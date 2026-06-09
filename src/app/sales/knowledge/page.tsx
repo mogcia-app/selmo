@@ -21,6 +21,14 @@ import {
   type KnowledgeSearchHistory,
 } from "@/lib/firebase/knowledge";
 
+const DEFAULT_CATEGORY = {
+  id: "how-to",
+  title: "使い方",
+  description: "Selmoの使い方やナレッジ整理の基本",
+  knowledgeCount: 0,
+  updatedAt: null,
+} as const;
+
 export default function SalesKnowledgePage() {
   const router = useRouter();
   const { profile } = useAuth();
@@ -177,11 +185,6 @@ export default function SalesKnowledgePage() {
                 </button>
               </form>
 
-              <div className="mt-5 rounded-[18px] border border-dashed border-[#dfe4ec] bg-[#fcfcfd] px-4 py-4 text-center">
-                <p className="text-[13px] leading-6 text-[#7a808c]">
-                  ナレッジを検索すると、関連する回答や資料がここから確認できます
-                </p>
-              </div>
             </div>
           </div>
         </div>
@@ -207,6 +210,25 @@ export default function SalesKnowledgePage() {
         </div>
 
         <div className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-5">
+          <Link
+            href={`/sales/knowledge/categories/${DEFAULT_CATEGORY.id}`}
+            className="min-w-0 rounded-[20px] border border-[#eceef4] bg-white px-5 py-5 shadow-[0_8px_20px_rgba(17,24,39,0.04)]"
+          >
+            <div className="flex items-start justify-between gap-3">
+              <span className="inline-flex h-11 w-11 items-center justify-center rounded-[14px] bg-[#fff0b8] text-[#8a6500]">
+                <CategoryIcon />
+              </span>
+              <span className="rounded-full bg-[#fff5d8] px-2.5 py-1 text-[11px] font-bold text-[#8a6500]">
+                はじめに
+              </span>
+            </div>
+            <span className="mt-4 block truncate text-[22px] font-bold text-[#171717]">{DEFAULT_CATEGORY.title}</span>
+            <span className="mt-2 block truncate text-[14px] text-[#6d7481]">{DEFAULT_CATEGORY.description}</span>
+            <div className="mt-4 flex items-center justify-between gap-3 text-[12px] font-medium text-[#8a909b]">
+              <span>{DEFAULT_CATEGORY.knowledgeCount}件</span>
+              <span>{formatDate(DEFAULT_CATEGORY.updatedAt)}</span>
+            </div>
+          </Link>
           {categories.map((category) => (
             <Link
               key={category.id}

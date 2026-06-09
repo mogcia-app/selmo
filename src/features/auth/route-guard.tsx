@@ -34,7 +34,7 @@ export function RouteGuard({ allowedRoles, children }: RouteGuardProps) {
   }, [allowedRoles, isAuthenticated, isLoading, pathname, profile, router]);
 
   if (isLoading) {
-    return <GuardMessage title="認証状態を確認中です..." body="Firebase Auth のログイン状態を読み込んでいます。" />;
+    return <AuthLoadingScreen />;
   }
 
   if (!isFirebaseReady) {
@@ -60,6 +60,49 @@ export function RouteGuard({ allowedRoles, children }: RouteGuardProps) {
   }
 
   return <>{children}</>;
+}
+
+function AuthLoadingScreen() {
+  return (
+    <main className="relative flex min-h-screen items-center justify-center overflow-hidden bg-[#fffdf8] px-4 py-8 sm:px-6 sm:py-10">
+      <Image
+        src="/nin.png"
+        alt="認証中の背景"
+        fill
+        priority
+        className="object-cover object-center"
+      />
+      <div className="absolute inset-0 bg-white/18" />
+
+      <section className="relative z-10 w-full max-w-[820px] rounded-[14px] border border-[#ece8df] bg-white/92 px-6 py-14 text-center shadow-[0_24px_70px_rgba(31,28,20,0.10)] backdrop-blur-[3px] sm:px-10 md:px-16 md:py-20">
+        <Image
+          src="/nini.png"
+          alt="selmo"
+          width={260}
+          height={190}
+          priority
+          className="mx-auto h-auto w-[150px] sm:w-[180px] md:w-[210px]"
+        />
+
+        <h1 className="mt-4 text-[30px] font-bold tracking-[-0.04em] text-[#20242c] sm:text-[36px]">
+          認証中です
+        </h1>
+        <p className="mx-auto mt-5 max-w-[420px] text-[16px] leading-8 text-[#3f4652] sm:text-[18px]">
+          しばらくお待ちください。
+          <br />
+          安全にログイン処理を行っています。
+        </p>
+
+        <div className="mt-10 flex justify-center">
+          <span className="block h-16 w-16 animate-spin rounded-full border-[8px] border-[#fff1ce] border-t-[#ffc400]" />
+        </div>
+
+        <p className="mt-9 text-[15px] text-[#6f7684] sm:text-[17px]">
+          この画面を閉じずにお待ちください
+        </p>
+      </section>
+    </main>
+  );
 }
 
 function GuardMessage({ title, body }: { title: string; body: string }) {

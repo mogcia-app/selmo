@@ -10,6 +10,7 @@ import {
 } from "react";
 
 import {
+  enableAuthPersistence,
   registerUser,
   signInWithEmail,
   signOutUser,
@@ -41,10 +42,12 @@ type AuthContextValue = {
 };
 
 const AuthContext = createContext<AuthContextValue | null>(null);
+const AUTH_PROFILE_CACHE_KEY = "selmo.auth.profile";
+const AUTH_READY_EXTRA_DELAY_MS = 3000;
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [isLoading, setIsLoading] = useState(isFirebaseConfigured);
   const [profile, setProfile] = useState<AppUserProfile | null>(null);
+  const [isLoading, setIsLoading] = useState(isFirebaseConfigured);
 
   useEffect(() => {
     if (!isFirebaseConfigured) {
@@ -52,12 +55,60 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       return;
     }
 
-    const unsubscribe = subscribeToAuthState(({ profile: nextProfile }) => {
-      setProfile(nextProfile);
-      setIsLoading(false);
-    });
+    const cachedProfile = readCachedProfile();
 
-    return unsubscribe;
+    if (cachedProfile) {
+      setProfile(cachedProfile);
+    }
+
+    let isActive = true;
+    let unsubscribe: (() => void) | undefined;
+    let authReadyTimer: ReturnType<typeof setTimeout> | undefined;
+    const finishLoadingAfterDelay = () => {
+      if (authReadyTimer) {
+        clearTimeout(authReadyTimer);
+      }
+
+      authReadyTimer = setTimeout(() => {
+        if (isActive) {
+          setIsLoading(false);
+        }
+      }, AUTH_READY_EXTRA_DELAY_MS);
+    };
+
+    enableAuthPersistence()
+      .then(() => {
+        if (!isActive) {
+          return;
+        }
+
+        unsubscribe = subscribeToAuthState(({ profile: nextProfile }) => {
+          if (!isActive) {
+            return;
+          }
+
+          setProfile(nextProfile);
+          writeCachedProfile(nextProfile);
+          finishLoadingAfterDelay();
+        });
+      })
+      .catch(() => {
+        if (!isActive) {
+          return;
+        }
+
+        setProfile(null);
+        writeCachedProfile(null);
+        finishLoadingAfterDelay();
+      });
+
+    return () => {
+      isActive = false;
+      if (authReadyTimer) {
+        clearTimeout(authReadyTimer);
+      }
+      unsubscribe?.();
+    };
   }, []);
 
   const value = useMemo<AuthContextValue>(
@@ -73,6 +124,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         try {
           const result = await signInWithEmail(email, password);
           setProfile(result.profile);
+          writeCachedProfile(result.profile);
           return result.profile;
         } finally {
           setIsLoading(false);
@@ -83,6 +135,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         try {
           const result = await registerUser(input);
           setProfile(result.profile);
+          writeCachedProfile(result.profile);
           return result.profile;
         } finally {
           setIsLoading(false);
@@ -92,6 +145,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setIsLoading(true);
         try {
           await signOutUser();
+          setProfile(null);
+          writeCachedProfile(null);
         } finally {
           setIsLoading(false);
         }
@@ -111,4 +166,51 @@ export function useAuth() {
   }
 
   return context;
+}
+
+function readCachedProfile() {
+  if (typeof window === "undefined") {
+    return null;
+  }
+
+  try {
+    const value = window.localStorage.getItem(AUTH_PROFILE_CACHE_KEY);
+
+    if (!value) {
+      return null;
+    }
+
+    const parsed = JSON.parse(value) as Partial<AppUserProfile>;
+
+    if (
+      typeof parsed.uid !== "string" ||
+      (parsed.role !== "admin" && parsed.role !== "sales") ||
+      (parsed.status !== "active" && parsed.status !== "inactive")
+    ) {
+      return null;
+    }
+
+    return {
+      uid: parsed.uid,
+      email: typeof parsed.email === "string" ? parsed.email : null,
+      name: typeof parsed.name === "string" ? parsed.name : null,
+      role: parsed.role,
+      status: parsed.status,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function writeCachedProfile(profile: AppUserProfile | null) {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  if (!profile) {
+    window.localStorage.removeItem(AUTH_PROFILE_CACHE_KEY);
+    return;
+  }
+
+  window.localStorage.setItem(AUTH_PROFILE_CACHE_KEY, JSON.stringify(profile));
 }

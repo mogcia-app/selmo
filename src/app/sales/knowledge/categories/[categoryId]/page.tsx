@@ -15,6 +15,12 @@ import {
   type KnowledgeItem,
 } from "@/lib/firebase/knowledge";
 
+const DEFAULT_CATEGORY = {
+  id: "how-to",
+  title: "使い方",
+  description: "Selmoの使い方やナレッジ整理の基本を確認できます。",
+} as const;
+
 export default function SalesKnowledgeCategoryPage() {
   const params = useParams<{ categoryId: string }>();
   const { profile } = useAuth();
@@ -40,7 +46,18 @@ export default function SalesKnowledgeCategoryPage() {
   }, [categoryId, userId]);
 
   const category = useMemo(
-    () => categories.find((candidate) => candidate.id === categoryId) ?? null,
+    () =>
+      categories.find((candidate) => candidate.id === categoryId) ??
+      (categoryId === DEFAULT_CATEGORY.id
+        ? {
+            id: DEFAULT_CATEGORY.id,
+            title: DEFAULT_CATEGORY.title,
+            description: DEFAULT_CATEGORY.description,
+            knowledgeCount: 0,
+            memoCount: 0,
+            updatedAt: null,
+          }
+        : null),
     [categories, categoryId],
   );
 
