@@ -1,7 +1,7 @@
 {
   "indexes": [
     {
-      "collectionGroup": "calls",
+      "collectionGroup": "meetings",
       "queryScope": "COLLECTION",
       "fields": [
         {
@@ -15,7 +15,7 @@
       ]
     },
     {
-      "collectionGroup": "calls",
+      "collectionGroup": "meetings",
       "queryScope": "COLLECTION",
       "fields": [
         {
@@ -29,7 +29,7 @@
       ]
     },
     {
-      "collectionGroup": "calls",
+      "collectionGroup": "meetings",
       "queryScope": "COLLECTION",
       "fields": [
         {

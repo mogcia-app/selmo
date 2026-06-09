@@ -1,10 +1,12 @@
 import type { Metadata } from "next";
 
+import { AuthProvider } from "@/features/auth/auth-provider";
+
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Selmo | Sales Call Analytics",
-  description: "営業通話AI分析・営業可視化ツールのMVP",
+  title: "Selmo | Sales Meeting Analytics",
+  description: "営業打ち合わせAI分析・営業可視化ツールのMVP",
 };
 
 export default function RootLayout({
@@ -14,7 +16,11 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="ja">
-      <body className="font-sans antialiased">{children}</body>
+      <body className="font-sans antialiased">
+        <AuthProvider>
+          {children}
+        </AuthProvider>
+      </body>
     </html>
   );
 }

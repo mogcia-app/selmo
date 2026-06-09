@@ -18,26 +18,43 @@ service cloud.firestore {
       return isSignedIn() && request.auth.uid == userId;
     }
 
+    function isValidUserRole(role) {
+      return role == "admin" || role == "sales";
+    }
+
+    function isValidActiveStatus(status) {
+      return status == "active";
+    }
+
     match /users/{userId} {
       allow read: if isAdmin() || isOwner(userId);
-      allow create: if isAdmin();
-      allow update: if isAdmin() || isOwner(userId);
+      allow create: if isOwner(userId)
+        && request.resource.data.email == request.auth.token.email
+        && isValidActiveStatus(request.resource.data.status)
+        && isValidUserRole(request.resource.data.role);
+      allow update: if isAdmin()
+        || (
+          isOwner(userId)
+          && request.resource.data.role == resource.data.role
+          && request.resource.data.status == resource.data.status
+          && request.resource.data.email == resource.data.email
+        );
       allow delete: if false;
     }
 
-    match /calls/{callId} {
+    match /meetings/{meetingId} {
       allow read: if isAdmin() || isOwner(resource.data.userId);
       allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid;
       allow update: if isAdmin() || isOwner(resource.data.userId);
       allow delete: if false;
 
       match /{subcollection}/{documentId} {
-        allow read: if isAdmin() || isOwner(get(/databases/$(database)/documents/calls/$(callId)).data.userId);
+        allow read: if isAdmin() || isOwner(get(/databases/$(database)/documents/meetings/$(meetingId)).data.userId);
         allow write: if isAdmin();
       }
     }
 
-    match /callOutcomeHistory/{historyId} {
+    match /meetingOutcomeHistory/{historyId} {
       allow read: if isAdmin();
       allow write: if isAdmin();
     }
@@ -55,6 +72,34 @@ service cloud.firestore {
     match /manualChecklists/{checklistId} {
       allow read: if isSignedIn();
       allow write: if isAdmin();
+    }
+
+    match /knowledgeCategories/{categoryId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn() && request.resource.data.createdBy == request.auth.uid;
+      allow update: if isAdmin() || isOwner(resource.data.createdBy);
+      allow delete: if isAdmin();
+    }
+
+    match /knowledgeProducts/{productId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn() && request.resource.data.createdBy == request.auth.uid;
+      allow update: if isAdmin() || isOwner(resource.data.createdBy);
+      allow delete: if isAdmin();
+    }
+
+    match /knowledgeItems/{knowledgeId} {
+      allow read: if isSignedIn()
+        && (resource.data.scope == "shared" || resource.data.ownerId == request.auth.uid || isAdmin());
+      allow create: if isSignedIn()
+        && request.resource.data.ownerId == request.auth.uid
+        && (request.resource.data.scope == "personal" || request.resource.data.scope == "shared");
+      allow update: if isAdmin() || isOwner(resource.data.ownerId);
+      allow delete: if isAdmin() || isOwner(resource.data.ownerId);
+    }
+
+    match /users/{userId}/knowledgeSearchHistory/{historyId} {
+      allow read, write: if isOwner(userId);
     }
   }
 }

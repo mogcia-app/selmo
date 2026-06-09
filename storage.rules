@@ -13,7 +13,7 @@ service firebase.storage {
         ).data.role == "admin";
     }
 
-    match /calls/{userId}/{allPaths=**} {
+    match /meetings/{userId}/{allPaths=**} {
       allow read: if isAdmin() || (isSignedIn() && request.auth.uid == userId);
       allow write: if isSignedIn() && request.auth.uid == userId;
       allow delete: if isAdmin() || (isSignedIn() && request.auth.uid == userId);

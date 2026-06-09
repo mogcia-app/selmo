@@ -1,6 +1,6 @@
 type DashboardRow = {
   name: string;
-  callCount: number;
+  meetingCount: number;
   winRate: string;
   averageDuration: string;
   manualScore: string;
@@ -17,9 +17,9 @@ export function DashboardTable({ rows }: DashboardTableProps) {
         <thead className="bg-brand-soft">
           <tr>
             <th className="px-5 py-4 font-semibold">営業マン</th>
-            <th className="px-5 py-4 font-semibold">通話数</th>
+            <th className="px-5 py-4 font-semibold">打ち合わせ数</th>
             <th className="px-5 py-4 font-semibold">成約率</th>
-            <th className="px-5 py-4 font-semibold">平均通話時間</th>
+            <th className="px-5 py-4 font-semibold">平均打ち合わせ時間</th>
             <th className="px-5 py-4 font-semibold">マニュアル準拠率</th>
           </tr>
         </thead>
@@ -27,7 +27,7 @@ export function DashboardTable({ rows }: DashboardTableProps) {
           {rows.map((row) => (
             <tr key={row.name}>
               <td className="px-5 py-4 font-medium">{row.name}</td>
-              <td className="px-5 py-4">{row.callCount}</td>
+              <td className="px-5 py-4">{row.meetingCount}</td>
               <td className="px-5 py-4">{row.winRate}</td>
               <td className="px-5 py-4">{row.averageDuration}</td>
               <td className="px-5 py-4">{row.manualScore}</td>

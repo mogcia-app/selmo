@@ -1,6 +1,6 @@
 # Firestore Collection Design
 
-MVPでは「通話ごとの原本」と「表示用の集計済みデータ」を分けて持ちます。
+MVPでは「打ち合わせごとの原本」と「表示用の集計済みデータ」を分けて持ちます。
 Firestoreは重い集計が得意ではないため、管理画面は `monthlyStats` や `userMonthlyStats` を参照する前提です。
 
 ## Collections
@@ -19,10 +19,10 @@ type UserDocument = {
 };
 ```
 
-### `calls/{callId}`
+### `meetings/{meetingId}`
 
 ```ts
-type CallDocument = {
+type MeetingDocument = {
   userId: string;
   uploadedBy: string;
   customerName: string;
@@ -32,7 +32,6 @@ type CallDocument = {
   recordedAt: Timestamp;
   location?: string;
   status: "considering" | "won" | "lost";
-  speakerAssignment: "sales_speaker_a" | "sales_speaker_b";
   audioFilePath?: string;
   audioDeletedAt?: Timestamp | null;
   audioMimeType: "audio/mpeg" | "audio/wav";
@@ -49,7 +48,7 @@ type CallDocument = {
 };
 ```
 
-### `calls/{callId}/transcript/current`
+### `meetings/{meetingId}/transcript/current`
 
 ```ts
 type TranscriptDocument = {
@@ -68,10 +67,10 @@ type TranscriptDocument = {
 };
 ```
 
-### `calls/{callId}/metrics/current`
+### `meetings/{meetingId}/metrics/current`
 
 ```ts
-type CallMetricsDocument = {
+type MeetingMetricsDocument = {
   durationSec: number;
   salesTalkRatio: number;
   customerTalkRatio: number;
@@ -88,7 +87,7 @@ type CallMetricsDocument = {
 };
 ```
 
-### `calls/{callId}/manualChecks/current`
+### `meetings/{meetingId}/manualChecks/current`
 
 ```ts
 type ManualCheckDocument = {
@@ -106,7 +105,7 @@ type ManualCheckDocument = {
 };
 ```
 
-### `calls/{callId}/aiComments/current`
+### `meetings/{meetingId}/aiComments/current`
 
 ```ts
 type AICommentDocument = {
@@ -120,11 +119,11 @@ type AICommentDocument = {
 };
 ```
 
-### `callOutcomeHistory/{historyId}`
+### `meetingOutcomeHistory/{historyId}`
 
 ```ts
-type CallOutcomeHistoryDocument = {
-  callId: string;
+type MeetingOutcomeHistoryDocument = {
+  meetingId: string;
   previousStatus?: "considering" | "won" | "lost";
   newStatus: "considering" | "won" | "lost";
   changedBy: string;
@@ -140,9 +139,9 @@ type CallOutcomeHistoryDocument = {
 ```ts
 type MonthlyStatsDocument = {
   month: string;
-  totalCallCount: number;
-  totalWonCount: number;
-  totalLostCount: number;
+  totalMeetingCount: number;
+  totalWonMeetingCount: number;
+  totalLostMeetingCount: number;
   averageDurationSec: number;
   productWinRates: Record<string, number>;
   topKeywords: Array<{ word: string; count: number }>;
@@ -158,10 +157,10 @@ type MonthlyStatsDocument = {
 type UserMonthlyStatsDocument = {
   userId: string;
   month: string;
-  callCount: number;
-  wonCount: number;
-  lostCount: number;
-  consideringCount: number;
+  meetingCount: number;
+  wonMeetingCount: number;
+  lostMeetingCount: number;
+  consideringMeetingCount: number;
   winRate: number;
   averageDurationSec: number;
   averageManualScore: number;
@@ -189,26 +188,84 @@ type ManualChecklistDocument = {
 };
 ```
 
+### `knowledgeCategories/{categoryId}`
+
+```ts
+type KnowledgeCategoryDocument = {
+  title: string;
+  description: string;
+  knowledgeCount: number;
+  memoCount: number;
+  createdBy: string;
+  createdAt: Timestamp;
+  updatedAt: Timestamp;
+};
+```
+
+### `knowledgeProducts/{productId}`
+
+```ts
+type KnowledgeProductDocument = {
+  name: string;
+  knowledgeCount: number;
+  createdBy: string;
+  createdAt: Timestamp;
+  updatedAt: Timestamp;
+};
+```
+
+### `knowledgeItems/{knowledgeId}`
+
+```ts
+type KnowledgeItemDocument = {
+  title: string;
+  description: string;
+  body: string;
+  categoryId: string | null;
+  productId: string | null;
+  ownerId: string;
+  scope: "personal" | "shared";
+  kind: "knowledge" | "memo" | "qa";
+  tags: string[];
+  createdAt: Timestamp;
+  updatedAt: Timestamp;
+};
+```
+
+### `users/{userId}/knowledgeSearchHistory/{historyId}`
+
+```ts
+type KnowledgeSearchHistoryDocument = {
+  term: string;
+  searchedAt: Timestamp;
+};
+```
+
 ## Indexing Guidance
 
-- `calls`: `userId + recordedAt desc`
-- `calls`: `processingStatus + createdAt desc`
-- `calls`: `status + recordedAt desc`
+- `meetings`: `userId + recordedAt desc`
+- `meetings`: `processingStatus + createdAt desc`
+- `meetings`: `status + recordedAt desc`
 - `userMonthlyStats`: `userId + month desc`
+- `knowledgeCategories`: `updatedAt desc`
+- `knowledgeProducts`: `updatedAt desc`
+- `knowledgeItems`: `scope`
+- `knowledgeItems`: `ownerId`
+- `users/{userId}/knowledgeSearchHistory`: `searchedAt desc`
 
 ## Retention Rule
 
 - 音声本体は月30件超過時に最古の `audioFilePath` を削除
-- `calls` ドキュメント自体は削除しない
-- `transcript`, `metrics`, `manualChecks`, `aiComments`, `callOutcomeHistory` は保持
+- `meetings` ドキュメント自体は削除しない
+- `transcript`, `metrics`, `manualChecks`, `aiComments`, `meetingOutcomeHistory` は保持
 
 ## Async Processing Flow
 
 1. Next.js で音声アップロード情報を登録
 2. Storage に音声保存
-3. `calls.processingStatus = uploaded`
+3. `meetings.processingStatus = uploaded`
 4. Cloud Run / Functions がジョブ取得
 5. 文字起こし、数値分析、マニュアルチェック、AIコメント生成
 6. 各サブコレクションを保存
 7. `monthlyStats`, `userMonthlyStats` を更新
-8. `calls.processingStatus = completed`
+8. `meetings.processingStatus = completed`
