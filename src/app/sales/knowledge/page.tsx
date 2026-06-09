@@ -4,8 +4,9 @@ import { FirebaseError } from "firebase/app";
 import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useState, type ReactNode } from "react";
 
+import { KnowledgeCreateDialog } from "@/app/sales/knowledge/components/knowledge-create-dialog";
 import { useAuth } from "@/features/auth/auth-provider";
 import {
   createKnowledgeCategory,
@@ -16,6 +17,7 @@ import {
   subscribeToRecentKnowledgeSearches,
   subscribeToVisibleKnowledgeItems,
   type KnowledgeCategory,
+  type CreateKnowledgeItemInput,
   type KnowledgeItem,
   type KnowledgeProduct,
   type KnowledgeSearchHistory,
@@ -38,7 +40,21 @@ export default function SalesKnowledgePage() {
   const [items, setItems] = useState<KnowledgeItem[]>([]);
   const [searchHistory, setSearchHistory] = useState<KnowledgeSearchHistory[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [createDialog, setCreateDialog] = useState<{
+    open: boolean;
+    kind: CreateKnowledgeItemInput["kind"];
+    scope: CreateKnowledgeItemInput["scope"];
+    categoryId: string | null;
+  }>({
+    open: false,
+    kind: "knowledge",
+    scope: "personal",
+    categoryId: null,
+  });
+  const [categoryDialogOpen, setCategoryDialogOpen] = useState(false);
+  const [productDialogOpen, setProductDialogOpen] = useState(false);
   const userId = profile?.uid;
+  const canCreateShared = profile?.role === "admin";
 
   useEffect(() => {
     if (!userId) return;
@@ -74,25 +90,35 @@ export default function SalesKnowledgePage() {
     router.push(`/sales/knowledge/search${query}`);
   };
 
-  const handleCreateCategory = async () => {
+  const handleCreateCategory = async (input: { title: string; description?: string }) => {
     if (!userId) return;
-    const title = window.prompt("カテゴリ名を入力してください");
-    if (!title?.trim()) return;
-    await createKnowledgeCategory({ title: title.trim(), userId });
+    await createKnowledgeCategory({
+      title: input.title,
+      description: input.description,
+      userId,
+    });
   };
 
-  const handleCreateProduct = async () => {
+  const handleCreateProduct = async (input: { name: string }) => {
     if (!userId) return;
-    const name = window.prompt("商品名を入力してください");
-    if (!name?.trim()) return;
-    await createKnowledgeProduct({ name: name.trim(), userId });
+    await createKnowledgeProduct({ name: input.name, userId });
   };
 
-  const handleCreateKnowledge = async (scope: "personal" | "shared" = "personal") => {
-    if (!userId) return;
-    const title = window.prompt(scope === "shared" ? "共有ナレッジのタイトルを入力してください" : "ナレッジのタイトルを入力してください");
-    if (!title?.trim()) return;
-    await createKnowledgeItem({ title: title.trim(), ownerId: userId, scope });
+  const openCreateDialog = (input?: {
+    kind?: CreateKnowledgeItemInput["kind"];
+    scope?: CreateKnowledgeItemInput["scope"];
+    categoryId?: string | null;
+  }) => {
+    setCreateDialog({
+      open: true,
+      kind: input?.kind ?? "knowledge",
+      scope: input?.scope ?? "personal",
+      categoryId: input?.categoryId ?? null,
+    });
+  };
+
+  const handleCreateKnowledge = async (input: CreateKnowledgeItemInput) => {
+    await createKnowledgeItem(input);
   };
 
   return (
@@ -112,7 +138,7 @@ export default function SalesKnowledgePage() {
           <div className="flex flex-wrap items-center gap-3">
             <button
               type="button"
-              onClick={() => handleCreateKnowledge("personal")}
+              onClick={() => openCreateDialog({ kind: "knowledge", scope: "personal" })}
               className="inline-flex h-[42px] items-center gap-2 rounded-[15px] border border-[#f0c655] bg-white px-4 text-[12px] font-semibold text-[#171717] shadow-[0_8px_18px_rgba(17,24,39,0.05)]"
             >
               <PlusIcon />
@@ -120,7 +146,7 @@ export default function SalesKnowledgePage() {
             </button>
             <button
               type="button"
-              onClick={() => handleCreateKnowledge("personal")}
+              onClick={() => openCreateDialog({ kind: "memo", scope: "personal" })}
               className="inline-flex h-[42px] items-center gap-2 rounded-[15px] border border-[#e6eaf0] bg-white px-4 text-[12px] font-semibold text-[#3d4350] shadow-[0_8px_18px_rgba(17,24,39,0.05)]"
             >
               <PenIcon />
@@ -201,7 +227,7 @@ export default function SalesKnowledgePage() {
           <h2 className="text-[30px] font-bold tracking-[-0.04em] text-[#171717]">カテゴリ</h2>
           <button
             type="button"
-            onClick={handleCreateCategory}
+            onClick={() => setCategoryDialogOpen(true)}
             className="inline-flex h-[42px] items-center gap-2 rounded-[14px] border border-[#f0c655] bg-white px-4 text-[13px] font-semibold text-[#171717] shadow-[0_8px_18px_rgba(17,24,39,0.05)]"
           >
             <PlusIcon />
@@ -246,7 +272,7 @@ export default function SalesKnowledgePage() {
               </div>
             </Link>
           ))}
-          <AddCard title="新しいカテゴリ" count="0件" onClick={handleCreateCategory} />
+          <AddCard title="新しいカテゴリ" count="0件" onClick={() => setCategoryDialogOpen(true)} />
         </div>
       </section>
 
@@ -255,7 +281,7 @@ export default function SalesKnowledgePage() {
           <h2 className="text-[30px] font-bold tracking-[-0.04em] text-[#171717]">商品で探す</h2>
           <button
             type="button"
-            onClick={handleCreateProduct}
+            onClick={() => setProductDialogOpen(true)}
             className="inline-flex h-[42px] items-center gap-2 rounded-[14px] border border-[#f0c655] bg-white px-4 text-[13px] font-semibold text-[#171717] shadow-[0_8px_18px_rgba(17,24,39,0.05)]"
           >
             <PlusIcon />
@@ -276,7 +302,7 @@ export default function SalesKnowledgePage() {
               <p className="mt-2 text-[14px] text-[#6d7481]">{product.knowledgeCount}件</p>
             </article>
           ))}
-          <AddCard title="新しい商品" count="0件" onClick={handleCreateProduct} />
+          <AddCard title="新しい商品" count="0件" onClick={() => setProductDialogOpen(true)} />
         </div>
       </section>
 
@@ -288,17 +314,21 @@ export default function SalesKnowledgePage() {
           emptyTitle="新しいナレッジを作成"
           emptyBody="自分用の提案メモや切り返しを保存できます"
           actionLabel="ナレッジを作成"
-          onAction={() => handleCreateKnowledge("personal")}
+          onAction={() => openCreateDialog({ kind: "knowledge", scope: "personal" })}
         />
 
         <KnowledgePanel
           title="共有ナレッジ"
           description="管理者から共有されたナレッジ"
           items={sharedItems}
-          emptyTitle="共有ナレッジを追加"
-          emptyBody="チームで使う資料やFAQをまとめられます"
-          actionLabel="共有ナレッジを追加"
-          onAction={() => handleCreateKnowledge("shared")}
+          emptyTitle="共有ナレッジはまだありません"
+          emptyBody="管理者から共有された資料やFAQがここに表示されます"
+          actionLabel={canCreateShared ? "共有ナレッジを追加" : undefined}
+          onAction={
+            canCreateShared
+              ? () => openCreateDialog({ kind: "knowledge", scope: "shared" })
+              : undefined
+          }
         />
 
         <article className="min-w-0 rounded-[24px] border border-[#eceef4] bg-white px-5 py-6 shadow-[0_8px_20px_rgba(17,24,39,0.04)] sm:px-6">
@@ -330,7 +360,231 @@ export default function SalesKnowledgePage() {
           )}
         </article>
       </section>
+
+      <KnowledgeCreateDialog
+        open={createDialog.open}
+        categories={categories}
+        products={products}
+        ownerId={userId}
+        canCreateShared={canCreateShared}
+        defaultCategoryId={createDialog.categoryId}
+        defaultKind={createDialog.kind}
+        defaultScope={createDialog.scope}
+        onClose={() => setCreateDialog((current) => ({ ...current, open: false }))}
+        onSubmit={handleCreateKnowledge}
+      />
+      <CategoryCreateDialog
+        open={categoryDialogOpen}
+        onClose={() => setCategoryDialogOpen(false)}
+        onSubmit={handleCreateCategory}
+      />
+      <ProductCreateDialog
+        open={productDialogOpen}
+        onClose={() => setProductDialogOpen(false)}
+        onSubmit={handleCreateProduct}
+      />
     </main>
+  );
+}
+
+function CategoryCreateDialog({
+  open,
+  onClose,
+  onSubmit,
+}: {
+  open: boolean;
+  onClose: () => void;
+  onSubmit: (input: { title: string; description?: string }) => Promise<void>;
+}) {
+  const [title, setTitle] = useState("");
+  const [description, setDescription] = useState("");
+  const [isSaving, setIsSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    setTitle("");
+    setDescription("");
+    setError(null);
+    setIsSaving(false);
+  }, [open]);
+
+  if (!open) return null;
+
+  return (
+    <SimpleDialogFrame
+      title="カテゴリを追加"
+      description="ナレッジを整理するカテゴリを作成します。"
+      error={error}
+      isSaving={isSaving}
+      submitLabel="追加する"
+      onClose={onClose}
+      onSubmit={async (event) => {
+        event.preventDefault();
+        if (!title.trim()) {
+          setError("カテゴリ名を入力してください。");
+          return;
+        }
+        setIsSaving(true);
+        setError(null);
+        try {
+          await onSubmit({ title: title.trim(), description: description.trim() });
+          onClose();
+        } catch (nextError) {
+          setError(nextError instanceof Error ? nextError.message : "カテゴリの追加に失敗しました。");
+        } finally {
+          setIsSaving(false);
+        }
+      }}
+    >
+      <label>
+        <span className="text-[13px] font-bold text-[#343b48]">カテゴリ名</span>
+        <input
+          value={title}
+          onChange={(event) => setTitle(event.target.value)}
+          placeholder="例：価格交渉"
+          className="mt-2 h-12 w-full rounded-[14px] border border-[#e4e8ef] bg-white px-4 text-[14px] text-[#171717] outline-none transition focus:border-[#e0bd4b]"
+          autoFocus
+        />
+      </label>
+      <label className="mt-4 block">
+        <span className="text-[13px] font-bold text-[#343b48]">説明</span>
+        <input
+          value={description}
+          onChange={(event) => setDescription(event.target.value)}
+          placeholder="一覧に表示する短い説明"
+          className="mt-2 h-12 w-full rounded-[14px] border border-[#e4e8ef] bg-white px-4 text-[14px] text-[#171717] outline-none transition focus:border-[#e0bd4b]"
+        />
+      </label>
+    </SimpleDialogFrame>
+  );
+}
+
+function ProductCreateDialog({
+  open,
+  onClose,
+  onSubmit,
+}: {
+  open: boolean;
+  onClose: () => void;
+  onSubmit: (input: { name: string }) => Promise<void>;
+}) {
+  const [name, setName] = useState("");
+  const [isSaving, setIsSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    setName("");
+    setError(null);
+    setIsSaving(false);
+  }, [open]);
+
+  if (!open) return null;
+
+  return (
+    <SimpleDialogFrame
+      title="商品を追加"
+      description="ナレッジを商品別に探せるようにします。"
+      error={error}
+      isSaving={isSaving}
+      submitLabel="追加する"
+      onClose={onClose}
+      onSubmit={async (event) => {
+        event.preventDefault();
+        if (!name.trim()) {
+          setError("商品名を入力してください。");
+          return;
+        }
+        setIsSaving(true);
+        setError(null);
+        try {
+          await onSubmit({ name: name.trim() });
+          onClose();
+        } catch (nextError) {
+          setError(nextError instanceof Error ? nextError.message : "商品の追加に失敗しました。");
+        } finally {
+          setIsSaving(false);
+        }
+      }}
+    >
+      <label>
+        <span className="text-[13px] font-bold text-[#343b48]">商品名</span>
+        <input
+          value={name}
+          onChange={(event) => setName(event.target.value)}
+          placeholder="例：Selmo"
+          className="mt-2 h-12 w-full rounded-[14px] border border-[#e4e8ef] bg-white px-4 text-[14px] text-[#171717] outline-none transition focus:border-[#e0bd4b]"
+          autoFocus
+        />
+      </label>
+    </SimpleDialogFrame>
+  );
+}
+
+function SimpleDialogFrame({
+  title,
+  description,
+  error,
+  isSaving,
+  submitLabel,
+  children,
+  onClose,
+  onSubmit,
+}: {
+  title: string;
+  description: string;
+  error: string | null;
+  isSaving: boolean;
+  submitLabel: string;
+  children: ReactNode;
+  onClose: () => void;
+  onSubmit: (event: FormEvent<HTMLFormElement>) => void;
+}) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#171717]/24 px-4 py-6">
+      <form
+        onSubmit={onSubmit}
+        className="w-full max-w-[520px] rounded-[24px] border border-[#eceef4] bg-white p-5 shadow-[0_24px_70px_rgba(17,24,39,0.18)] md:p-6"
+      >
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <h2 className="text-[24px] font-bold tracking-[-0.03em] text-[#171717]">{title}</h2>
+            <p className="mt-1 text-[13px] leading-6 text-[#7a808c]">{description}</p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-[12px] border border-[#e6eaf0] text-[22px] leading-none text-[#8a909b] transition hover:text-[#171717]"
+            aria-label="閉じる"
+          >
+            ×
+          </button>
+        </div>
+        {error ? (
+          <div className="mt-4 rounded-[14px] border border-[#f4d4d4] bg-[#fff8f8] px-4 py-3 text-[13px] font-medium text-[#b4232a]">
+            {error}
+          </div>
+        ) : null}
+        <div className="mt-5">{children}</div>
+        <div className="mt-6 flex justify-end gap-3">
+          <button
+            type="button"
+            onClick={onClose}
+            className="inline-flex h-11 items-center justify-center rounded-[14px] border border-[#e4e8ef] bg-white px-5 text-[14px] font-bold text-[#596273]"
+          >
+            キャンセル
+          </button>
+          <button
+            type="submit"
+            disabled={isSaving}
+            className="inline-flex h-11 items-center justify-center rounded-[14px] border border-[#f0c655] bg-[#ffd84d] px-6 text-[14px] font-bold text-[#171717] disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {isSaving ? "保存中" : submitLabel}
+          </button>
+        </div>
+      </form>
+    </div>
   );
 }
 
@@ -348,8 +602,8 @@ function KnowledgePanel({
   items: KnowledgeItem[];
   emptyTitle: string;
   emptyBody: string;
-  actionLabel: string;
-  onAction: () => void;
+  actionLabel?: string;
+  onAction?: () => void;
 }) {
   return (
     <article className="min-w-0 rounded-[24px] border border-[#eceef4] bg-white px-6 py-6 shadow-[0_8px_20px_rgba(17,24,39,0.04)]">
@@ -380,14 +634,16 @@ function KnowledgePanel({
         </div>
       )}
 
-      <button
-        type="button"
-        onClick={onAction}
-        className="mt-5 inline-flex h-[44px] w-full items-center justify-center gap-2 rounded-[14px] border border-[#f0c655] bg-white text-[14px] font-semibold text-[#171717]"
-      >
-        <PlusIcon />
-        {actionLabel}
-      </button>
+      {actionLabel && onAction ? (
+        <button
+          type="button"
+          onClick={onAction}
+          className="mt-5 inline-flex h-[44px] w-full items-center justify-center gap-2 rounded-[14px] border border-[#f0c655] bg-white text-[14px] font-semibold text-[#171717]"
+        >
+          <PlusIcon />
+          {actionLabel}
+        </button>
+      ) : null}
     </article>
   );
 }

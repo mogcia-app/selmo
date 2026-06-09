@@ -6,10 +6,12 @@ import {
   addDoc,
   collection,
   doc,
+  increment,
   limit,
   onSnapshot,
   orderBy,
   query,
+  runTransaction,
   serverTimestamp,
   setDoc,
   where,
@@ -20,6 +22,8 @@ import {
 } from "firebase/firestore";
 
 import { assertFirebaseClient } from "@/lib/firebase/client";
+
+const LOCAL_DEFAULT_CATEGORY_ID = "how-to";
 
 export type KnowledgeCategory = {
   id: string;
@@ -48,7 +52,20 @@ export type KnowledgeItem = {
   scope: "personal" | "shared";
   kind: "knowledge" | "memo" | "qa";
   tags: string[];
+  createdAt: Date | null;
   updatedAt: Date | null;
+};
+
+export type CreateKnowledgeItemInput = {
+  title: string;
+  description?: string;
+  body?: string;
+  categoryId?: string | null;
+  productId?: string | null;
+  ownerId: string;
+  scope: "personal" | "shared";
+  kind?: "knowledge" | "memo" | "qa";
+  tags?: string[];
 };
 
 export type KnowledgeSearchHistory = {
@@ -227,31 +244,45 @@ export async function createKnowledgeProduct(input: { name: string; userId: stri
   });
 }
 
-export async function createKnowledgeItem(input: {
-  title: string;
-  description?: string;
-  body?: string;
-  categoryId?: string | null;
-  productId?: string | null;
-  ownerId: string;
-  scope: "personal" | "shared";
-  kind?: "knowledge" | "memo" | "qa";
-  tags?: string[];
-}) {
+export async function createKnowledgeItem(input: CreateKnowledgeItemInput) {
   const { firestore } = assertFirebaseClient();
-  await addDoc(collection(firestore, "knowledgeItems"), {
-    title: input.title,
-    description: input.description ?? "",
-    body: input.body ?? "",
-    categoryId: input.categoryId ?? null,
-    productId: input.productId ?? null,
-    ownerId: input.ownerId,
-    scope: input.scope,
-    kind: input.kind ?? "knowledge",
-    tags: input.tags ?? [],
-    createdAt: serverTimestamp(),
-    updatedAt: serverTimestamp(),
+  const itemRef = doc(collection(firestore, "knowledgeItems"));
+  const categoryId = input.categoryId ?? null;
+  const productId = input.productId ?? null;
+  const kind = input.kind ?? "knowledge";
+
+  await runTransaction(firestore, async (transaction) => {
+    transaction.set(itemRef, {
+      title: input.title,
+      description: input.description ?? "",
+      body: input.body ?? "",
+      categoryId,
+      productId,
+      ownerId: input.ownerId,
+      scope: input.scope,
+      kind,
+      tags: input.tags ?? [],
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    });
+
+    if (categoryId && categoryId !== LOCAL_DEFAULT_CATEGORY_ID) {
+      transaction.update(doc(firestore, "knowledgeCategories", categoryId), {
+        knowledgeCount: increment(kind === "knowledge" || kind === "qa" ? 1 : 0),
+        memoCount: increment(kind === "memo" ? 1 : 0),
+        updatedAt: serverTimestamp(),
+      });
+    }
+
+    if (productId) {
+      transaction.update(doc(firestore, "knowledgeProducts", productId), {
+        knowledgeCount: increment(1),
+        updatedAt: serverTimestamp(),
+      });
+    }
   });
+
+  return itemRef.id;
 }
 
 export function filterKnowledgeItems(items: KnowledgeItem[], term: string) {
@@ -309,6 +340,7 @@ function mapKnowledgeItem(snapshot: QueryDocumentSnapshot<DocumentData> | Docume
     scope,
     kind,
     tags: Array.isArray(data.tags) ? data.tags.filter((tag): tag is string => typeof tag === "string") : [],
+    createdAt: readDate(data.createdAt),
     updatedAt: readDate(data.updatedAt),
   };
 }

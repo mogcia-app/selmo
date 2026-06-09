@@ -6,13 +6,17 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 
+import { KnowledgeCreateDialog } from "@/app/sales/knowledge/components/knowledge-create-dialog";
 import { useAuth } from "@/features/auth/auth-provider";
 import {
   createKnowledgeItem,
   subscribeToKnowledgeCategories,
   subscribeToKnowledgeItemsByCategory,
+  subscribeToKnowledgeProducts,
+  type CreateKnowledgeItemInput,
   type KnowledgeCategory,
   type KnowledgeItem,
+  type KnowledgeProduct,
 } from "@/lib/firebase/knowledge";
 
 const DEFAULT_CATEGORY = {
@@ -27,12 +31,22 @@ export default function SalesKnowledgeCategoryPage() {
   const categoryId = params.categoryId;
   const userId = profile?.uid;
   const [categories, setCategories] = useState<KnowledgeCategory[]>([]);
+  const [products, setProducts] = useState<KnowledgeProduct[]>([]);
   const [items, setItems] = useState<KnowledgeItem[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [createDialogOpen, setCreateDialogOpen] = useState(false);
+  const canCreateShared = profile?.role === "admin";
 
   useEffect(() => {
     const handleError = (nextError: FirebaseError) => setError(nextError.message);
-    return subscribeToKnowledgeCategories(setCategories, handleError);
+    const unsubscribers = [
+      subscribeToKnowledgeCategories(setCategories, handleError),
+      subscribeToKnowledgeProducts(setProducts, handleError),
+    ];
+
+    return () => {
+      unsubscribers.forEach((unsubscribe) => unsubscribe());
+    };
   }, []);
 
   useEffect(() => {
@@ -61,16 +75,8 @@ export default function SalesKnowledgeCategoryPage() {
     [categories, categoryId],
   );
 
-  const handleCreateKnowledge = async () => {
-    if (!userId) return;
-    const title = window.prompt("ナレッジのタイトルを入力してください");
-    if (!title?.trim()) return;
-    await createKnowledgeItem({
-      title: title.trim(),
-      categoryId,
-      ownerId: userId,
-      scope: "personal",
-    });
+  const handleCreateKnowledge = async (input: CreateKnowledgeItemInput) => {
+    await createKnowledgeItem(input);
   };
 
   return (
@@ -188,7 +194,7 @@ export default function SalesKnowledgeCategoryPage() {
 
             <button
               type="button"
-              onClick={handleCreateKnowledge}
+              onClick={() => setCreateDialogOpen(true)}
               className="mt-5 inline-flex min-h-[54px] w-full items-center justify-center gap-2 rounded-[14px] border border-dashed border-[#f0c655] bg-white text-[15px] font-bold text-[#171717] hover:bg-[#fffdf7]"
             >
               <PlusIcon />
@@ -197,6 +203,19 @@ export default function SalesKnowledgeCategoryPage() {
           </section>
         </div>
       </div>
+
+      <KnowledgeCreateDialog
+        open={createDialogOpen}
+        categories={categories}
+        products={products}
+        ownerId={userId}
+        canCreateShared={canCreateShared}
+        defaultCategoryId={categoryId}
+        defaultKind="knowledge"
+        defaultScope="personal"
+        onClose={() => setCreateDialogOpen(false)}
+        onSubmit={handleCreateKnowledge}
+      />
     </main>
   );
 }

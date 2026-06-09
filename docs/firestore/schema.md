@@ -232,6 +232,13 @@ type KnowledgeItemDocument = {
 };
 ```
 
+作成フロー:
+
+- 営業ユーザーは `scope: "personal"` のナレッジ、メモ、Q&Aを作成できます。
+- 管理者は `scope: "shared"` の共有ナレッジを作成できます。
+- `categoryId` または `productId` が指定された場合、作成トランザクション内で `knowledgeCategories` / `knowledgeProducts` の件数と `updatedAt` を更新します。
+- 画面上の初期カテゴリ `how-to` はアプリ内の固定カテゴリです。Firestore 上にカテゴリドキュメントがないため、カウンター更新対象には含めません。
+
 ### `users/{userId}/knowledgeSearchHistory/{historyId}`
 
 ```ts

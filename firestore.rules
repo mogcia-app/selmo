@@ -26,6 +26,27 @@ service cloud.firestore {
       return status == "active";
     }
 
+    function isValidKnowledgeScope(scope) {
+      return scope == "personal" || scope == "shared";
+    }
+
+    function isValidKnowledgeKind(kind) {
+      return kind == "knowledge" || kind == "memo" || kind == "qa";
+    }
+
+    function isKnowledgeCategoryCounterUpdate() {
+      return isSignedIn()
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(["knowledgeCount", "memoCount", "updatedAt"])
+        && request.resource.data.knowledgeCount is int
+        && request.resource.data.memoCount is int;
+    }
+
+    function isKnowledgeProductCounterUpdate() {
+      return isSignedIn()
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(["knowledgeCount", "updatedAt"])
+        && request.resource.data.knowledgeCount is int;
+    }
+
     match /users/{userId} {
       allow read: if isAdmin() || isOwner(userId);
       allow create: if isOwner(userId)
@@ -77,14 +98,14 @@ service cloud.firestore {
     match /knowledgeCategories/{categoryId} {
       allow read: if isSignedIn();
       allow create: if isSignedIn() && request.resource.data.createdBy == request.auth.uid;
-      allow update: if isAdmin() || isOwner(resource.data.createdBy);
+      allow update: if isAdmin() || isOwner(resource.data.createdBy) || isKnowledgeCategoryCounterUpdate();
       allow delete: if isAdmin();
     }
 
     match /knowledgeProducts/{productId} {
       allow read: if isSignedIn();
       allow create: if isSignedIn() && request.resource.data.createdBy == request.auth.uid;
-      allow update: if isAdmin() || isOwner(resource.data.createdBy);
+      allow update: if isAdmin() || isOwner(resource.data.createdBy) || isKnowledgeProductCounterUpdate();
       allow delete: if isAdmin();
     }
 
@@ -92,8 +113,27 @@ service cloud.firestore {
       allow read: if isSignedIn()
         && (resource.data.scope == "shared" || resource.data.ownerId == request.auth.uid || isAdmin());
       allow create: if isSignedIn()
+        && request.resource.data.keys().hasOnly([
+          "title",
+          "description",
+          "body",
+          "categoryId",
+          "productId",
+          "ownerId",
+          "scope",
+          "kind",
+          "tags",
+          "createdAt",
+          "updatedAt"
+        ])
         && request.resource.data.ownerId == request.auth.uid
-        && (request.resource.data.scope == "personal" || request.resource.data.scope == "shared");
+        && isValidKnowledgeScope(request.resource.data.scope)
+        && isValidKnowledgeKind(request.resource.data.kind)
+        && request.resource.data.title is string
+        && request.resource.data.description is string
+        && request.resource.data.body is string
+        && request.resource.data.tags is list
+        && (request.resource.data.scope == "personal" || isAdmin());
       allow update: if isAdmin() || isOwner(resource.data.ownerId);
       allow delete: if isAdmin() || isOwner(resource.data.ownerId);
     }
