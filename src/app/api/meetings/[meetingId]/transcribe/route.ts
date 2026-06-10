@@ -6,6 +6,12 @@ import { promisify } from "node:util";
 
 import { NextResponse } from "next/server";
 
+import {
+  estimateTranscriptionCostUsd,
+  saveAiUsageLog,
+  saveSystemErrorLog,
+} from "@/lib/server/operational-logs";
+
 export const runtime = "nodejs";
 
 const maxTranscriptionFileSizeBytes = 25 * 1024 * 1024;
@@ -28,6 +34,8 @@ type TranscriptionSegment = {
 };
 
 type RequestBody = {
+  companyId?: string | null;
+  userId?: string | null;
   audioDownloadUrl?: string;
   audioFileName?: string;
   audioMimeType?: string;
@@ -41,6 +49,9 @@ export async function POST(
   request: Request,
   context: { params: Promise<{ meetingId: string }> },
 ) {
+  let body: RequestBody | null = null;
+  let selectedModel = "gpt-4o-mini-transcribe";
+
   try {
     const { meetingId } = await context.params;
 
@@ -53,8 +64,6 @@ export async function POST(
         { status: 500 },
       );
     }
-
-    let body: RequestBody;
 
     try {
       body = (await request.json()) as RequestBody;
@@ -76,6 +85,7 @@ export async function POST(
           | "gpt-4o-transcribe-diarize"
           | "whisper-1")
       : "gpt-4o-mini-transcribe";
+    selectedModel = model;
 
     const audioResponse = await fetchWithTimeout(body.audioDownloadUrl, {
       timeoutMs: remoteFetchTimeoutMs,
@@ -140,6 +150,19 @@ export async function POST(
         0,
       );
       const segments = flattenSegmentsWithOffsets(chunkResults);
+      const loggedDurationSec = durationSec || body.audioDurationSec || null;
+      await saveAiUsageLog({
+        companyId: body.companyId,
+        userId: body.userId,
+        feature: "transcription",
+        model,
+        audioDurationSec: loggedDurationSec,
+        estimatedCostUsd: estimateTranscriptionCostUsd({
+          model,
+          audioDurationSec: loggedDurationSec,
+        }),
+        status: "success",
+      });
 
       return NextResponse.json({
         meetingId,
@@ -165,6 +188,27 @@ export async function POST(
   } catch (error) {
     const message =
       error instanceof Error ? error.message : "文字起こし処理に失敗しました。";
+    await saveAiUsageLog({
+      companyId: body?.companyId,
+      userId: body?.userId,
+      feature: "transcription",
+      model: selectedModel,
+      audioDurationSec: body?.audioDurationSec ?? null,
+      estimatedCostUsd: estimateTranscriptionCostUsd({
+        model: selectedModel,
+        audioDurationSec: body?.audioDurationSec ?? null,
+      }),
+      status: "failed",
+      errorMessage: message,
+    });
+    await saveSystemErrorLog({
+      companyId: body?.companyId,
+      userId: body?.userId,
+      kind: message.includes("Storage") ? "Storage" : "OpenAI",
+      message,
+      severity: "critical",
+      source: "api/meetings/transcribe",
+    });
 
     return NextResponse.json(
       {

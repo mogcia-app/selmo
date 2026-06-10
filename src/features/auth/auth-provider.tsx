@@ -37,6 +37,7 @@ type AuthContextValue = {
     email: string;
     password: string;
     role: UserRole;
+    companyName?: string;
   }) => Promise<AppUserProfile | null>;
   signOut: () => Promise<void>;
 };
@@ -194,6 +195,8 @@ function readCachedProfile() {
       uid: parsed.uid,
       email: typeof parsed.email === "string" ? parsed.email : null,
       name: typeof parsed.name === "string" ? parsed.name : null,
+      companyId: typeof parsed.companyId === "string" ? parsed.companyId : null,
+      companyName: typeof parsed.companyName === "string" ? parsed.companyName : null,
       role: parsed.role,
       status: parsed.status,
     };

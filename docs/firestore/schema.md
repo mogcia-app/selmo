@@ -11,9 +11,24 @@ Firestoreは重い集計が得意ではないため、管理画面は `monthlySt
 type UserDocument = {
   name: string;
   email: string;
+  companyId?: string;
+  companyName?: string;
   role: "admin" | "sales";
   status: "active" | "inactive";
   teamId?: string;
+  createdAt: Timestamp;
+  updatedAt: Timestamp;
+};
+```
+
+### `companies/{companyId}`
+
+```ts
+type CompanyDocument = {
+  name: string;
+  monthlyFee: number;
+  contractStartDate: Timestamp;
+  billingCurrency: "JPY";
   createdAt: Timestamp;
   updatedAt: Timestamp;
 };
@@ -23,6 +38,7 @@ type UserDocument = {
 
 ```ts
 type MeetingDocument = {
+  companyId?: string;
   userId: string;
   uploadedBy: string;
   customerName: string;
@@ -44,6 +60,81 @@ type MeetingDocument = {
     | "failed";
   reanalysisCount: number;
   createdAt: Timestamp;
+  updatedAt: Timestamp;
+};
+```
+
+### `aiUsageLogs/{logId}`
+
+```ts
+type AiUsageLogDocument = {
+  companyId: string;
+  userId: string;
+  feature:
+    | "transcription"
+    | "summary"
+    | "analysis"
+    | "roleplay"
+    | "knowledge_search";
+  model: string;
+  inputTokens?: number;
+  outputTokens?: number;
+  audioDurationSec?: number;
+  estimatedCostUsd?: number;
+  createdAt: Timestamp;
+  status: "success" | "failed";
+  errorMessage?: string;
+};
+```
+
+### `knowledgeSearchEvents/{eventId}`
+
+```ts
+type KnowledgeSearchEventDocument = {
+  companyId: string;
+  userId: string;
+  query: string;
+  resultCount: number;
+  usedAi: boolean;
+  createdAt: Timestamp;
+};
+```
+
+### `systemErrors/{errorId}`
+
+```ts
+type SystemErrorDocument = {
+  companyId?: string;
+  userId?: string;
+  kind: "OpenAI" | "Firebase" | "Storage" | "Cloud Run" | "Auth" | "API";
+  message: string;
+  severity: "info" | "warning" | "critical";
+  status: "open" | "investigating" | "resolved";
+  occurredAt: Timestamp;
+  source?: string;
+};
+```
+
+### `audioProcessingJobs/{jobId}`
+
+```ts
+type AudioProcessingJobDocument = {
+  companyId: string;
+  userId: string;
+  meetingId: string;
+  fileName: string;
+  audioDurationSec: number;
+  status:
+    | "waiting"
+    | "uploading"
+    | "transcribing"
+    | "analyzing"
+    | "completed"
+    | "failed";
+  startedAt: Timestamp;
+  completedAt?: Timestamp | null;
+  errorMessage?: string | null;
+  retryCount: number;
   updatedAt: Timestamp;
 };
 ```
@@ -207,7 +298,10 @@ type KnowledgeCategoryDocument = {
 ```ts
 type KnowledgeProductDocument = {
   name: string;
+  logoUrl?: string;
+  logoStoragePath?: string;
   knowledgeCount: number;
+  tabs: string[];
   createdBy: string;
   createdAt: Timestamp;
   updatedAt: Timestamp;
@@ -221,12 +315,28 @@ type KnowledgeItemDocument = {
   title: string;
   description: string;
   body: string;
+  tabTitle: string;
   categoryId: string | null;
   productId: string | null;
   ownerId: string;
   scope: "personal" | "shared";
   kind: "knowledge" | "memo" | "qa";
   tags: string[];
+  links: Array<{
+    title: string;
+    url: string;
+    description: string;
+  }>;
+  attachments: Array<{
+    id: string;
+    name: string;
+    url: string;
+    storagePath: string;
+    contentType: string;
+    size: number;
+    uploadedAt: Timestamp;
+    uploadedBy: string;
+  }>;
   createdAt: Timestamp;
   updatedAt: Timestamp;
 };
@@ -238,6 +348,10 @@ type KnowledgeItemDocument = {
 - 管理者は `scope: "shared"` の共有ナレッジを作成できます。
 - `categoryId` または `productId` が指定された場合、作成トランザクション内で `knowledgeCategories` / `knowledgeProducts` の件数と `updatedAt` を更新します。
 - 画面上の初期カテゴリ `how-to` はアプリ内の固定カテゴリです。Firestore 上にカテゴリドキュメントがないため、カウンター更新対象には含めません。
+- HPや外部ページは `links` に保存します。
+- PDFなどの添付ファイルは Firebase Storage の `knowledge/{userId}/{knowledgeId}/attachments/*` に保存し、Firestore には参照メタ情報のみ保存します。
+- 商品別ページでは `knowledgeProducts.tabs` を商品共通のタブ一覧として表示し、各ナレッジの `tabTitle` が一致するタブへ自動で入ります。
+- 共有ナレッジも同じ `productId` と `tabTitle` を持っていれば、商品ページの同じタブ内に表示されます。
 
 ### `users/{userId}/knowledgeSearchHistory/{historyId}`
 
@@ -245,6 +359,47 @@ type KnowledgeItemDocument = {
 type KnowledgeSearchHistoryDocument = {
   term: string;
   searchedAt: Timestamp;
+};
+```
+
+### `roleplayScenarios/{scenarioId}`
+
+```ts
+type RoleplayScenarioDocument = {
+  title: string;
+  description: string;
+  productId: string | null;
+  productName: string;
+  customerRole: string;
+  customerProfile: string;
+  goal: string;
+  objections: string[];
+  evaluationCriteria: string[];
+  difficulty: "easy" | "normal" | "hard";
+  createdBy: string;
+  createdAt: Timestamp;
+  updatedAt: Timestamp;
+};
+```
+
+### `roleplayResults/{resultId}`
+
+```ts
+type RoleplayResultDocument = {
+  scenarioId: string;
+  scenarioTitle: string;
+  productName: string;
+  userId: string;
+  score: number;
+  summary: string;
+  strengths: string[];
+  improvements: string[];
+  messages: Array<{
+    role: "customer" | "sales";
+    content: string;
+    createdAt: string;
+  }>;
+  createdAt: Timestamp;
 };
 ```
 
@@ -259,6 +414,9 @@ type KnowledgeSearchHistoryDocument = {
 - `knowledgeItems`: `scope`
 - `knowledgeItems`: `ownerId`
 - `users/{userId}/knowledgeSearchHistory`: `searchedAt desc`
+- `roleplayScenarios`: クライアント側で `updatedAt desc` に整列
+- `roleplayResults`: クライアント側で `createdAt desc` に整列
+- `roleplayResults`: `userId`
 
 ## Retention Rule
 

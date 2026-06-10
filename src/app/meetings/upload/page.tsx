@@ -3,12 +3,12 @@
 import { FirebaseError } from "firebase/app";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
-import { useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { useAuth } from "@/features/auth/auth-provider";
-import { createMeeting } from "@/lib/firebase/meetings";
+import { subscribeToKnowledgeProducts, type KnowledgeProduct } from "@/lib/firebase/knowledge";
+import { createMeeting, subscribeToMeetings, type MeetingRecord } from "@/lib/firebase/meetings";
 
-const productOptions = ["商材A", "商材B", "商材C", "商材D"];
 const maxRecommendedDurationSec = 120 * 60;
 const maxOpenAiTranscriptionFileSizeBytes = 25 * 1024 * 1024;
 const supportedAudioTypes = new Set([
@@ -17,24 +17,66 @@ const supportedAudioTypes = new Set([
   "audio/wav",
   "audio/x-wav",
   "audio/wave",
+  "audio/mp4",
+  "audio/m4a",
+  "audio/x-m4a",
 ]);
 export default function MeetingUploadPage() {
   const router = useRouter();
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const { firebaseError, isFirebaseReady, isLoading, missingEnvKeys, profile } =
     useAuth();
-  const [recordedAt, setRecordedAt] = useState("2026-05-24T14:00");
+  const [recordedAt, setRecordedAt] = useState(() => toDatetimeLocalValue(new Date()));
   const [customerName, setCustomerName] = useState("");
-  const [productType, setProductType] = useState(productOptions[0]);
+  const [products, setProducts] = useState<KnowledgeProduct[]>([]);
+  const [meetings, setMeetings] = useState<MeetingRecord[]>([]);
+  const [productType, setProductType] = useState("");
   const [customerType, setCustomerType] = useState<"new" | "existing">("new");
   const [status, setStatus] = useState<"won" | "considering" | "lost">("considering");
   const [location, setLocation] = useState("");
+  const [memo, setMemo] = useState("");
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [detectedDurationSec, setDetectedDurationSec] = useState<number | null>(null);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  useEffect(() => {
+    if (!isFirebaseReady) {
+      return;
+    }
+
+    const unsubscribe = subscribeToKnowledgeProducts(
+      (nextProducts) => {
+        setProducts(nextProducts);
+        setProductType((current) => current || nextProducts[0]?.name || "");
+      },
+      () => setErrorMessage("商材一覧の読み込みに失敗しました。"),
+    );
+
+    return unsubscribe;
+  }, [isFirebaseReady]);
+
+  useEffect(() => {
+    if (!profile?.uid || !profile.role) {
+      return;
+    }
+
+    const unsubscribe = subscribeToMeetings(
+      { role: profile.role, userId: profile.uid },
+      setMeetings,
+      () => setMeetings([]),
+    );
+
+    return unsubscribe;
+  }, [profile?.role, profile?.uid]);
+
+  const productOptions = useMemo(() => products.map((product) => product.name), [products]);
+  const monthlyUploadCount = useMemo(
+    () => meetings.filter((meeting) => isCurrentMonth(meeting.recordedAt)).length,
+    [meetings],
+  );
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -68,19 +110,21 @@ export default function MeetingUploadPage() {
     try {
       const meetingId = await createMeeting({
         userId: profile.uid,
+        companyId: profile.companyId,
         customerName: normalizedCustomerName,
         productType,
         customerType,
         recordedAt: normalizedRecordedAt,
         location: location.trim(),
+        memo: memo.trim(),
         status,
         audioFile: selectedFile,
         audioDurationSec: detectedDurationSec,
         onUploadProgress: setUploadProgress,
       });
 
-      setSuccessMessage("打ち合わせ情報を保存しました。詳細画面へ移動します。");
-      router.push(`/meetings/${meetingId}`);
+      setSuccessMessage(`打ち合わせ情報を保存しました。処理状況は一覧で確認できます。ID: ${meetingId}`);
+      router.push("/meetings");
     } catch (error) {
       if (error instanceof FirebaseError) {
         setErrorMessage(
@@ -112,7 +156,7 @@ export default function MeetingUploadPage() {
         <div className="rounded-[18px] border border-[#eceef4] bg-white px-5 py-4 text-right shadow-[0_10px_28px_rgba(17,24,39,0.05)]">
           <div className="text-[13px] text-[#8a909b]">今月のアップロード件数</div>
           <div className="mt-1 text-[28px] font-bold tracking-[-0.03em] text-[#171717]">
-            23 / 30
+            {monthlyUploadCount}件
           </div>
         </div>
       </header>
@@ -128,7 +172,7 @@ export default function MeetingUploadPage() {
                 音声ファイル
               </h2>
               <p className="text-[14px] text-[#7a808c]">
-                mp3推奨 / wav対応 / 長時間音声も検証できます
+                mp3 / wav / m4a に対応しています
               </p>
             </div>
           </div>
@@ -157,7 +201,7 @@ export default function MeetingUploadPage() {
             <input
               ref={fileInputRef}
               type="file"
-              accept=".mp3,.wav,audio/mpeg,audio/wav"
+              accept=".mp3,.wav,.m4a,audio/mpeg,audio/wav,audio/mp4,audio/x-m4a"
               className="hidden"
               onChange={async (event) => {
                 const file = event.target.files?.[0] ?? null;
@@ -173,7 +217,7 @@ export default function MeetingUploadPage() {
 
                 if (!isSupportedAudioFile(file)) {
                   setErrorMessage(
-                    "対応している形式は mp3 / wav です。別形式の場合は変換してから再度お試しください。",
+                    "対応している形式は mp3 / wav / m4a です。別形式の場合は変換してから再度お試しください。",
                   );
                   return;
                 }
@@ -211,6 +255,17 @@ export default function MeetingUploadPage() {
               </div>
             </div>
           ) : null}
+
+          <div className="mt-5 rounded-[18px] border border-[#eceef4] bg-white px-5 py-4">
+            <div className="text-[13px] font-semibold text-[#505866]">処理ステータス</div>
+            <div className="mt-2 text-[14px] leading-6 text-[#7a808c]">
+              {isSubmitting
+                ? "音声をアップロード中です。完了後、一覧で処理状況を確認できます。"
+                : selectedFile
+                  ? "アップロード前です。保存すると処理待ちとして一覧に表示されます。"
+                  : "音声ファイルを選択してください。"}
+            </div>
+          </div>
 
           {detectedDurationSec !== null && detectedDurationSec > maxRecommendedDurationSec ? (
             <AlertBox>
@@ -289,8 +344,13 @@ export default function MeetingUploadPage() {
                 value={productType}
                 onChange={(event) => setProductType(event.target.value)}
               >
+                {productOptions.length === 0 ? (
+                  <option value="">商材未登録</option>
+                ) : null}
                 {productOptions.map((product) => (
-                  <option key={product}>{product}</option>
+                  <option key={product} value={product}>
+                    {product}
+                  </option>
                 ))}
               </select>
             </Field>
@@ -328,12 +388,21 @@ export default function MeetingUploadPage() {
               />
             </Field>
 
+            <Field label="メモ">
+              <textarea
+                className={`${inputClassName} min-h-[112px] resize-y leading-7`}
+                placeholder="商談中に気になったこと、次回確認したいことなど"
+                value={memo}
+                onChange={(event) => setMemo(event.target.value)}
+              />
+            </Field>
+
             <div className="flex flex-wrap items-center justify-end gap-3 pt-2">
               <button
                 type="button"
                 className="rounded-[14px] border border-[#e6e8ee] bg-white px-4 py-3 text-[14px] font-medium text-[#575f6d]"
               >
-                下書き保存
+                入力を保持
               </button>
               <button
                 type="submit"
@@ -465,7 +534,7 @@ function isSupportedAudioFile(file: File) {
     return true;
   }
 
-  return lowerName.endsWith(".mp3") || lowerName.endsWith(".wav");
+  return lowerName.endsWith(".mp3") || lowerName.endsWith(".wav") || lowerName.endsWith(".m4a");
 }
 
 function formatFileSize(sizeBytes: number) {
@@ -522,4 +591,22 @@ function buildUntitledMeetingName(recordedAt: Date) {
   const minutes = String(recordedAt.getMinutes()).padStart(2, "0");
 
   return `未設定_${year}${month}${day}_${hours}${minutes}`;
+}
+
+function toDatetimeLocalValue(date: Date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  const hours = String(date.getHours()).padStart(2, "0");
+  const minutes = String(date.getMinutes()).padStart(2, "0");
+  return `${year}-${month}-${day}T${hours}:${minutes}`;
+}
+
+function isCurrentMonth(date: Date | null) {
+  if (!date) {
+    return false;
+  }
+
+  const now = new Date();
+  return date.getFullYear() === now.getFullYear() && date.getMonth() === now.getMonth();
 }

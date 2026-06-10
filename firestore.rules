@@ -34,6 +34,48 @@ service cloud.firestore {
       return kind == "knowledge" || kind == "memo" || kind == "qa";
     }
 
+    function isValidBillingCurrency(currency) {
+      return currency == "JPY";
+    }
+
+    function isValidAiUsageFeature(feature) {
+      return feature == "transcription"
+        || feature == "summary"
+        || feature == "analysis"
+        || feature == "roleplay"
+        || feature == "knowledge_search";
+    }
+
+    function isValidLogStatus(status) {
+      return status == "success" || status == "failed";
+    }
+
+    function isValidSystemErrorKind(kind) {
+      return kind == "OpenAI"
+        || kind == "Firebase"
+        || kind == "Storage"
+        || kind == "Cloud Run"
+        || kind == "Auth"
+        || kind == "API";
+    }
+
+    function isValidSystemErrorSeverity(severity) {
+      return severity == "info" || severity == "warning" || severity == "critical";
+    }
+
+    function isValidSystemErrorStatus(status) {
+      return status == "open" || status == "investigating" || status == "resolved";
+    }
+
+    function isValidAudioProcessingStatus(status) {
+      return status == "waiting"
+        || status == "uploading"
+        || status == "transcribing"
+        || status == "analyzing"
+        || status == "completed"
+        || status == "failed";
+    }
+
     function isKnowledgeCategoryCounterUpdate() {
       return isSignedIn()
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly(["knowledgeCount", "memoCount", "updatedAt"])
@@ -45,6 +87,12 @@ service cloud.firestore {
       return isSignedIn()
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly(["knowledgeCount", "updatedAt"])
         && request.resource.data.knowledgeCount is int;
+    }
+
+    function isKnowledgeProductTabsUpdate() {
+      return isSignedIn()
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(["tabs", "updatedAt"])
+        && request.resource.data.tabs is list;
     }
 
     match /users/{userId} {
@@ -60,6 +108,20 @@ service cloud.firestore {
           && request.resource.data.status == resource.data.status
           && request.resource.data.email == resource.data.email
         );
+      allow delete: if false;
+    }
+
+    match /companies/{companyId} {
+      allow read: if isAdmin() || isSignedIn();
+      allow create: if isSignedIn()
+        && companyId == request.auth.uid
+        && request.resource.data.monthlyFee is number
+        && request.resource.data.contractStartDate is timestamp
+        && isValidBillingCurrency(request.resource.data.billingCurrency);
+      allow update: if isAdmin()
+        && request.resource.data.monthlyFee is number
+        && request.resource.data.contractStartDate is timestamp
+        && isValidBillingCurrency(request.resource.data.billingCurrency);
       allow delete: if false;
     }
 
@@ -85,6 +147,57 @@ service cloud.firestore {
       allow write: if isAdmin();
     }
 
+    match /aiUsageLogs/{logId} {
+      allow read: if isAdmin();
+      allow create: if isAdmin()
+        && isValidAiUsageFeature(request.resource.data.feature)
+        && isValidLogStatus(request.resource.data.status);
+      allow update, delete: if false;
+    }
+
+    match /knowledgeSearchEvents/{eventId} {
+      allow read: if isAdmin() || isOwner(resource.data.userId);
+      allow create: if isSignedIn()
+        && request.resource.data.userId == request.auth.uid
+        && request.resource.data.query is string
+        && request.resource.data.resultCount is int
+        && request.resource.data.usedAi is bool
+        && request.resource.data.createdAt is timestamp;
+      allow update, delete: if false;
+    }
+
+    match /systemErrors/{errorId} {
+      allow read: if isAdmin();
+      allow create: if isSignedIn()
+        && isValidSystemErrorKind(request.resource.data.kind)
+        && isValidSystemErrorSeverity(request.resource.data.severity)
+        && isValidSystemErrorStatus(request.resource.data.status)
+        && request.resource.data.message is string
+        && request.resource.data.occurredAt is timestamp
+        && (!("userId" in request.resource.data) || request.resource.data.userId == request.auth.uid);
+      allow update: if isAdmin()
+        && isValidSystemErrorStatus(request.resource.data.status);
+      allow delete: if false;
+    }
+
+    match /audioProcessingJobs/{jobId} {
+      allow read: if isAdmin() || isOwner(resource.data.userId);
+      allow create: if isSignedIn()
+        && request.resource.data.userId == request.auth.uid
+        && request.resource.data.meetingId == jobId
+        && request.resource.data.fileName is string
+        && request.resource.data.audioDurationSec is number
+        && isValidAudioProcessingStatus(request.resource.data.status);
+      allow update: if isAdmin()
+        || (
+          isOwner(resource.data.userId)
+          && request.resource.data.userId == resource.data.userId
+          && request.resource.data.meetingId == resource.data.meetingId
+          && isValidAudioProcessingStatus(request.resource.data.status)
+        );
+      allow delete: if false;
+    }
+
     match /userMonthlyStats/{documentId} {
       allow read: if isAdmin() || isOwner(resource.data.userId);
       allow write: if isAdmin();
@@ -105,7 +218,7 @@ service cloud.firestore {
     match /knowledgeProducts/{productId} {
       allow read: if isSignedIn();
       allow create: if isSignedIn() && request.resource.data.createdBy == request.auth.uid;
-      allow update: if isAdmin() || isOwner(resource.data.createdBy) || isKnowledgeProductCounterUpdate();
+      allow update: if isAdmin() || isOwner(resource.data.createdBy) || isKnowledgeProductCounterUpdate() || isKnowledgeProductTabsUpdate();
       allow delete: if isAdmin();
     }
 
@@ -117,12 +230,15 @@ service cloud.firestore {
           "title",
           "description",
           "body",
+          "tabTitle",
           "categoryId",
           "productId",
           "ownerId",
           "scope",
           "kind",
           "tags",
+          "links",
+          "attachments",
           "createdAt",
           "updatedAt"
         ])
@@ -132,14 +248,75 @@ service cloud.firestore {
         && request.resource.data.title is string
         && request.resource.data.description is string
         && request.resource.data.body is string
+        && request.resource.data.tabTitle is string
         && request.resource.data.tags is list
+        && request.resource.data.links is list
+        && request.resource.data.attachments is list
         && (request.resource.data.scope == "personal" || isAdmin());
-      allow update: if isAdmin() || isOwner(resource.data.ownerId);
+      allow update: if isAdmin()
+        || (
+          isOwner(resource.data.ownerId)
+          && request.resource.data.ownerId == resource.data.ownerId
+          && request.resource.data.scope == "personal"
+        );
       allow delete: if isAdmin() || isOwner(resource.data.ownerId);
     }
 
     match /users/{userId}/knowledgeSearchHistory/{historyId} {
       allow read, write: if isOwner(userId);
+    }
+
+    match /roleplayScenarios/{scenarioId} {
+      allow read: if isSignedIn();
+      allow create: if isAdmin()
+        && request.resource.data.keys().hasOnly([
+          "title",
+          "description",
+          "productId",
+          "productName",
+          "customerRole",
+          "customerProfile",
+          "goal",
+          "objections",
+          "evaluationCriteria",
+          "difficulty",
+          "createdBy",
+          "createdAt",
+          "updatedAt"
+        ])
+        && request.resource.data.createdBy == request.auth.uid
+        && request.resource.data.title is string
+        && request.resource.data.description is string
+        && request.resource.data.customerRole is string
+        && request.resource.data.customerProfile is string
+        && request.resource.data.goal is string
+        && request.resource.data.objections is list
+        && request.resource.data.evaluationCriteria is list
+        && (request.resource.data.difficulty == "easy" || request.resource.data.difficulty == "normal" || request.resource.data.difficulty == "hard");
+      allow update, delete: if isAdmin();
+    }
+
+    match /roleplayResults/{resultId} {
+      allow read: if isAdmin() || isOwner(resource.data.userId);
+      allow create: if isSignedIn()
+        && request.resource.data.keys().hasOnly([
+          "scenarioId",
+          "scenarioTitle",
+          "productName",
+          "userId",
+          "score",
+          "summary",
+          "strengths",
+          "improvements",
+          "messages",
+          "createdAt"
+        ])
+        && request.resource.data.userId == request.auth.uid
+        && request.resource.data.score is int
+        && request.resource.data.strengths is list
+        && request.resource.data.improvements is list
+        && request.resource.data.messages is list;
+      allow update, delete: if false;
     }
   }
 }

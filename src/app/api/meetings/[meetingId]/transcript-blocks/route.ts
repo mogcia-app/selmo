@@ -6,6 +6,12 @@ import { promisify } from "node:util";
 
 import { NextResponse } from "next/server";
 
+import {
+  estimateTranscriptionCostUsd,
+  saveAiUsageLog,
+  saveSystemErrorLog,
+} from "@/lib/server/operational-logs";
+
 export const runtime = "nodejs";
 
 const execFileAsync = promisify(execFile);
@@ -15,6 +21,8 @@ const defaultOverlapSec = 6;
 const supportedModels = new Set(["gpt-4o-mini-transcribe", "gpt-4o-transcribe"]);
 
 type RequestBody = {
+  companyId?: string | null;
+  userId?: string | null;
   audioDownloadUrl?: string;
   audioFileName?: string;
   audioMimeType?: string;
@@ -38,6 +46,9 @@ export async function POST(
   request: Request,
   context: { params: Promise<{ meetingId: string }> },
 ) {
+  let body: RequestBody | null = null;
+  let selectedModel = "gpt-4o-mini-transcribe";
+
   try {
     const { meetingId } = await context.params;
 
@@ -48,7 +59,6 @@ export async function POST(
       );
     }
 
-    let body: RequestBody;
     try {
       body = (await request.json()) as RequestBody;
     } catch {
@@ -65,6 +75,7 @@ export async function POST(
     const model = supportedModels.has(body.model ?? "")
       ? (body.model as "gpt-4o-mini-transcribe" | "gpt-4o-transcribe")
       : "gpt-4o-mini-transcribe";
+    selectedModel = model;
 
     const audioResponse = await fetchWithTimeout(body.audioDownloadUrl, {
       timeoutMs: remoteFetchTimeoutMs,
@@ -133,6 +144,18 @@ export async function POST(
           confidence: "estimated" as const,
         })),
       ).filter((block) => block.text);
+      await saveAiUsageLog({
+        companyId: body.companyId,
+        userId: body.userId,
+        feature: "transcription",
+        model,
+        audioDurationSec,
+        estimatedCostUsd: estimateTranscriptionCostUsd({
+          model,
+          audioDurationSec,
+        }),
+        status: "success",
+      });
 
       return NextResponse.json({
         meetingId,
@@ -147,6 +170,27 @@ export async function POST(
   } catch (error) {
     const message =
       error instanceof Error ? error.message : "本文ブロック生成に失敗しました。";
+    await saveAiUsageLog({
+      companyId: body?.companyId,
+      userId: body?.userId,
+      feature: "transcription",
+      model: selectedModel,
+      audioDurationSec: body?.audioDurationSec ?? null,
+      estimatedCostUsd: estimateTranscriptionCostUsd({
+        model: selectedModel,
+        audioDurationSec: body?.audioDurationSec ?? null,
+      }),
+      status: "failed",
+      errorMessage: message,
+    });
+    await saveSystemErrorLog({
+      companyId: body?.companyId,
+      userId: body?.userId,
+      kind: message.includes("Storage") ? "Storage" : "OpenAI",
+      message,
+      severity: "warning",
+      source: "api/meetings/transcript-blocks",
+    });
 
     return NextResponse.json(
       {

@@ -1,11 +1,19 @@
 import { NextResponse } from "next/server";
 
+import {
+  estimateChatCostUsd,
+  saveAiUsageLog,
+  saveSystemErrorLog,
+} from "@/lib/server/operational-logs";
+
 export const runtime = "nodejs";
 
 const remoteFetchTimeoutMs = 10 * 60 * 1000;
 const maxSegmentsPerBatch = 36;
 
 type RequestBody = {
+  companyId?: string | null;
+  userId?: string | null;
   transcriptText?: string | null;
   segments?: Array<{ startSec: number; endSec: number; text: string }>;
 };
@@ -23,6 +31,9 @@ export async function POST(
   request: Request,
   context: { params: Promise<{ meetingId: string }> },
 ) {
+  let body: RequestBody | null = null;
+  const model = "gpt-4o-mini";
+
   try {
     const { meetingId } = await context.params;
 
@@ -33,7 +44,6 @@ export async function POST(
       );
     }
 
-    let body: RequestBody;
     try {
       body = (await request.json()) as RequestBody;
     } catch {
@@ -57,20 +67,50 @@ export async function POST(
       );
     }
 
-    const logs = await buildConversationLogs({
+    const result = await buildConversationLogs({
       transcriptText: body.transcriptText ?? null,
       segments,
+    });
+    await saveAiUsageLog({
+      companyId: body.companyId,
+      userId: body.userId,
+      feature: "analysis",
+      model,
+      inputTokens: result.usage.inputTokens,
+      outputTokens: result.usage.outputTokens,
+      estimatedCostUsd: estimateChatCostUsd({
+        model,
+        inputTokens: result.usage.inputTokens,
+        outputTokens: result.usage.outputTokens,
+      }),
+      status: "success",
     });
 
     return NextResponse.json({
       meetingId,
-      model: "gpt-4o-mini",
-      logCount: logs.length,
-      logs,
+      model,
+      logCount: result.logs.length,
+      logs: result.logs,
     });
   } catch (error) {
     const message =
       error instanceof Error ? error.message : "会話ログ生成に失敗しました。";
+    await saveAiUsageLog({
+      companyId: body?.companyId,
+      userId: body?.userId,
+      feature: "analysis",
+      model,
+      status: "failed",
+      errorMessage: message,
+    });
+    await saveSystemErrorLog({
+      companyId: body?.companyId,
+      userId: body?.userId,
+      kind: "OpenAI",
+      message,
+      severity: "warning",
+      source: "api/meetings/conversation-logs",
+    });
 
     return NextResponse.json(
       {
@@ -91,6 +131,8 @@ async function buildConversationLogs({
 }) {
   const batches = chunkSegments(segments, maxSegmentsPerBatch);
   const logs: ConversationLog[] = [];
+  let inputTokens = 0;
+  let outputTokens = 0;
   let logCounter = 0;
 
   for (const batch of batches) {
@@ -100,7 +142,10 @@ async function buildConversationLogs({
       baseIndex: batch.baseIndex,
     });
 
-    for (const log of batchLogs) {
+    inputTokens += batchLogs.usage.inputTokens ?? 0;
+    outputTokens += batchLogs.usage.outputTokens ?? 0;
+
+    for (const log of batchLogs.logs) {
       logCounter += 1;
       logs.push({
         ...log,
@@ -113,7 +158,13 @@ async function buildConversationLogs({
     throw new Error("会話ログを生成できませんでした。");
   }
 
-  return mergeAdjacentConversationLogs(logs);
+  return {
+    logs: mergeAdjacentConversationLogs(logs),
+    usage: {
+      inputTokens: inputTokens || null,
+      outputTokens: outputTokens || null,
+    },
+  };
 }
 
 async function buildConversationLogBatch({
@@ -184,9 +235,21 @@ async function buildConversationLogBatch({
   }
 
   let payload: unknown;
+  let usage: { inputTokens: number | null; outputTokens: number | null } = {
+    inputTokens: null,
+    outputTokens: null,
+  };
   try {
     const parsed = JSON.parse(responseText) as {
       choices?: Array<{ message?: { content?: string | null } }>;
+      usage?: {
+        prompt_tokens?: number;
+        completion_tokens?: number;
+      };
+    };
+    usage = {
+      inputTokens: parsed.usage?.prompt_tokens ?? null,
+      outputTokens: parsed.usage?.completion_tokens ?? null,
     };
     payload = JSON.parse(parsed.choices?.[0]?.message?.content || "{}");
   } catch {
@@ -230,7 +293,10 @@ async function buildConversationLogBatch({
         .filter((log): log is ConversationLog => Boolean(log)))
     : [];
 
-  return logs;
+  return {
+    logs,
+    usage,
+  };
 }
 
 function chunkSegments(

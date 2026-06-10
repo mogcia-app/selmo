@@ -8,33 +8,38 @@ import {
 
 export const runtime = "nodejs";
 
-const remoteFetchTimeoutMs = 10 * 60 * 1000;
+const remoteFetchTimeoutMs = 60 * 1000;
+
+type KnowledgeSearchSource = {
+  id: string;
+  title: string;
+  kind: string;
+  scope: string;
+  snippets: string[];
+};
 
 type RequestBody = {
   companyId?: string | null;
   userId?: string | null;
-  transcriptText?: string;
+  query?: string;
+  sources?: KnowledgeSearchSource[];
 };
 
-type SummaryResponse = {
+type KnowledgeSearchAnswer = {
   overview: string;
   bullets: string[];
+  followUps: string[];
 };
 
-export async function POST(
-  request: Request,
-  context: { params: Promise<{ meetingId: string }> },
-) {
+export async function POST(request: Request) {
   let body: RequestBody | null = null;
   const model = "gpt-4o-mini";
 
   try {
-    await context.params;
-
     if (!process.env.OPENAI_API_KEY) {
       return NextResponse.json(
         { error: "OPENAI_API_KEY が未設定です。" },
-        { status: 500 },
+        { status: 503 },
       );
     }
 
@@ -44,18 +49,22 @@ export async function POST(
       return NextResponse.json({ error: "不正なリクエストです。" }, { status: 400 });
     }
 
-    if (!body.transcriptText?.trim()) {
-      return NextResponse.json(
-        { error: "要約対象の文字起こし本文がありません。" },
-        { status: 400 },
-      );
+    const query = body.query?.trim();
+    const sources = Array.isArray(body.sources) ? body.sources.slice(0, 8) : [];
+
+    if (!query) {
+      return NextResponse.json({ error: "検索キーワードがありません。" }, { status: 400 });
     }
 
-    const result = await summarizeTranscript(body.transcriptText);
+    if (sources.length === 0) {
+      return NextResponse.json({ error: "回答に使えるナレッジがありません。" }, { status: 400 });
+    }
+
+    const result = await generateKnowledgeSearchAnswer(query, sources);
     await saveAiUsageLog({
       companyId: body.companyId,
       userId: body.userId,
-      feature: "summary",
+      feature: "knowledge_search",
       model,
       inputTokens: result.usage.inputTokens,
       outputTokens: result.usage.outputTokens,
@@ -69,14 +78,14 @@ export async function POST(
 
     return NextResponse.json({
       model,
-      summary: result.summary,
+      answer: result.answer,
     });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "AI要約の生成に失敗しました。";
+    const message = error instanceof Error ? error.message : "AI回答の生成に失敗しました。";
     await saveAiUsageLog({
       companyId: body?.companyId,
       userId: body?.userId,
-      feature: "summary",
+      feature: "knowledge_search",
       model,
       status: "failed",
       errorMessage: message,
@@ -87,12 +96,12 @@ export async function POST(
       kind: "OpenAI",
       message,
       severity: "warning",
-      source: "api/meetings/summary",
+      source: "api/knowledge/search-answer",
     });
 
     return NextResponse.json(
       {
-        error: "AI要約の生成に失敗しました。",
+        error: "AI回答の生成に失敗しました。",
         detail: message,
       },
       { status: 500 },
@@ -100,7 +109,7 @@ export async function POST(
   }
 }
 
-async function summarizeTranscript(transcriptText: string) {
+async function generateKnowledgeSearchAnswer(query: string, sources: KnowledgeSearchSource[]) {
   const model = "gpt-4o-mini";
   const response = await fetchWithTimeout("https://api.openai.com/v1/chat/completions", {
     method: "POST",
@@ -113,7 +122,7 @@ async function summarizeTranscript(transcriptText: string) {
       response_format: {
         type: "json_schema",
         json_schema: {
-          name: "meeting_summary",
+          name: "knowledge_search_answer",
           schema: {
             type: "object",
             additionalProperties: false,
@@ -122,11 +131,17 @@ async function summarizeTranscript(transcriptText: string) {
               bullets: {
                 type: "array",
                 items: { type: "string" },
-                minItems: 3,
-                maxItems: 4,
+                minItems: 2,
+                maxItems: 5,
+              },
+              followUps: {
+                type: "array",
+                items: { type: "string" },
+                minItems: 0,
+                maxItems: 3,
               },
             },
-            required: ["overview", "bullets"],
+            required: ["overview", "bullets", "followUps"],
           },
         },
       },
@@ -134,14 +149,23 @@ async function summarizeTranscript(transcriptText: string) {
         {
           role: "system",
           content:
-            "あなたは営業商談の文字起こしを要約するアシスタントです。全体の要約は2〜4文で簡潔にまとめ、ポイントは3〜4個の短い箇条書き向け文で返してください。情報を捏造せず、日本語で返してください。",
+            "あなたは営業ナレッジ検索の回答アシスタントです。与えられたナレッジ抜粋だけを根拠に、日本語で簡潔に回答してください。根拠にない情報は推測せず、必要なら「登録済みナレッジでは確認できません」と明記してください。",
         },
         {
           role: "user",
-          content: `以下の商談文字起こしを要約してください。\n\n${transcriptText}`,
+          content: [
+            `検索キーワード: ${query}`,
+            "ナレッジ抜粋:",
+            ...sources.map((source, index) =>
+              [
+                `【${index + 1}】${source.title} / ${source.kind} / ${source.scope}`,
+                ...source.snippets.map((snippet) => `- ${snippet}`),
+              ].join("\n"),
+            ),
+          ].join("\n\n"),
         },
       ],
-      temperature: 0.3,
+      temperature: 0.2,
     }),
   });
 
@@ -168,26 +192,29 @@ async function summarizeTranscript(transcriptText: string) {
       }>;
     };
   } catch {
-    throw new Error("OpenAI のAI要約レスポンス解析に失敗しました。");
+    throw new Error("OpenAI のAI回答レスポンス解析に失敗しました。");
   }
 
   const content = parsed.choices?.[0]?.message?.content;
   if (!content) {
-    throw new Error("OpenAI からAI要約本文が返りませんでした。");
+    throw new Error("OpenAI からAI回答本文が返りませんでした。");
   }
 
-  let summary: SummaryResponse;
+  let answer: KnowledgeSearchAnswer;
   try {
-    summary = JSON.parse(content) as SummaryResponse;
+    answer = JSON.parse(content) as KnowledgeSearchAnswer;
   } catch {
-    throw new Error("AI要約JSONの解析に失敗しました。");
+    throw new Error("AI回答JSONの解析に失敗しました。");
   }
 
   return {
-    summary: {
-      overview: summary.overview?.trim() || "要約を生成できませんでした。",
-      bullets: Array.isArray(summary.bullets)
-        ? summary.bullets.map((bullet) => bullet.trim()).filter(Boolean).slice(0, 4)
+    answer: {
+      overview: answer.overview?.trim() || "回答を生成できませんでした。",
+      bullets: Array.isArray(answer.bullets)
+        ? answer.bullets.map((bullet) => bullet.trim()).filter(Boolean).slice(0, 5)
+        : [],
+      followUps: Array.isArray(answer.followUps)
+        ? answer.followUps.map((question) => question.trim()).filter(Boolean).slice(0, 3)
         : [],
     },
     usage: {
@@ -205,7 +232,7 @@ function mapOpenAiErrorMessage(rawMessage: string) {
     const code = parsed.error?.code ?? parsed.error?.type ?? null;
 
     if (code === "insufficient_quota") {
-      return "OpenAI API の利用枠が不足しているためAI要約を生成できません。Billing / quota を確認してください。";
+      return "OpenAI API の利用枠が不足しているためAI回答を生成できません。Billing / quota を確認してください。";
     }
 
     if (code === "invalid_api_key") {
@@ -217,13 +244,13 @@ function mapOpenAiErrorMessage(rawMessage: string) {
     }
 
     if (parsed.error?.message) {
-      return `OpenAI API でAI要約生成に失敗しました。${parsed.error.message}`;
+      return `OpenAI API でAI回答生成に失敗しました。${parsed.error.message}`;
     }
   } catch {
     // noop
   }
 
-  return `OpenAI API でAI要約生成に失敗しました。${rawMessage}`;
+  return `OpenAI API でAI回答生成に失敗しました。${rawMessage}`;
 }
 
 async function fetchWithTimeout(
@@ -241,7 +268,7 @@ async function fetchWithTimeout(
     });
   } catch (error) {
     if (error instanceof Error && error.name === "AbortError") {
-      throw new Error("OpenAI のAI要約生成がタイムアウトしました。");
+      throw new Error("OpenAI のAI回答生成がタイムアウトしました。");
     }
 
     throw error;

@@ -4,15 +4,28 @@ import { FirebaseError } from "firebase/app";
 import Image from "next/image";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 
 import { useAuth } from "@/features/auth/auth-provider";
 import {
+  buildKnowledgeSearchTerms,
   filterKnowledgeItems,
   saveKnowledgeSearch,
   subscribeToVisibleKnowledgeItems,
   type KnowledgeItem,
 } from "@/lib/firebase/knowledge";
+import { saveKnowledgeSearchEvent } from "@/lib/firebase/operations";
+
+type KnowledgeSearchEvidence = {
+  item: KnowledgeItem;
+  snippets: string[];
+};
+
+type AiAnswer = {
+  overview: string;
+  bullets: string[];
+  followUps: string[];
+};
 
 export default function SalesKnowledgeSearchPage() {
   const router = useRouter();
@@ -21,7 +34,11 @@ export default function SalesKnowledgeSearchPage() {
   const query = searchParams.get("q")?.trim() ?? "";
   const [searchTerm, setSearchTerm] = useState(query);
   const [items, setItems] = useState<KnowledgeItem[]>([]);
+  const [aiAnswer, setAiAnswer] = useState<AiAnswer | null>(null);
+  const [aiStatus, setAiStatus] = useState<"idle" | "loading" | "ready" | "fallback" | "error">("idle");
+  const [aiError, setAiError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const loggedSearchEventKeyRef = useRef<string | null>(null);
   const userId = profile?.uid;
 
   useEffect(() => {
@@ -46,9 +63,83 @@ export default function SalesKnowledgeSearchPage() {
   }, [query, userId]);
 
   const results = useMemo(() => filterKnowledgeItems(items, query), [items, query]);
+  const evidence = useMemo(() => buildSearchEvidence(results, query), [query, results]);
   const personalResults = results.filter((item) => item.scope === "personal");
   const sharedResults = results.filter((item) => item.scope === "shared");
   const qaResults = results.filter((item) => item.kind === "qa");
+
+  useEffect(() => {
+    if (!userId || !query) return;
+
+    const eventKey = `${userId}:${query}:${results.length}:${evidence.length > 0}`;
+    if (loggedSearchEventKeyRef.current === eventKey) return;
+    loggedSearchEventKeyRef.current = eventKey;
+
+    void saveKnowledgeSearchEvent({
+      companyId: profile?.companyId,
+      userId,
+      query,
+      resultCount: results.length,
+      usedAi: evidence.length > 0,
+    }).catch(() => undefined);
+  }, [evidence.length, profile?.companyId, query, results.length, userId]);
+
+  useEffect(() => {
+    if (!query || evidence.length === 0) {
+      setAiAnswer(null);
+      setAiStatus("idle");
+      setAiError(null);
+      return;
+    }
+
+    let isActive = true;
+    setAiStatus("loading");
+    setAiError(null);
+
+    fetch("/api/knowledge/search-answer", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        companyId: profile?.companyId ?? null,
+        userId,
+        query,
+        sources: evidence.slice(0, 8).map(({ item, snippets }) => ({
+          id: item.id,
+          title: item.title,
+          kind: item.kind,
+          scope: item.scope,
+          snippets,
+        })),
+      }),
+    })
+      .then(async (response) => {
+        const payload = (await response.json()) as {
+          answer?: AiAnswer;
+          error?: string;
+          detail?: string;
+        };
+
+        if (!response.ok || !payload.answer) {
+          throw new Error(payload.detail || payload.error || "AI回答の生成に失敗しました。");
+        }
+
+        if (!isActive) return;
+        setAiAnswer(payload.answer);
+        setAiStatus("ready");
+      })
+      .catch((nextError: unknown) => {
+        if (!isActive) return;
+        setAiAnswer(buildFallbackAnswer(query, evidence));
+        setAiStatus("fallback");
+        setAiError(nextError instanceof Error ? nextError.message : "AI回答の生成に失敗しました。");
+      });
+
+    return () => {
+      isActive = false;
+    };
+  }, [evidence, profile?.companyId, query, userId]);
 
   const handleSearch = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -94,20 +185,20 @@ export default function SalesKnowledgeSearchPage() {
           </form>
 
           <div className="flex flex-wrap items-center gap-3">
-            <button
-              type="button"
+            <Link
+              href="/sales/knowledge/new?kind=knowledge&scope=personal"
               className="inline-flex h-[42px] items-center gap-2 rounded-[14px] border border-[#f0c655] bg-white px-4 text-[13px] font-semibold text-[#171717] shadow-[0_8px_18px_rgba(17,24,39,0.05)]"
             >
               <PlusIcon />
               ナレッジを作成
-            </button>
-            <button
-              type="button"
+            </Link>
+            <Link
+              href="/sales/knowledge/new?kind=memo&scope=personal"
               className="inline-flex h-[42px] items-center gap-2 rounded-[14px] border border-[#e6eaf0] bg-white px-4 text-[13px] font-semibold text-[#3d4350] shadow-[0_8px_18px_rgba(17,24,39,0.05)]"
             >
               <PenIcon />
               メモを作成
-            </button>
+            </Link>
             <span className="inline-flex h-[42px] w-[42px] items-center justify-center rounded-full bg-[#171717] shadow-[0_10px_18px_rgba(17,24,39,0.12)]">
               <Image src="/nareji.png" alt="ナレッジ" width={30} height={30} className="h-[30px] w-[30px] object-contain" />
             </span>
@@ -129,11 +220,57 @@ export default function SalesKnowledgeSearchPage() {
                 <SparkIcon />
               </span>
               <h1 className="text-[18px] font-bold text-[#171717]">AI回答</h1>
+              {aiStatus === "loading" ? (
+                <span className="rounded-full bg-[#fff5d8] px-2.5 py-1 text-[11px] font-bold text-[#8a6500]">
+                  生成中
+                </span>
+              ) : null}
+              {aiStatus === "fallback" ? (
+                <span className="rounded-full bg-[#f1f2f5] px-2.5 py-1 text-[11px] font-bold text-[#596273]">
+                  ローカル要約
+                </span>
+              ) : null}
             </div>
-            {query && results.length > 0 ? (
-              <p className="mt-4 text-[14px] leading-7 text-[#3d4350]">
-                「{query}」に関連するナレッジが {results.length} 件見つかりました。関連ナレッジや共有ナレッジを確認して、商談前の準備に活用できます。
-              </p>
+            {query && evidence.length > 0 && aiAnswer ? (
+              <div className="mt-4">
+                <p className="text-[14px] leading-7 text-[#3d4350]">{aiAnswer.overview}</p>
+                {aiAnswer.bullets.length > 0 ? (
+                  <ul className="mt-4 space-y-2">
+                    {aiAnswer.bullets.map((bullet) => (
+                      <li key={bullet} className="flex gap-2 text-[13px] leading-6 text-[#343b48]">
+                        <span className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-[#f0c655]" />
+                        <span>{bullet}</span>
+                      </li>
+                    ))}
+                  </ul>
+                ) : null}
+                {aiError ? (
+                  <p className="mt-4 rounded-[14px] bg-[#fcfcfd] px-4 py-3 text-[12px] leading-5 text-[#7a808c]">
+                    AI生成は利用できなかったため、検索結果から自動要約しています。
+                  </p>
+                ) : null}
+                {aiAnswer.followUps.length > 0 ? (
+                  <div className="mt-4 flex flex-wrap gap-2">
+                    {aiAnswer.followUps.map((followUp) => (
+                      <button
+                        key={followUp}
+                        type="button"
+                        onClick={() => {
+                          setSearchTerm(followUp);
+                          router.push(`/sales/knowledge/search?q=${encodeURIComponent(followUp)}`);
+                        }}
+                        className="rounded-full border border-[#e6eaf0] bg-white px-3 py-1.5 text-[12px] font-semibold text-[#596273] transition hover:border-[#ead8a8] hover:bg-[#fffdf7]"
+                      >
+                        {followUp}
+                      </button>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
+            ) : query && evidence.length > 0 ? (
+              <div className="mt-4 rounded-[18px] border border-dashed border-[#f0c655] bg-[#fffdf7] px-5 py-5 text-[14px] leading-7 text-[#3d4350]">
+                「{query}」に関連するナレッジを確認しています。
+              </div>
             ) : (
               <EmptyBlock
                 icon={<SparkIcon />}
@@ -143,10 +280,11 @@ export default function SalesKnowledgeSearchPage() {
             )}
           </section>
 
-          <ResultSection title="関連ナレッジ" items={results} emptyTitle="関連ナレッジはまだありません" />
-          <ResultSection title="マイナレッジ" items={personalResults} emptyTitle="自分のナレッジはまだありません" />
-          <ResultSection title="共有ナレッジ" items={sharedResults} emptyTitle="共有ナレッジはまだありません" />
-          <ResultSection title="関連するQ&A" items={qaResults} emptyTitle="関連するQ&Aはまだありません" />
+          <EvidenceSection query={query} evidence={evidence} />
+          <ResultSection title="関連ナレッジ" query={query} items={results} emptyTitle="関連ナレッジはまだありません" />
+          <ResultSection title="マイナレッジ" query={query} items={personalResults} emptyTitle="自分のナレッジはまだありません" />
+          <ResultSection title="共有ナレッジ" query={query} items={sharedResults} emptyTitle="共有ナレッジはまだありません" />
+          <ResultSection title="関連するQ&A" query={query} items={qaResults} emptyTitle="関連するQ&Aはまだありません" />
         </div>
 
         <aside className="space-y-5">
@@ -154,6 +292,7 @@ export default function SalesKnowledgeSearchPage() {
             <h2 className="text-[17px] font-bold text-[#171717]">検索サマリー</h2>
             <div className="mt-5 space-y-4">
               <SummaryRow label="関連ナレッジ" value={`${results.length}件`} icon={<DocumentIcon />} />
+              <SummaryRow label="根拠箇所" value={`${evidence.reduce((total, item) => total + item.snippets.length, 0)}件`} icon={<SparkIcon />} />
               <SummaryRow label="マイナレッジ" value={`${personalResults.length}件`} icon={<DocumentIcon />} />
               <SummaryRow label="共有ナレッジ" value={`${sharedResults.length}件`} icon={<BriefcaseIcon />} />
               <SummaryRow label="関連Q&A" value={`${qaResults.length}件`} icon={<QuestionIcon />} />
@@ -187,14 +326,69 @@ export default function SalesKnowledgeSearchPage() {
   );
 }
 
-function ResultSection({ title, items, emptyTitle }: { title: string; items: KnowledgeItem[]; emptyTitle: string }) {
+function EvidenceSection({ query, evidence }: { query: string; evidence: KnowledgeSearchEvidence[] }) {
+  if (!query || evidence.length === 0) {
+    return null;
+  }
+
+  return (
+    <section className="rounded-[20px] border border-[#eceef4] bg-white px-5 py-5 shadow-[0_8px_22px_rgba(17,24,39,0.04)]">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <h2 className="text-[17px] font-bold text-[#171717]">根拠ハイライト</h2>
+        <span className="rounded-full bg-[#fff5d8] px-3 py-1 text-[12px] font-bold text-[#8a6500]">
+          {buildKnowledgeSearchTerms(query).join(" / ")}
+        </span>
+      </div>
+      <div className="mt-4 space-y-3">
+        {evidence.slice(0, 5).map(({ item, snippets }) => (
+          <Link
+            key={item.id}
+            href={getKnowledgeDetailHref(item)}
+            className="block rounded-[16px] border border-[#eef1f5] bg-[#fcfcfd] px-4 py-4 transition hover:border-[#ead8a8] hover:bg-[#fffdf7]"
+          >
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <h3 className="text-[15px] font-bold text-[#171717]">{item.title}</h3>
+              <span className="text-[12px] font-semibold text-[#8a909b]">{formatKind(item.kind)}</span>
+            </div>
+            <div className="mt-3 space-y-2">
+              {snippets.slice(0, 2).map((snippet) => (
+                <p
+                  key={snippet}
+                  className="border-l-4 border-[#ffd84d] bg-white px-3 py-2 text-[13px] leading-6 text-[#343b48]"
+                >
+                  <HighlightedText text={snippet} query={query} />
+                </p>
+              ))}
+            </div>
+          </Link>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function ResultSection({
+  title,
+  query,
+  items,
+  emptyTitle,
+}: {
+  title: string;
+  query: string;
+  items: KnowledgeItem[];
+  emptyTitle: string;
+}) {
   return (
     <section className="rounded-[20px] border border-[#eceef4] bg-white px-5 py-5 shadow-[0_8px_22px_rgba(17,24,39,0.04)]">
       <h2 className="text-[17px] font-bold text-[#171717]">{title}</h2>
       {items.length > 0 ? (
         <div className="mt-4 grid gap-4 lg:grid-cols-3">
           {items.map((item) => (
-            <article key={item.id} className="min-w-0 rounded-[16px] border border-[#eef1f5] bg-[#fcfcfd] px-4 py-4">
+            <Link
+              key={item.id}
+              href={getKnowledgeDetailHref(item)}
+              className="min-w-0 rounded-[16px] border border-[#eef1f5] bg-[#fcfcfd] px-4 py-4 transition hover:border-[#ead8a8] hover:bg-[#fffdf7]"
+            >
               <div className="flex items-start gap-3">
                 <span className="mt-0.5 text-[#4f7df3]">
                   <DocumentIcon />
@@ -204,11 +398,16 @@ function ResultSection({ title, items, emptyTitle }: { title: string; items: Kno
               <p className="mt-3 line-clamp-2 text-[12px] leading-5 text-[#6d7481]">
                 {item.description || item.body || "本文未入力"}
               </p>
+              {query ? (
+                <p className="mt-3 border-l-4 border-[#ffd84d] bg-white px-3 py-2 text-[12px] leading-5 text-[#343b48]">
+                  <HighlightedText text={buildBestSnippet(item, query) || "該当箇所を詳細で確認できます。"} query={query} />
+                </p>
+              ) : null}
               <div className="mt-4 flex items-center justify-between text-[11px] text-[#8a909b]">
                 <span>{item.scope === "shared" ? "共有" : "自分用"}</span>
                 <span>{formatDate(item.updatedAt)}</span>
               </div>
-            </article>
+            </Link>
           ))}
         </div>
       ) : (
@@ -216,6 +415,112 @@ function ResultSection({ title, items, emptyTitle }: { title: string; items: Kno
       )}
     </section>
   );
+}
+
+function getKnowledgeDetailHref(item: KnowledgeItem) {
+  return `/sales/knowledge/categories/${item.categoryId ?? "how-to"}/knowledge/${item.id}`;
+}
+
+function buildSearchEvidence(items: KnowledgeItem[], query: string): KnowledgeSearchEvidence[] {
+  if (!query.trim()) {
+    return [];
+  }
+
+  return items
+    .map((item) => ({
+      item,
+      snippets: buildKnowledgeSnippets(item, query),
+    }))
+    .filter((entry) => entry.snippets.length > 0)
+    .sort((left, right) => right.snippets.length - left.snippets.length);
+}
+
+function buildKnowledgeSnippets(item: KnowledgeItem, query: string) {
+  const searchTerms = buildKnowledgeSearchTerms(query);
+  const candidates = [
+    item.description,
+    ...splitTextIntoSentences(item.body),
+    ...item.links.flatMap((link) => [link.title, link.description, link.url]),
+    ...item.attachments.map((attachment) => attachment.name),
+  ].filter(Boolean);
+
+  return Array.from(
+    new Set(
+      candidates
+        .filter((candidate) => {
+          const normalizedCandidate = candidate.toLowerCase();
+          return searchTerms.some((term) => normalizedCandidate.includes(term));
+        })
+        .map((candidate) => candidate.trim())
+        .filter(Boolean),
+    ),
+  ).slice(0, 4);
+}
+
+function buildBestSnippet(item: KnowledgeItem, query: string) {
+  return buildKnowledgeSnippets(item, query)[0] ?? "";
+}
+
+function splitTextIntoSentences(text: string) {
+  return text
+    .split(/(?<=[。！？!?])|\n+/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+}
+
+function buildFallbackAnswer(query: string, evidence: KnowledgeSearchEvidence[]): AiAnswer {
+  const sourceCount = evidence.length;
+  const snippetCount = evidence.reduce((total, entry) => total + entry.snippets.length, 0);
+  const topTerms = buildKnowledgeSearchTerms(query).slice(0, 5);
+
+  return {
+    overview: `「${query}」に関連するナレッジが ${sourceCount} 件、根拠になりそうな箇所が ${snippetCount} 件見つかりました。該当箇所を確認して、商談前の説明や切り返しに利用できます。`,
+    bullets: [
+      topTerms.length > 1 ? `関連語として「${topTerms.join("」「")}」も含めて検索しています。` : `「${query}」を含む箇所を抽出しています。`,
+      evidence[0]?.item.title ? `特に「${evidence[0].item.title}」に関連する記述があります。` : "関連ナレッジの本文や概要から根拠を抽出しています。",
+    ],
+    followUps: [],
+  };
+}
+
+function HighlightedText({ text, query }: { text: string; query: string }) {
+  const searchTerms = buildKnowledgeSearchTerms(query);
+  const pattern = searchTerms
+    .filter(Boolean)
+    .map(escapeRegExp)
+    .join("|");
+
+  if (!pattern) {
+    return <>{text}</>;
+  }
+
+  const parts = text.split(new RegExp(`(${pattern})`, "gi"));
+
+  return (
+    <>
+      {parts.map((part, index) => {
+        const isMatch = searchTerms.some((term) => part.toLowerCase() === term.toLowerCase());
+
+        return isMatch ? (
+          <mark key={`${part}-${index}`} className="rounded bg-[#fff0a6] px-1 text-[#171717]">
+            {part}
+          </mark>
+        ) : (
+          <span key={`${part}-${index}`}>{part}</span>
+        );
+      })}
+    </>
+  );
+}
+
+function escapeRegExp(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function formatKind(kind: KnowledgeItem["kind"]) {
+  if (kind === "memo") return "メモ";
+  if (kind === "qa") return "Q&A";
+  return "ナレッジ";
 }
 
 function EmptyBlock({ icon, title, body }: { icon: React.ReactNode; title: string; body: string }) {

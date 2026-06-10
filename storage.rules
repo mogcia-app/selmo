@@ -18,5 +18,23 @@ service firebase.storage {
       allow write: if isSignedIn() && request.auth.uid == userId;
       allow delete: if isAdmin() || (isSignedIn() && request.auth.uid == userId);
     }
+
+    match /knowledge/{userId}/{allPaths=**} {
+      allow read: if isAdmin() || (isSignedIn() && request.auth.uid == userId);
+      allow write: if isSignedIn()
+        && request.auth.uid == userId
+        && request.resource.size < 20 * 1024 * 1024
+        && request.resource.contentType == "application/pdf";
+      allow delete: if isAdmin() || (isSignedIn() && request.auth.uid == userId);
+    }
+
+    match /knowledge-product-logos/{userId}/{allPaths=**} {
+      allow read: if isSignedIn();
+      allow write: if isSignedIn()
+        && request.auth.uid == userId
+        && request.resource.size < 5 * 1024 * 1024
+        && request.resource.contentType == "image/png";
+      allow delete: if isAdmin() || (isSignedIn() && request.auth.uid == userId);
+    }
   }
 }

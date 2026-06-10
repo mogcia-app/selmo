@@ -4,6 +4,7 @@ import { FormEvent, useEffect, useMemo, useState } from "react";
 
 import type {
   CreateKnowledgeItemInput,
+  KnowledgeItem,
   KnowledgeCategory,
   KnowledgeProduct,
 } from "@/lib/firebase/knowledge";
@@ -17,6 +18,10 @@ type KnowledgeCreateDialogProps = {
   defaultCategoryId?: string | null;
   defaultKind?: CreateKnowledgeItemInput["kind"];
   defaultScope?: CreateKnowledgeItemInput["scope"];
+  initialItem?: KnowledgeItem | null;
+  title?: string;
+  description?: string;
+  submitLabel?: string;
   onClose: () => void;
   onSubmit: (input: CreateKnowledgeItemInput) => Promise<void>;
 };
@@ -30,6 +35,10 @@ export function KnowledgeCreateDialog({
   defaultCategoryId = null,
   defaultKind = "knowledge",
   defaultScope = "personal",
+  initialItem = null,
+  title: dialogTitle = "ナレッジを作成",
+  description: dialogDescription = "商談で使う切り返し、提案メモ、Q&Aを保存できます。",
+  submitLabel = "作成する",
   onClose,
   onSubmit,
 }: KnowledgeCreateDialogProps) {
@@ -49,17 +58,17 @@ export function KnowledgeCreateDialog({
   useEffect(() => {
     if (!open) return;
 
-    setTitle("");
-    setDescription("");
-    setBody("");
-    setCategoryId(defaultCategoryId ?? "");
-    setProductId("");
-    setKind(defaultKind);
-    setScope(canCreateShared ? defaultScope : "personal");
-    setTagsText("");
+    setTitle(initialItem?.title ?? "");
+    setDescription(initialItem?.description ?? "");
+    setBody(initialItem?.body ?? "");
+    setCategoryId(initialItem?.categoryId ?? defaultCategoryId ?? "");
+    setProductId(initialItem?.productId ?? "");
+    setKind(initialItem?.kind ?? defaultKind);
+    setScope(canCreateShared ? (initialItem?.scope ?? defaultScope) : "personal");
+    setTagsText(initialItem?.tags.join(", ") ?? "");
     setError(null);
     setIsSaving(false);
-  }, [canCreateShared, defaultCategoryId, defaultKind, defaultScope, open]);
+  }, [canCreateShared, defaultCategoryId, defaultKind, defaultScope, initialItem, open]);
 
   const normalizedTags = useMemo(
     () =>
@@ -105,7 +114,7 @@ export function KnowledgeCreateDialog({
       });
       onClose();
     } catch (nextError) {
-      setError(nextError instanceof Error ? nextError.message : "ナレッジの作成に失敗しました。");
+      setError(nextError instanceof Error ? nextError.message : "ナレッジの保存に失敗しました。");
     } finally {
       setIsSaving(false);
     }
@@ -119,9 +128,9 @@ export function KnowledgeCreateDialog({
       >
         <div className="flex items-start justify-between gap-4">
           <div>
-            <h2 className="text-[24px] font-bold tracking-[-0.03em] text-[#171717]">ナレッジを作成</h2>
+            <h2 className="text-[24px] font-bold tracking-[-0.03em] text-[#171717]">{dialogTitle}</h2>
             <p className="mt-1 text-[13px] leading-6 text-[#7a808c]">
-              商談で使う切り返し、提案メモ、Q&Aを保存できます。
+              {dialogDescription}
             </p>
           </div>
           <button
@@ -254,7 +263,7 @@ export function KnowledgeCreateDialog({
             disabled={isSaving}
             className="inline-flex h-11 items-center justify-center rounded-[14px] border border-[#f0c655] bg-[#ffd84d] px-6 text-[14px] font-bold text-[#171717] disabled:cursor-not-allowed disabled:opacity-60"
           >
-            {isSaving ? "保存中" : "作成する"}
+            {isSaving ? "保存中" : submitLabel}
           </button>
         </div>
       </form>

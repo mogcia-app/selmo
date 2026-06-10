@@ -19,25 +19,25 @@ type NavItem = {
 
 const adminSections: Array<{ label: string; items: NavItem[] }> = [
   {
-    label: "01 — Dashboard",
+    label: "01 — Coaching",
     items: [
-      { href: "/admin/dashboard", label: "全体ダッシュボード", num: "01" },
-      { href: "/admin/reps", label: "営業マン別一覧", num: "02" },
-      { href: "/admin/reps/detail", label: "営業マン詳細", num: "03" },
-      { href: "/admin/meetings/detail", label: "通話詳細", num: "04" },
+      { href: "/admin/dashboard", label: "ダッシュボード", num: "01" },
+      { href: "/admin/members", label: "営業メンバー", num: "02" },
+      { href: "/admin/meetings", label: "商談レビュー", num: "03" },
     ],
   },
   {
-    label: "02 — Action",
+    label: "02 — Enablement",
     items: [
-      { href: "/meetings/upload", label: "音声アップロード", num: "05" },
-      { href: "/meetings", label: "通話一覧", num: "06" },
+      { href: "/admin/knowledge", label: "ナレッジ管理", num: "04" },
+      { href: "/admin/roleplay", label: "ロープレ管理", num: "05" },
+      { href: "/admin/products", label: "商材管理", num: "06" },
     ],
   },
   {
-    label: "03 — Manage",
+    label: "03 — System",
     items: [
-      { href: "/admin/manuals", label: "マニュアル管理", num: "07" },
+      { href: "/meetings/upload", label: "音声アップロード", num: "07" },
       { href: "/admin/users", label: "ユーザー管理", num: "08" },
     ],
   },

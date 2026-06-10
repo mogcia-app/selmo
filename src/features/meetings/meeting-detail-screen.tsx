@@ -11,8 +11,10 @@ import {
   saveMeetingConversationLogs,
   saveMeetingTranscriptionProbe,
   subscribeToMeeting,
+  updateMeetingMetadata,
   type MeetingRecord,
 } from "@/lib/firebase/meetings";
+import { updateAudioProcessingJob } from "@/lib/firebase/operations";
 
 const transcriptionRequestTimeoutMs = 10 * 60 * 1000;
 const transientBannerDurationMs = 5 * 1000;
@@ -64,6 +66,10 @@ export function MeetingDetailScreen({
   const [currentPlaybackSec, setCurrentPlaybackSec] = useState<number | null>(null);
   const [selectedTranscriptBlockIndex, setSelectedTranscriptBlockIndex] = useState<number | null>(null);
   const [transcriptionVisualProgress, setTranscriptionVisualProgress] = useState(12);
+  const [draftStatus, setDraftStatus] = useState<MeetingRecord["status"]>("considering");
+  const [draftMemo, setDraftMemo] = useState("");
+  const [isSavingMetadata, setIsSavingMetadata] = useState(false);
+  const [metadataMessage, setMetadataMessage] = useState<string | null>(null);
   const [transcriptScrollbar, setTranscriptScrollbar] = useState<ScrollbarMetrics>({
     thumbHeight: 0,
     thumbTop: 0,
@@ -93,6 +99,15 @@ export function MeetingDetailScreen({
 
     return unsubscribe;
   }, [meetingId]);
+
+  useEffect(() => {
+    if (!meeting) {
+      return;
+    }
+
+    setDraftStatus(meeting.status);
+    setDraftMemo(meeting.memo ?? "");
+  }, [meeting]);
 
   useEffect(() => {
     if (meeting?.transcriptionProbeStatus === "completed" || meeting?.transcriptionProbeStatus === "failed") {
@@ -154,6 +169,8 @@ export function MeetingDetailScreen({
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
+          companyId: profile?.companyId ?? meeting?.companyId ?? null,
+          userId: profile?.uid ?? meeting?.userId ?? null,
           transcriptText,
         }),
         timeoutMs: null,
@@ -180,6 +197,10 @@ export function MeetingDetailScreen({
         error: null,
         processingStatus: "uploaded",
       });
+      await updateAudioProcessingJob(meetingId, {
+        status: "completed",
+        errorMessage: null,
+      }).catch(() => undefined);
     } catch (summaryError) {
       const summaryMessage =
         summaryError instanceof Error ? summaryError.message : "AI要約の生成に失敗しました。";
@@ -190,6 +211,10 @@ export function MeetingDetailScreen({
           model: "gpt-4o-mini",
           error: summaryMessage,
           processingStatus: "uploaded",
+        });
+        await updateAudioProcessingJob(meetingId, {
+          status: "failed",
+          errorMessage: summaryMessage,
         });
       } catch {
         // noop
@@ -225,6 +250,10 @@ export function MeetingDetailScreen({
         error: null,
         processingStatus: "transcribing",
       });
+      await updateAudioProcessingJob(meetingId, {
+        status: "transcribing",
+        errorMessage: null,
+      }).catch(() => undefined);
       await saveMeetingConversationLogs(meetingId, {
         status: "running",
         model,
@@ -239,6 +268,8 @@ export function MeetingDetailScreen({
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
+          companyId: profile.companyId ?? meeting.companyId,
+          userId: profile.uid,
           audioDownloadUrl: meeting.audioDownloadUrl,
           audioFileName: meeting.audioFileName,
           audioMimeType: meeting.audioMimeType,
@@ -291,7 +322,16 @@ export function MeetingDetailScreen({
       setTranscriptionVisualProgress(100);
 
       if (payload.text?.trim()) {
+        await updateAudioProcessingJob(meetingId, {
+          status: "analyzing",
+          errorMessage: null,
+        }).catch(() => undefined);
         void generateAiSummaryInBackground(payload.text);
+      } else {
+        await updateAudioProcessingJob(meetingId, {
+          status: "completed",
+          errorMessage: null,
+        }).catch(() => undefined);
       }
     } catch (error) {
       const message =
@@ -313,6 +353,10 @@ export function MeetingDetailScreen({
           model,
           error: message,
           processingStatus: "failed",
+        });
+        await updateAudioProcessingJob(meetingId, {
+          status: "failed",
+          errorMessage: message,
         });
       } catch {
         // noop
@@ -593,6 +637,41 @@ export function MeetingDetailScreen({
     setErrorMessage(null);
   }
 
+  async function handleSaveMeetingMetadata() {
+    if (!meeting) {
+      return;
+    }
+
+    setIsSavingMetadata(true);
+    setMetadataMessage(null);
+    setErrorMessage(null);
+
+    try {
+      await updateMeetingMetadata(meeting.id, {
+        customerName: meeting.customerName,
+        productType: meeting.productType,
+        customerType: meeting.customerType,
+        recordedAt: meeting.recordedAt,
+        location: meeting.location,
+        memo: draftMemo.trim(),
+        status: draftStatus,
+      });
+      setMetadataMessage("商談ステータスとメモを保存しました。");
+    } catch (error) {
+      if (error instanceof FirebaseError) {
+        setErrorMessage(
+          error.code === "permission-denied"
+            ? "この商談を更新する権限がありません。"
+            : "商談情報の保存に失敗しました。",
+        );
+      } else {
+        setErrorMessage("商談情報の保存に失敗しました。");
+      }
+    } finally {
+      setIsSavingMetadata(false);
+    }
+  }
+
   if (isLoading) {
     return (
       <main className="min-h-screen bg-[#f7f7f8] px-5 py-6 md:px-8 md:py-7">
@@ -830,6 +909,45 @@ export function MeetingDetailScreen({
                   <div className="text-[13px] text-[#7a808c]">音声ファイルの保存がまだ完了していません。</div>
                 )}
               </div>
+            </div>
+          </div>
+
+          <div className="mt-4 grid gap-4 rounded-[20px] border border-[#eceef4] bg-[#fffdf8] p-4 xl:grid-cols-[0.72fr_1.28fr_auto] xl:items-end">
+            <div>
+              <div className="text-[13px] font-semibold text-[#505866]">成約/失注ステータス</div>
+              <select
+                value={draftStatus}
+                onChange={(event) => setDraftStatus(event.target.value as MeetingRecord["status"])}
+                className="mt-2 h-[44px] w-full rounded-[12px] border border-[#d8dde6] bg-white px-4 text-[14px] text-[#171717] outline-none"
+              >
+                <option value="considering">検討中</option>
+                <option value="won">成約</option>
+                <option value="lost">失注</option>
+              </select>
+            </div>
+            <div>
+              <div className="text-[13px] font-semibold text-[#505866]">営業メモ</div>
+              <textarea
+                value={draftMemo}
+                onChange={(event) => setDraftMemo(event.target.value)}
+                placeholder="次回アクション、顧客の不安、上司に確認したいことなど"
+                className="mt-2 min-h-[84px] w-full resize-y rounded-[12px] border border-[#d8dde6] bg-white px-4 py-3 text-[14px] leading-7 text-[#171717] outline-none placeholder:text-[#9aa1ac]"
+              />
+            </div>
+            <div className="flex flex-col gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  void handleSaveMeetingMetadata();
+                }}
+                disabled={isSavingMetadata}
+                className="inline-flex h-[44px] items-center justify-center rounded-[12px] bg-[#171717] px-5 text-[13px] font-semibold text-white transition disabled:cursor-not-allowed disabled:bg-[#9ca3af]"
+              >
+                {isSavingMetadata ? "保存中..." : "保存する"}
+              </button>
+              {metadataMessage ? (
+                <div className="text-center text-[12px] font-semibold text-[#2f8f56]">{metadataMessage}</div>
+              ) : null}
             </div>
           </div>
 

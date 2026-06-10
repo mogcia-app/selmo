@@ -22,6 +22,12 @@ import {
 } from "firebase/storage";
 
 import { assertFirebaseClient } from "@/lib/firebase/client";
+import { resolveCompanyId } from "@/lib/firebase/company";
+import {
+  createAudioProcessingJob,
+  saveSystemError,
+  updateAudioProcessingJob,
+} from "@/lib/firebase/operations";
 import type { MeetingOutcome, ProcessingStatus } from "@/types/domain";
 
 export type MeetingTranscriptionSegment = {
@@ -59,6 +65,7 @@ export type MeetingAiSummary = {
 
 export type MeetingRecord = {
   id: string;
+  companyId: string;
   userId: string;
   uploadedBy: string;
   customerName: string;
@@ -66,6 +73,7 @@ export type MeetingRecord = {
   customerType: "new" | "existing";
   recordedAt: Date | null;
   location: string;
+  memo: string;
   status: MeetingOutcome;
   audioFilePath: string | null;
   audioDownloadUrl: string | null;
@@ -106,11 +114,13 @@ export type MeetingRecord = {
 
 export type CreateMeetingInput = {
   userId: string;
+  companyId?: string | null;
   customerName: string;
   productType: string;
   customerType: "new" | "existing";
   recordedAt: Date;
   location?: string;
+  memo?: string;
   status: MeetingOutcome;
   audioFile?: File | null;
   audioDurationSec?: number | null;
@@ -123,6 +133,7 @@ export type UpdateMeetingMetadataInput = {
   customerType: "new" | "existing";
   recordedAt: Date | null;
   location?: string;
+  memo?: string;
   status: MeetingOutcome;
 };
 
@@ -130,8 +141,10 @@ export async function createMeeting(input: CreateMeetingInput) {
   const { firestore, firebaseStorage } = assertFirebaseClient();
   const meetingRef = doc(collection(firestore, "meetings"));
   const now = serverTimestamp();
+  const companyId = resolveCompanyId(input.companyId);
 
   await setDoc(meetingRef, {
+    companyId,
     userId: input.userId,
     uploadedBy: input.userId,
     customerName: input.customerName,
@@ -139,6 +152,7 @@ export async function createMeeting(input: CreateMeetingInput) {
     customerType: input.customerType,
     recordedAt: Timestamp.fromDate(input.recordedAt),
     location: input.location ?? "",
+    memo: input.memo ?? "",
     status: input.status,
     audioFilePath: null,
     audioDownloadUrl: null,
@@ -156,6 +170,15 @@ export async function createMeeting(input: CreateMeetingInput) {
   if (!input.audioFile) {
     return meetingRef.id;
   }
+
+  await createAudioProcessingJob({
+    companyId,
+    userId: input.userId,
+    meetingId: meetingRef.id,
+    fileName: input.audioFile.name,
+    audioDurationSec: input.audioDurationSec ?? null,
+    status: "uploading",
+  });
 
   const storagePath = buildMeetingAudioPath(
     input.userId,
@@ -186,13 +209,32 @@ export async function createMeeting(input: CreateMeetingInput) {
       processingStatus: "uploaded",
       updatedAt: serverTimestamp(),
     });
+    await updateAudioProcessingJob(meetingRef.id, {
+      status: "waiting",
+      errorMessage: null,
+    });
 
     return meetingRef.id;
   } catch (error) {
+    const message =
+      error instanceof Error ? error.message : "音声ファイルのアップロードに失敗しました。";
+
     await updateDoc(meetingRef, {
       processingStatus: "failed",
       updatedAt: serverTimestamp(),
     });
+    await updateAudioProcessingJob(meetingRef.id, {
+      status: "failed",
+      errorMessage: message,
+    }).catch(() => undefined);
+    await saveSystemError({
+      companyId,
+      userId: input.userId,
+      kind: "Storage",
+      message,
+      severity: "critical",
+      source: "createMeeting",
+    }).catch(() => undefined);
 
     throw error;
   }
@@ -411,6 +453,7 @@ export async function updateMeetingMetadata(
     customerType: input.customerType,
     recordedAt: input.recordedAt ? Timestamp.fromDate(input.recordedAt) : null,
     location: input.location ?? "",
+    memo: input.memo ?? "",
     status: input.status,
     updatedAt: serverTimestamp(),
   });
@@ -453,6 +496,7 @@ function uploadWithProgress(
 function mapMeetingRecord(id: string, data: Record<string, unknown>): MeetingRecord {
   return {
     id,
+    companyId: String(data.companyId ?? "default"),
     userId: String(data.userId ?? ""),
     uploadedBy: String(data.uploadedBy ?? ""),
     customerName: String(data.customerName ?? ""),
@@ -460,6 +504,7 @@ function mapMeetingRecord(id: string, data: Record<string, unknown>): MeetingRec
     customerType: (data.customerType as "new" | "existing") ?? "new",
     recordedAt: toDateValue(data.recordedAt),
     location: String(data.location ?? ""),
+    memo: String(data.memo ?? ""),
     status: (data.status as MeetingOutcome) ?? "considering",
     audioFilePath: toNullableString(data.audioFilePath),
     audioDownloadUrl: toNullableString(data.audioDownloadUrl),

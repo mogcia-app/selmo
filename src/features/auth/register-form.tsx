@@ -57,6 +57,7 @@ export function RegisterForm() {
         email,
         password,
         role,
+        companyName,
       });
 
       const nextPath =

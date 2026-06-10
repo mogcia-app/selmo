@@ -21,6 +21,7 @@ export default function MeetingsPage() {
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
   const [productFilter, setProductFilter] = useState("all");
+  const [dateFilter, setDateFilter] = useState("all");
 
   useEffect(() => {
     if (!profile?.uid || !profile.role) {
@@ -72,10 +73,11 @@ export default function MeetingsPage() {
       const matchesStatus = statusFilter === "all" || meeting.status === statusFilter;
       const matchesProduct =
         productFilter === "all" || meeting.productType === productFilter;
+      const matchesDate = dateFilter === "all" || isWithinDateFilter(meeting.recordedAt, dateFilter);
 
-      return matchesSearch && matchesStatus && matchesProduct;
+      return matchesSearch && matchesStatus && matchesProduct && matchesDate;
     });
-  }, [meetings, productFilter, search, statusFilter]);
+  }, [dateFilter, meetings, productFilter, search, statusFilter]);
 
   return (
     <main className="min-h-screen bg-[#f7f7f8] px-5 py-6 md:px-8 md:py-7">
@@ -85,27 +87,18 @@ export default function MeetingsPage() {
             打ち合わせ一覧
           </h1>
           <p className="mt-2 text-[16px] text-[#7a808c]">
-            すべての打ち合わせの予定・履歴を確認できます。
+            自分がアップロードした商談・通話の処理状況と分析結果を確認できます。
           </p>
         </div>
 
         <div className="flex items-start gap-3 self-start">
-          <button
-            type="button"
-            className="flex items-center gap-3 rounded-[14px] border border-[#e6e8ee] bg-white px-4 py-3 text-[14px] font-medium text-[#303544] shadow-[0_6px_20px_rgba(17,24,39,0.04)]"
+          <Link
+            href="/meetings/upload"
+            className="flex items-center gap-3 rounded-[14px] border border-[#f0c655] bg-white px-4 py-3 text-[14px] font-semibold text-[#303544] shadow-[0_6px_20px_rgba(17,24,39,0.04)]"
           >
-            <CalendarIcon />
-            <span>2024/05/01 〜 2024/05/31</span>
-            <ChevronDownIcon />
-          </button>
-          <button
-            type="button"
-            className="relative flex h-11 w-11 items-center justify-center rounded-[14px] border border-[#e6e8ee] bg-white text-[#6e7480] shadow-[0_6px_20px_rgba(17,24,39,0.04)]"
-            aria-label="通知"
-          >
-            <BellIcon />
-            <span className="absolute right-3 top-3 h-2.5 w-2.5 rounded-full bg-[#ffc400]" />
-          </button>
+            <UploadIcon />
+            <span>音声をアップロード</span>
+          </Link>
         </div>
       </section>
 
@@ -116,7 +109,7 @@ export default function MeetingsPage() {
       ) : null}
 
       <section className="rounded-[24px] border border-[#eceef4] bg-white p-4 shadow-[0_10px_28px_rgba(17,24,39,0.05)]">
-        <div className="mb-4 grid gap-3 xl:grid-cols-[1.5fr_0.75fr_0.75fr_0.42fr]">
+        <div className="mb-4 grid gap-3 xl:grid-cols-[1.35fr_0.68fr_0.68fr_0.68fr]">
           <label className="relative">
             <span className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-[#96a0ad]">
               <SearchIcon />
@@ -133,7 +126,7 @@ export default function MeetingsPage() {
             value={statusFilter}
             onChange={setStatusFilter}
             options={[
-              ["all", "すべてのステータス"],
+              ["all", "成約/失注すべて"],
               ["won", "成約"],
               ["considering", "検討中"],
               ["lost", "失注"],
@@ -149,13 +142,16 @@ export default function MeetingsPage() {
             ])}
           />
 
-          <button
-            type="button"
-            className="flex items-center justify-center gap-2 rounded-[14px] border border-[#e6e8ee] bg-white px-4 py-3 text-[14px] font-medium text-[#303544]"
-          >
-            <ExportIcon />
-            <span>エクスポート</span>
-          </button>
+          <SelectLike
+            value={dateFilter}
+            onChange={setDateFilter}
+            options={[
+              ["all", "すべての日付"],
+              ["thisMonth", "今月"],
+              ["lastMonth", "先月"],
+              ["last90Days", "直近90日"],
+            ]}
+          />
         </div>
 
         {isLoading ? (
@@ -176,8 +172,9 @@ export default function MeetingsPage() {
                     <th className="px-5 py-5">会社名 / 担当者</th>
                     <th className="px-5 py-5">商材</th>
                     <th className="px-5 py-5">目的</th>
-                    <th className="px-5 py-5">ステータス</th>
-                    <th className="px-5 py-5">打ち合わせ時間</th>
+                    <th className="px-5 py-5">成約/失注</th>
+                    <th className="px-5 py-5">処理状況</th>
+                    <th className="px-5 py-5">AIスコア</th>
                     <th className="px-5 py-5">メモ</th>
                     <th className="px-5 py-5">操作</th>
                   </tr>
@@ -219,12 +216,15 @@ export default function MeetingsPage() {
                         <StatusBadge value={meeting.status} />
                       </td>
                       <td className="px-5 py-4 align-top">
-                        {meeting.audioDurationSec
-                          ? `${Math.max(1, Math.round(meeting.audioDurationSec / 60))}分`
-                          : "—"}
+                        <ProcessingBadge value={meeting.processingStatus} />
                       </td>
+                      <td className="px-5 py-4 align-top text-[#7a808c]">集計準備中</td>
                       <td className="px-5 py-4 align-top text-[#7a808c]">
-                        <MemoIcon />
+                        {meeting.memo ? (
+                          <span className="line-clamp-2 max-w-[220px] leading-6">{meeting.memo}</span>
+                        ) : (
+                          <MemoIcon />
+                        )}
                       </td>
                       <td className="px-5 py-4 align-top">
                         <Link
@@ -243,23 +243,11 @@ export default function MeetingsPage() {
 
             <div className="mt-5 flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
               <div className="text-[14px] text-[#66707d]">
-                全 {filteredMeetings.length} 件中 1 - {Math.min(filteredMeetings.length, 10)} 件を表示
+                全 {filteredMeetings.length} 件を表示
               </div>
-
-              <div className="flex items-center gap-2">
-                <PageButton label="‹" />
-                <PageButton label="1" active />
-                <PageButton label="2" />
-                <PageButton label="3" />
-                <PageButton label="›" />
-              </div>
-
-              <div className="flex items-center gap-3 text-[14px] text-[#66707d]">
-                <span>表示件数</span>
-                <div className="rounded-[12px] border border-[#e6e8ee] bg-white px-3 py-2 text-[#303544]">
-                  10件
-                </div>
-              </div>
+              <Link href="/sales/dashboard" className="text-[14px] font-semibold text-[#8b6a00]">
+                ダッシュボードへ戻る
+              </Link>
             </div>
           </>
         )}
@@ -322,21 +310,6 @@ function StatusBadge({ value }: { value: MeetingRecord["status"] }) {
   );
 }
 
-function PageButton({ label, active = false }: { label: string; active?: boolean }) {
-  return (
-    <button
-      type="button"
-      className={`flex h-9 w-9 items-center justify-center rounded-[12px] border text-[14px] font-medium ${
-        active
-          ? "border-[#f2d980] bg-[#fff2c9] text-[#171717]"
-          : "border-[#e6e8ee] bg-white text-[#6d7482]"
-      }`}
-    >
-      {label}
-    </button>
-  );
-}
-
 function formatDate(date: Date) {
   return new Intl.DateTimeFormat("ja-JP", {
     year: "numeric",
@@ -344,6 +317,33 @@ function formatDate(date: Date) {
     day: "2-digit",
     weekday: "short",
   }).format(date);
+}
+
+function isWithinDateFilter(date: Date | null, filter: string) {
+  if (!date) {
+    return false;
+  }
+
+  const now = new Date();
+  const startOfThisMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+  const startOfLastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+  const startOfNextMonth = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+
+  if (filter === "thisMonth") {
+    return date >= startOfThisMonth && date < startOfNextMonth;
+  }
+
+  if (filter === "lastMonth") {
+    return date >= startOfLastMonth && date < startOfThisMonth;
+  }
+
+  if (filter === "last90Days") {
+    const threshold = new Date(now);
+    threshold.setDate(now.getDate() - 90);
+    return date >= threshold;
+  }
+
+  return true;
 }
 
 function formatTimeRange(date: Date, durationSec: number | null) {
@@ -389,21 +389,40 @@ function SearchIcon() {
   );
 }
 
-function CalendarIcon() {
+function UploadIcon() {
   return (
     <svg viewBox="0 0 24 24" aria-hidden="true" className="h-5 w-5 fill-none stroke-current stroke-[1.8]">
-      <rect x="3.75" y="5.5" width="16.5" height="14.5" rx="2.2" />
-      <path d="M7.5 3.75v3.5M16.5 3.75v3.5M3.75 9.2h16.5" />
+      <path d="M12 16V5" />
+      <path d="m8 9 4-4 4 4" />
+      <path d="M5 19h14" />
     </svg>
   );
 }
 
-function BellIcon() {
+function ProcessingBadge({ value }: { value: MeetingRecord["processingStatus"] }) {
+  const label =
+    value === "uploaded"
+      ? "処理待ち"
+      : value === "processing"
+        ? "処理中"
+        : value === "completed"
+          ? "完了"
+          : value === "failed"
+            ? "失敗"
+            : value === "uploading"
+              ? "アップロード中"
+              : "確認中";
+  const className =
+    value === "completed"
+      ? "bg-[#e9f9ee] text-[#30a65b]"
+      : value === "failed"
+        ? "bg-[#ffe8e8] text-[#ff5d47]"
+        : "bg-[#fff4df] text-[#b07c00]";
+
   return (
-    <svg viewBox="0 0 24 24" aria-hidden="true" className="h-5 w-5 fill-none stroke-current stroke-[1.8]">
-      <path d="M6.5 15.8V10.9a5.5 5.5 0 1 1 11 0v4.9l1.2 1.8H5.3l1.2-1.8Z" />
-      <path d="M10.2 19a2.2 2.2 0 0 0 3.6 0" />
-    </svg>
+    <span className={`inline-flex rounded-full px-3 py-1 text-[12px] font-semibold ${className}`}>
+      {label}
+    </span>
   );
 }
 
@@ -411,16 +430,6 @@ function ChevronDownIcon() {
   return (
     <svg viewBox="0 0 24 24" aria-hidden="true" className="h-4 w-4 fill-none stroke-current stroke-[2]">
       <path d="m6 9 6 6 6-6" />
-    </svg>
-  );
-}
-
-function ExportIcon() {
-  return (
-    <svg viewBox="0 0 24 24" aria-hidden="true" className="h-5 w-5 fill-none stroke-current stroke-[1.8]">
-      <path d="M12 4v10" />
-      <path d="m8 10 4 4 4-4" />
-      <path d="M5 19h14" />
     </svg>
   );
 }
