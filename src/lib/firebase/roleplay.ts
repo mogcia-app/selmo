@@ -4,10 +4,12 @@ import {
   Timestamp,
   addDoc,
   collection,
+  doc,
   getDocs,
   onSnapshot,
   query,
   serverTimestamp,
+  updateDoc,
   where,
   type DocumentData,
   type FirestoreError,
@@ -55,8 +57,25 @@ export type RoleplayResult = {
   summary: string;
   strengths: string[];
   improvements: string[];
+  improvementPhrases: string[];
   messages: RoleplayMessage[];
   createdAt: Date | null;
+};
+
+export type RoleplayAssignmentStatus = "assigned" | "completed";
+
+export type RoleplayAssignment = {
+  id: string;
+  companyId: string | null;
+  userId: string;
+  scenarioId: string;
+  scenarioTitle: string;
+  productName: string;
+  assignedBy: string;
+  reason: string;
+  status: RoleplayAssignmentStatus;
+  createdAt: Date | null;
+  completedAt: Date | null;
 };
 
 export type CreateRoleplayScenarioInput = {
@@ -72,6 +91,14 @@ export type CreateRoleplayScenarioInput = {
   evaluationCriteria: string[];
   difficulty: RoleplayDifficulty;
   createdBy: string;
+};
+
+export type CreateRoleplayAssignmentInput = {
+  companyId?: string | null;
+  userId: string;
+  scenario: RoleplayScenario;
+  assignedBy: string;
+  reason: string;
 };
 
 export function subscribeToRoleplayScenarios(
@@ -140,6 +167,34 @@ export function subscribeToRoleplayResults(
   };
 }
 
+export function subscribeToRoleplayAssignments(
+  input: { companyId?: string | null; userId?: string | null; isAdmin?: boolean },
+  callback: (assignments: RoleplayAssignment[]) => void,
+  onError?: (error: FirestoreError) => void,
+): Unsubscribe {
+  const { firestore } = assertFirebaseClient();
+  const assignmentsQuery = input.companyId
+    ? input.isAdmin
+      ? query(collection(firestore, "roleplayAssignments"), where("companyId", "==", input.companyId))
+      : query(
+          collection(firestore, "roleplayAssignments"),
+          where("companyId", "==", input.companyId),
+          where("userId", "==", input.userId ?? ""),
+        )
+    : collection(firestore, "roleplayAssignments");
+
+  return onSnapshot(
+    assignmentsQuery,
+    (snapshot) =>
+      callback(
+        snapshot.docs
+          .map(mapRoleplayAssignment)
+          .sort((left, right) => (right.createdAt?.getTime() ?? 0) - (left.createdAt?.getTime() ?? 0)),
+      ),
+    onError,
+  );
+}
+
 export async function createRoleplayScenario(input: CreateRoleplayScenarioInput) {
   const { firestore } = assertFirebaseClient();
 
@@ -174,9 +229,29 @@ export async function saveRoleplayResult(input: Omit<RoleplayResult, "id" | "cre
     summary: input.summary,
     strengths: input.strengths,
     improvements: input.improvements,
+    improvementPhrases: input.improvementPhrases,
     messages: input.messages,
     createdAt: serverTimestamp(),
   });
+
+  const assignmentsSnapshot = await getDocs(
+    query(
+      collection(firestore, "roleplayAssignments"),
+      where("companyId", "==", input.companyId ?? null),
+      where("userId", "==", input.userId),
+      where("scenarioId", "==", input.scenarioId),
+      where("status", "==", "assigned"),
+    ),
+  ).catch(() => null);
+
+  await Promise.all(
+    assignmentsSnapshot?.docs.map((assignment) =>
+      updateDoc(doc(firestore, "roleplayAssignments", assignment.id), {
+        status: "completed",
+        completedAt: serverTimestamp(),
+      }),
+    ) ?? [],
+  ).catch(() => undefined);
 
   await saveSalesActivityEvent({
     companyId: input.companyId,
@@ -198,6 +273,23 @@ export async function saveRoleplayResult(input: Omit<RoleplayResult, "id" | "cre
       score: input.score,
     },
   }).catch(() => undefined);
+}
+
+export async function createRoleplayAssignment(input: CreateRoleplayAssignmentInput) {
+  const { firestore } = assertFirebaseClient();
+
+  await addDoc(collection(firestore, "roleplayAssignments"), {
+    companyId: input.companyId ?? null,
+    userId: input.userId,
+    scenarioId: input.scenario.id,
+    scenarioTitle: input.scenario.title,
+    productName: input.scenario.productName,
+    assignedBy: input.assignedBy,
+    reason: input.reason,
+    status: "assigned",
+    createdAt: serverTimestamp(),
+    completedAt: null,
+  });
 }
 
 function mapRoleplayScenario(snapshot: QueryDocumentSnapshot<DocumentData>): RoleplayScenario {
@@ -237,8 +329,28 @@ function mapRoleplayResult(snapshot: QueryDocumentSnapshot<DocumentData>): Rolep
     summary: readString(data.summary),
     strengths: readStringArray(data.strengths),
     improvements: readStringArray(data.improvements),
+    improvementPhrases: readStringArray(data.improvementPhrases),
     messages: readMessages(data.messages),
     createdAt: readDate(data.createdAt),
+  };
+}
+
+function mapRoleplayAssignment(snapshot: QueryDocumentSnapshot<DocumentData>): RoleplayAssignment {
+  const data = snapshot.data();
+  const status = data.status === "completed" ? "completed" : "assigned";
+
+  return {
+    id: snapshot.id,
+    companyId: readNullableString(data.companyId),
+    userId: readString(data.userId),
+    scenarioId: readString(data.scenarioId),
+    scenarioTitle: readString(data.scenarioTitle, "ロープレ課題"),
+    productName: readString(data.productName),
+    assignedBy: readString(data.assignedBy),
+    reason: readString(data.reason),
+    status,
+    createdAt: readDate(data.createdAt),
+    completedAt: readDate(data.completedAt),
   };
 }
 

@@ -5,6 +5,7 @@ import {
   saveAiUsageLog,
   saveSystemErrorLog,
 } from "@/lib/server/operational-logs";
+import { buildAnalysisContextPrompt, loadAnalysisContext } from "@/lib/server/analysis-context";
 
 export const runtime = "nodejs";
 
@@ -13,12 +14,21 @@ const remoteFetchTimeoutMs = 10 * 60 * 1000;
 type RequestBody = {
   companyId?: string | null;
   userId?: string | null;
+  productName?: string | null;
   transcriptText?: string;
 };
 
 type SummaryResponse = {
   overview: string;
   bullets: string[];
+  manualCompliance?: {
+    mode: "manual" | "generic";
+    score: number | null;
+    matchedCriteria: string[];
+    missingCriteria: string[];
+    productNotes: string[];
+    improvementPhrases: string[];
+  };
 };
 
 export async function POST(
@@ -51,7 +61,11 @@ export async function POST(
       );
     }
 
-    const result = await summarizeTranscript(body.transcriptText);
+    const analysisContext = await loadAnalysisContext({
+      companyId: body.companyId,
+      productName: body.productName,
+    });
+    const result = await summarizeTranscript(body.transcriptText, analysisContext);
     await saveAiUsageLog({
       companyId: body.companyId,
       userId: body.userId,
@@ -100,8 +114,12 @@ export async function POST(
   }
 }
 
-async function summarizeTranscript(transcriptText: string) {
+async function summarizeTranscript(
+  transcriptText: string,
+  analysisContext: Awaited<ReturnType<typeof loadAnalysisContext>>,
+) {
   const model = "gpt-4o-mini";
+  const contextPrompt = buildAnalysisContextPrompt(analysisContext);
   const response = await fetchWithTimeout("https://api.openai.com/v1/chat/completions", {
     method: "POST",
     headers: {
@@ -125,8 +143,21 @@ async function summarizeTranscript(transcriptText: string) {
                 minItems: 3,
                 maxItems: 4,
               },
+              manualCompliance: {
+                type: "object",
+                additionalProperties: false,
+                properties: {
+                  mode: { type: "string", enum: ["manual", "generic"] },
+                  score: { type: ["number", "null"] },
+                  matchedCriteria: { type: "array", items: { type: "string" } },
+                  missingCriteria: { type: "array", items: { type: "string" } },
+                  productNotes: { type: "array", items: { type: "string" } },
+                  improvementPhrases: { type: "array", items: { type: "string" } },
+                },
+                required: ["mode", "score", "matchedCriteria", "missingCriteria", "productNotes", "improvementPhrases"],
+              },
             },
-            required: ["overview", "bullets"],
+            required: ["overview", "bullets", "manualCompliance"],
           },
         },
       },
@@ -134,11 +165,22 @@ async function summarizeTranscript(transcriptText: string) {
         {
           role: "system",
           content:
-            "あなたは営業商談の文字起こしを要約するアシスタントです。全体の要約は2〜4文で簡潔にまとめ、ポイントは3〜4個の短い箇条書き向け文で返してください。情報を捏造せず、日本語で返してください。",
+            [
+              "あなたは営業商談の文字起こしを分析するAIコーチです。",
+              "全体要約は2〜4文で簡潔にまとめ、ポイントは3〜4個の短い箇条書き向け文で返してください。",
+              "会社の営業成功基準や商材情報がある場合は、それを最優先して評価してください。",
+              "マニュアルがある場合は mode=manual、ない場合は mode=generic にしてください。",
+              "score は0〜100で、基準に対する準拠度を表します。根拠が薄い場合はnullにしてください。",
+              "改善フレーズは次回商談でそのまま使える自然な日本語にしてください。",
+              "情報を捏造せず、日本語で返してください。",
+            ].join("\n"),
         },
         {
           role: "user",
-          content: `以下の商談文字起こしを要約してください。\n\n${transcriptText}`,
+          content: [
+            contextPrompt ? `以下の基準を使って分析してください。\n\n${contextPrompt}` : "会社固有の基準は未登録です。汎用的な営業観点で分析してください。",
+            `以下の商談文字起こしを分析してください。\n\n${transcriptText}`,
+          ].join("\n\n"),
         },
       ],
       temperature: 0.3,
@@ -189,12 +231,26 @@ async function summarizeTranscript(transcriptText: string) {
       bullets: Array.isArray(summary.bullets)
         ? summary.bullets.map((bullet) => bullet.trim()).filter(Boolean).slice(0, 4)
         : [],
+      manualCompliance: {
+        mode: summary.manualCompliance?.mode === "manual" ? "manual" : "generic",
+        score: typeof summary.manualCompliance?.score === "number" ? summary.manualCompliance.score : null,
+        matchedCriteria: readStringArray(summary.manualCompliance?.matchedCriteria).slice(0, 6),
+        missingCriteria: readStringArray(summary.manualCompliance?.missingCriteria).slice(0, 6),
+        productNotes: readStringArray(summary.manualCompliance?.productNotes).slice(0, 6),
+        improvementPhrases: readStringArray(summary.manualCompliance?.improvementPhrases).slice(0, 5),
+      },
     },
     usage: {
       inputTokens: parsed.usage?.prompt_tokens ?? null,
       outputTokens: parsed.usage?.completion_tokens ?? null,
     },
   };
+}
+
+function readStringArray(value: unknown) {
+  return Array.isArray(value)
+    ? value.map((item) => (typeof item === "string" ? item.trim() : "")).filter(Boolean)
+    : [];
 }
 
 function mapOpenAiErrorMessage(rawMessage: string) {

@@ -106,6 +106,17 @@ function ProductDialog({
   onClose: () => void;
 }) {
   const [name, setName] = useState(product?.name ?? "");
+  const [description, setDescription] = useState(product?.description ?? "");
+  const [targetCustomer, setTargetCustomer] = useState(product?.targetCustomer ?? "");
+  const [painPoints, setPainPoints] = useState((product?.painPoints ?? []).join("\n"));
+  const [valueProposition, setValueProposition] = useState(product?.valueProposition ?? "");
+  const [pricing, setPricing] = useState(product?.pricing ?? "");
+  const [competitors, setCompetitors] = useState((product?.competitors ?? []).join("\n"));
+  const [commonObjections, setCommonObjections] = useState((product?.commonObjections ?? []).join("\n"));
+  const [successTalk, setSuccessTalk] = useState((product?.successTalk ?? []).join("\n"));
+  const [ngTalk, setNgTalk] = useState((product?.ngTalk ?? []).join("\n"));
+  const [sourceUrl, setSourceUrl] = useState(product?.sourceUrl ?? "");
+  const [sourceSummary, setSourceSummary] = useState(product?.sourceSummary ?? "");
   const [logoFile, setLogoFile] = useState<File | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -124,7 +135,27 @@ function ProductDialog({
     setIsSaving(true);
     setError(null);
     try {
-      const productId = mode === "create" ? await createKnowledgeProduct({ name: nextName, userId, companyId }) : product?.id;
+      const analyzedSummary =
+        sourceUrl.trim() && sourceUrl.trim() !== product?.sourceUrl && !sourceSummary.trim()
+          ? await analyzeProductUrl(sourceUrl.trim())
+          : sourceSummary.trim();
+      const payload = {
+        name: nextName,
+        userId,
+        companyId,
+        description: description.trim(),
+        targetCustomer: targetCustomer.trim(),
+        painPoints: splitLines(painPoints),
+        valueProposition: valueProposition.trim(),
+        pricing: pricing.trim(),
+        competitors: splitLines(competitors),
+        commonObjections: splitLines(commonObjections),
+        successTalk: splitLines(successTalk),
+        ngTalk: splitLines(ngTalk),
+        sourceUrl: sourceUrl.trim(),
+        sourceSummary: analyzedSummary,
+      };
+      const productId = mode === "create" ? await createKnowledgeProduct(payload) : product?.id;
       if (!productId) throw new Error("商材IDを確認できませんでした。");
       let logoUrl = product?.logoUrl ?? "";
       let logoStoragePath = product?.logoStoragePath ?? "";
@@ -133,7 +164,7 @@ function ProductDialog({
         logoUrl = logo.url;
         logoStoragePath = logo.storagePath;
       }
-      await updateKnowledgeProduct({ id: productId, name: nextName, logoUrl, logoStoragePath });
+      await updateKnowledgeProduct({ id: productId, ...payload, logoUrl, logoStoragePath });
       onClose();
     } catch (nextError) {
       setError(nextError instanceof Error ? nextError.message : "商材の保存に失敗しました。");
@@ -144,20 +175,21 @@ function ProductDialog({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#171717]/24 px-4 py-6">
-      <div className="w-full max-w-[520px] rounded-[24px] border border-[#eceef4] bg-white p-6 shadow-[0_24px_70px_rgba(17,24,39,0.18)]">
+      <div className="max-h-[92vh] w-full max-w-[860px] overflow-y-auto rounded-[24px] border border-[#eceef4] bg-white p-6 shadow-[0_24px_70px_rgba(17,24,39,0.18)]">
         <div className="flex items-start justify-between gap-4">
           <div>
             <h2 className="text-[22px] font-black text-[#171717]">{mode === "create" ? "商材追加" : "商材編集"}</h2>
-            <p className="mt-1 text-[13px] text-[#7a808c]">商材名とロゴPNGを設定できます。</p>
+            <p className="mt-1 text-[13px] text-[#7a808c]">商材情報、競合、反論、分析用URLを設定できます。</p>
           </div>
           <button type="button" onClick={onClose} className="text-[24px] leading-none text-[#9aa1ac]" aria-label="閉じる">×</button>
         </div>
         {error ? <div className="mt-4 rounded-[14px] border border-[#f4d4d4] bg-[#fff8f8] px-4 py-3 text-[13px] font-medium text-[#b4232a]">{error}</div> : null}
-        <label className="mt-5 block">
+        <div className="mt-5 grid gap-4 md:grid-cols-2">
+        <label className="block">
           <span className="text-[13px] font-bold text-[#343b48]">商材名</span>
           <input value={name} onChange={(event) => setName(event.target.value)} className="mt-2 h-12 w-full rounded-[14px] border border-[#e4e8ef] bg-white px-4 text-[14px] outline-none focus:border-[#e0bd4b]" />
         </label>
-        <label className="mt-4 block">
+        <label className="block">
           <span className="text-[13px] font-bold text-[#343b48]">ロゴPNG</span>
           <span className="mt-2 flex min-h-12 cursor-pointer items-center justify-between gap-3 rounded-[14px] border border-dashed border-[#d7dde8] bg-[#fcfcfd] px-4 py-3 text-[13px] text-[#596273]">
             <span className="min-w-0 truncate">{logoFile ? logoFile.name : product?.logoUrl ? "現在のロゴを使用中" : "PNGファイルを選択"}</span>
@@ -165,6 +197,40 @@ function ProductDialog({
           </span>
           <input type="file" accept="image/png,.png" onChange={(event) => setLogoFile(event.target.files?.[0] ?? null)} className="sr-only" />
         </label>
+        <Field label="商品URL">
+          <input value={sourceUrl} onChange={(event) => setSourceUrl(event.target.value)} className={inputClassName} placeholder="https://..." />
+        </Field>
+        <Field label="ターゲット顧客">
+          <input value={targetCustomer} onChange={(event) => setTargetCustomer(event.target.value)} className={inputClassName} placeholder="例：中小企業の管理部門" />
+        </Field>
+        <Field label="商品概要" className="md:col-span-2">
+          <textarea value={description} onChange={(event) => setDescription(event.target.value)} className={textareaClassName} />
+        </Field>
+        <Field label="URL解析メモ" className="md:col-span-2">
+          <textarea value={sourceSummary} onChange={(event) => setSourceSummary(event.target.value)} className={textareaClassName} placeholder="URLを入力して保存すると、未入力の場合のみ簡易解析して保存します。" />
+        </Field>
+        <Field label="顧客課題">
+          <textarea value={painPoints} onChange={(event) => setPainPoints(event.target.value)} className={textareaClassName} placeholder="1行に1つ" />
+        </Field>
+        <Field label="価値訴求">
+          <textarea value={valueProposition} onChange={(event) => setValueProposition(event.target.value)} className={textareaClassName} />
+        </Field>
+        <Field label="料金">
+          <textarea value={pricing} onChange={(event) => setPricing(event.target.value)} className={textareaClassName} />
+        </Field>
+        <Field label="競合">
+          <textarea value={competitors} onChange={(event) => setCompetitors(event.target.value)} className={textareaClassName} placeholder="1行に1つ" />
+        </Field>
+        <Field label="よくある反論">
+          <textarea value={commonObjections} onChange={(event) => setCommonObjections(event.target.value)} className={textareaClassName} placeholder="1行に1つ" />
+        </Field>
+        <Field label="成功トーク">
+          <textarea value={successTalk} onChange={(event) => setSuccessTalk(event.target.value)} className={textareaClassName} placeholder="1行に1つ" />
+        </Field>
+        <Field label="NGトーク" className="md:col-span-2">
+          <textarea value={ngTalk} onChange={(event) => setNgTalk(event.target.value)} className={textareaClassName} placeholder="1行に1つ" />
+        </Field>
+        </div>
         <div className="mt-6 flex justify-end gap-3">
           <button type="button" onClick={onClose} className="h-11 rounded-[14px] border border-[#e4e8ef] bg-white px-5 text-[14px] font-bold text-[#596273]">キャンセル</button>
           <button type="button" onClick={() => void handleSave()} disabled={isSaving} className="h-11 rounded-[14px] border border-[#f0c655] bg-[#ffd84d] px-6 text-[14px] font-black text-[#171717] disabled:opacity-60">{isSaving ? "保存中" : "保存する"}</button>
@@ -190,9 +256,39 @@ function Info({ label, value }: { label: string; value: string }) {
   );
 }
 
+const inputClassName = "mt-2 h-12 w-full rounded-[14px] border border-[#e4e8ef] bg-white px-4 text-[14px] outline-none focus:border-[#e0bd4b]";
+const textareaClassName = "mt-2 min-h-[104px] w-full resize-y rounded-[14px] border border-[#e4e8ef] bg-white px-4 py-3 text-[14px] leading-7 outline-none focus:border-[#e0bd4b]";
+
+function Field({ label, className = "", children }: { label: string; className?: string; children: React.ReactNode }) {
+  return (
+    <label className={className}>
+      <span className="text-[13px] font-bold text-[#343b48]">{label}</span>
+      {children}
+    </label>
+  );
+}
+
 function findTab(items: Array<{ tabTitle: string; title: string }>, candidates: string[]) {
   const item = items.find((candidate) => candidates.includes(candidate.tabTitle));
   return item?.title ?? "集計準備中";
+}
+
+function splitLines(value: string) {
+  return value.split(/\r?\n/).map((item) => item.trim()).filter(Boolean);
+}
+
+async function analyzeProductUrl(url: string) {
+  try {
+    const response = await fetch("/api/products/analyze-url", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ url }),
+    });
+    const payload = (await response.json()) as { summary?: string };
+    return payload.summary?.trim() ?? "";
+  } catch {
+    return "";
+  }
 }
 
 function ErrorBox({ message }: { message: string }) {

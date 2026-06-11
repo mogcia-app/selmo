@@ -62,6 +62,18 @@ export type KnowledgeProduct = {
   id: string;
   companyId: string | null;
   name: string;
+  description: string;
+  targetCustomer: string;
+  painPoints: string[];
+  valueProposition: string;
+  pricing: string;
+  competitors: string[];
+  commonObjections: string[];
+  successTalk: string[];
+  ngTalk: string[];
+  sourceUrl: string;
+  sourceSummary: string;
+  analyzedAt: Date | null;
   logoUrl: string;
   logoStoragePath: string;
   knowledgeCount: number;
@@ -129,6 +141,20 @@ export type KnowledgeSearchHistory = {
   id: string;
   term: string;
   searchedAt: Date | null;
+};
+
+export type KnowledgeProductAnalysisInput = {
+  description?: string;
+  targetCustomer?: string;
+  painPoints?: string[];
+  valueProposition?: string;
+  pricing?: string;
+  competitors?: string[];
+  commonObjections?: string[];
+  successTalk?: string[];
+  ngTalk?: string[];
+  sourceUrl?: string;
+  sourceSummary?: string;
 };
 
 export function subscribeToKnowledgeCategories(
@@ -335,11 +361,23 @@ export async function createKnowledgeCategory(input: { title: string; descriptio
   });
 }
 
-export async function createKnowledgeProduct(input: { name: string; logoUrl?: string; logoStoragePath?: string; userId: string; companyId?: string | null }) {
+export async function createKnowledgeProduct(input: { name: string; logoUrl?: string; logoStoragePath?: string; userId: string; companyId?: string | null } & KnowledgeProductAnalysisInput) {
   const { firestore } = assertFirebaseClient();
   const productRef = await addDoc(collection(firestore, "knowledgeProducts"), {
     companyId: input.companyId ?? null,
     name: input.name,
+    description: input.description ?? "",
+    targetCustomer: input.targetCustomer ?? "",
+    painPoints: input.painPoints ?? [],
+    valueProposition: input.valueProposition ?? "",
+    pricing: input.pricing ?? "",
+    competitors: input.competitors ?? [],
+    commonObjections: input.commonObjections ?? [],
+    successTalk: input.successTalk ?? [],
+    ngTalk: input.ngTalk ?? [],
+    sourceUrl: input.sourceUrl ?? "",
+    sourceSummary: input.sourceSummary ?? "",
+    analyzedAt: input.sourceSummary ? serverTimestamp() : null,
     logoUrl: input.logoUrl ?? "",
     logoStoragePath: input.logoStoragePath ?? "",
     knowledgeCount: 0,
@@ -352,13 +390,25 @@ export async function createKnowledgeProduct(input: { name: string; logoUrl?: st
   return productRef.id;
 }
 
-export async function updateKnowledgeProduct(input: { id: string; name: string; logoUrl?: string; logoStoragePath?: string }) {
+export async function updateKnowledgeProduct(input: { id: string; name: string; logoUrl?: string; logoStoragePath?: string } & KnowledgeProductAnalysisInput) {
   const { firestore } = assertFirebaseClient();
 
   await setDoc(
     doc(firestore, "knowledgeProducts", input.id),
     {
       name: input.name,
+      description: input.description ?? "",
+      targetCustomer: input.targetCustomer ?? "",
+      painPoints: input.painPoints ?? [],
+      valueProposition: input.valueProposition ?? "",
+      pricing: input.pricing ?? "",
+      competitors: input.competitors ?? [],
+      commonObjections: input.commonObjections ?? [],
+      successTalk: input.successTalk ?? [],
+      ngTalk: input.ngTalk ?? [],
+      sourceUrl: input.sourceUrl ?? "",
+      sourceSummary: input.sourceSummary ?? "",
+      analyzedAt: input.sourceSummary ? serverTimestamp() : null,
       logoUrl: input.logoUrl ?? "",
       logoStoragePath: input.logoStoragePath ?? "",
       updatedAt: serverTimestamp(),
@@ -632,6 +682,18 @@ function mapKnowledgeProduct(snapshot: QueryDocumentSnapshot<DocumentData>): Kno
     id: snapshot.id,
     companyId: readNullableString(data.companyId),
     name: readString(data.name, "未設定商品"),
+    description: readString(data.description),
+    targetCustomer: readString(data.targetCustomer),
+    painPoints: readStringArray(data.painPoints),
+    valueProposition: readString(data.valueProposition),
+    pricing: readString(data.pricing),
+    competitors: readStringArray(data.competitors),
+    commonObjections: readStringArray(data.commonObjections),
+    successTalk: readStringArray(data.successTalk),
+    ngTalk: readStringArray(data.ngTalk),
+    sourceUrl: readString(data.sourceUrl),
+    sourceSummary: readString(data.sourceSummary),
+    analyzedAt: readDate(data.analyzedAt),
     logoUrl: readString(data.logoUrl),
     logoStoragePath: readString(data.logoStoragePath),
     knowledgeCount: readNumber(data.knowledgeCount),
@@ -677,6 +739,12 @@ function mapSearchHistory(snapshot: QueryDocumentSnapshot<DocumentData>): Knowle
 
 function readString(value: unknown, fallback = "") {
   return typeof value === "string" ? value : fallback;
+}
+
+function readStringArray(value: unknown) {
+  return Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === "string" && Boolean(item.trim()))
+    : [];
 }
 
 function readNullableString(value: unknown) {

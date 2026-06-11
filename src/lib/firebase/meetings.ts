@@ -64,6 +64,14 @@ export type MeetingConversationLog = {
 export type MeetingAiSummary = {
   overview: string;
   bullets: string[];
+  manualCompliance?: {
+    mode: "manual" | "generic";
+    score: number | null;
+    matchedCriteria: string[];
+    missingCriteria: string[];
+    productNotes: string[];
+    improvementPhrases: string[];
+  };
 };
 
 export type MeetingRecord = {
@@ -918,5 +926,28 @@ function toAiSummary(value: unknown): MeetingAiSummary | null {
   return {
     overview,
     bullets: bullets.filter((item): item is string => typeof item === "string"),
+    manualCompliance: toManualCompliance((value as { manualCompliance?: unknown }).manualCompliance),
   };
+}
+
+function toManualCompliance(value: unknown): MeetingAiSummary["manualCompliance"] {
+  if (!value || typeof value !== "object") {
+    return undefined;
+  }
+
+  const mode = (value as { mode?: unknown }).mode === "manual" ? "manual" : "generic";
+  const score = (value as { score?: unknown }).score;
+
+  return {
+    mode,
+    score: typeof score === "number" ? score : null,
+    matchedCriteria: readStringArray((value as { matchedCriteria?: unknown }).matchedCriteria),
+    missingCriteria: readStringArray((value as { missingCriteria?: unknown }).missingCriteria),
+    productNotes: readStringArray((value as { productNotes?: unknown }).productNotes),
+    improvementPhrases: readStringArray((value as { improvementPhrases?: unknown }).improvementPhrases),
+  };
+}
+
+function readStringArray(value: unknown) {
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
 }

@@ -67,7 +67,7 @@ export default function AdminMemberDetailPage() {
               )}
             </Panel>
 
-            <Panel title="AI分析結果一覧">
+            <Panel title="salesの分析結果">
               {userMeetings.some((meeting) => meeting.aiSummary) ? (
                 <div className="space-y-3">
                   {userMeetings.filter((meeting) => meeting.aiSummary).map((meeting) => (
@@ -78,7 +78,7 @@ export default function AdminMemberDetailPage() {
                   ))}
                 </div>
               ) : (
-                <EmptyState title="AI分析はまだありません" body="商談のAI要約が完了すると、ここに表示されます。" />
+                <EmptyState title="salesの分析結果はまだありません" body="商談分析が完了すると、指導用レビューとしてここに表示されます。" />
               )}
             </Panel>
 

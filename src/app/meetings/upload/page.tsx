@@ -159,6 +159,7 @@ export default function MeetingUploadPage() {
               transcriptText: normalizedTranscriptText,
               companyId: profile.companyId,
               userId: profile.uid,
+              productName: productType,
             })
           : null;
 
@@ -673,11 +674,13 @@ async function generatePastedTranscriptInsights({
   transcriptText,
   companyId,
   userId,
+  productName,
 }: {
   meetingId: string;
   transcriptText: string;
   companyId?: string | null;
   userId: string;
+  productName?: string | null;
 }) {
   const segment = {
     startSec: 0,
@@ -752,6 +755,7 @@ async function generatePastedTranscriptInsights({
       body: JSON.stringify({
         companyId,
         userId,
+        productName,
         transcriptText,
       }),
     });

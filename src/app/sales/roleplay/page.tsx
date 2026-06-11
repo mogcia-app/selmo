@@ -120,6 +120,7 @@ export default function SalesRoleplayPage() {
         summary: evaluation.summary,
         strengths: evaluation.strengths,
         improvements: evaluation.improvements,
+        improvementPhrases: evaluation.improvementPhrases,
         messages,
       });
       router.push("/sales/roleplay/results");
@@ -254,7 +255,22 @@ function evaluateRoleplay(scenario: RoleplayScenario, messages: RoleplayMessage[
       "導入後の具体的な成果や事例をもう少し入れると説得力が上がります。",
       "次回は顧客の予算感や決裁プロセスも確認してみましょう。",
     ],
+    improvementPhrases: buildImprovementPhrases(scenario, salesText),
   };
+}
+
+function buildImprovementPhrases(scenario: RoleplayScenario, salesText: string) {
+  const phrases = [
+    `「${scenario.productName || "このご提案"}で、今いちばん解決したい課題はどこですか？」`,
+    "「費用だけでなく、止まった時の損失や対応時間も含めて一緒に比較させてください。」",
+    "「次回までに、判断に必要な条件を3つに絞って整理してお持ちします。」",
+  ];
+
+  if (!salesText.includes("予算") && !salesText.includes("費用") && !salesText.includes("金額")) {
+    phrases.unshift("「ご予算感として、月額でどの範囲なら検討しやすいでしょうか？」");
+  }
+
+  return phrases.slice(0, 3);
 }
 
 function RoleplayHeader({ activeStep }: { activeStep: "scenario" | "practice" | "results" }) {

@@ -6,9 +6,12 @@ import { FormEvent, useEffect, useMemo, useState } from "react";
 
 import { useAuth } from "@/features/auth/auth-provider";
 import { subscribeToKnowledgeProducts, type KnowledgeProduct } from "@/lib/firebase/knowledge";
+import { subscribeToMeetings, type MeetingRecord } from "@/lib/firebase/meetings";
 import {
   createRoleplayScenario,
+  subscribeToRoleplayAssignments,
   subscribeToRoleplayScenarios,
+  type RoleplayAssignment,
   type RoleplayDifficulty,
   type RoleplayScenario,
 } from "@/lib/firebase/roleplay";
@@ -18,6 +21,8 @@ export default function SalesRoleplayScenariosPage() {
   const userId = profile?.uid;
   const canManage = profile?.role === "admin";
   const [scenarios, setScenarios] = useState<RoleplayScenario[]>([]);
+  const [assignments, setAssignments] = useState<RoleplayAssignment[]>([]);
+  const [meetings, setMeetings] = useState<MeetingRecord[]>([]);
   const [products, setProducts] = useState<KnowledgeProduct[]>([]);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [activeScenarioId, setActiveScenarioId] = useState("");
@@ -32,13 +37,32 @@ export default function SalesRoleplayScenariosPage() {
     const handleError = (nextError: FirebaseError) => setError(nextError.message);
     const unsubscribers = [
       subscribeToRoleplayScenarios(profile.companyId, setScenarios, handleError),
+      subscribeToRoleplayAssignments(
+        { companyId: profile.companyId, userId: profile.uid, isAdmin: false },
+        setAssignments,
+        handleError,
+      ),
+      subscribeToMeetings(
+        { role: profile.role, userId: profile.uid, companyId: profile.companyId },
+        setMeetings,
+        handleError,
+      ),
       subscribeToKnowledgeProducts(profile.companyId, setProducts, handleError),
     ];
 
     return () => {
       unsubscribers.forEach((unsubscribe) => unsubscribe());
     };
-  }, [profile?.companyId]);
+  }, [profile?.companyId, profile?.role, profile?.uid]);
+
+  const activeAssignments = useMemo(
+    () => assignments.filter((assignment) => assignment.status === "assigned"),
+    [assignments],
+  );
+  const recommendedScenarios = useMemo(
+    () => buildRecommendedScenarios(meetings, scenarios),
+    [meetings, scenarios],
+  );
 
   return (
     <main className="min-h-screen overflow-x-hidden bg-[#f7f8fb] px-5 py-5">
@@ -72,6 +96,37 @@ export default function SalesRoleplayScenariosPage() {
                 </button>
               ) : null}
             </div>
+
+            {activeAssignments.length > 0 ? (
+              <section className="mt-6 rounded-[20px] border border-[#f0c655] bg-[#fffaf0] px-4 py-4">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <p className="text-[12px] font-black text-[#8a6500]">ASSIGNED</p>
+                    <h3 className="mt-1 text-[18px] font-black text-[#171717]">管理者からの課題</h3>
+                  </div>
+                  <span className="rounded-full bg-white px-3 py-1 text-[12px] font-black text-[#8a6500]">
+                    {activeAssignments.length}件
+                  </span>
+                </div>
+                <div className="mt-3 grid gap-3 md:grid-cols-2">
+                  {activeAssignments.slice(0, 4).map((assignment) => (
+                    <AssignmentCard key={assignment.id} assignment={assignment} />
+                  ))}
+                </div>
+              </section>
+            ) : null}
+
+            {recommendedScenarios.length > 0 ? (
+              <section className="mt-6 rounded-[20px] border border-[#e6eaf0] bg-[#fcfcfd] px-4 py-4">
+                <p className="text-[12px] font-black text-[#8a6500]">RECOMMENDED</p>
+                <h3 className="mt-1 text-[18px] font-black text-[#171717]">商談分析からの推奨ロープレ</h3>
+                <div className="mt-3 grid gap-3 md:grid-cols-2">
+                  {recommendedScenarios.map(({ scenario, reason }) => (
+                    <RecommendationCard key={scenario.id} scenario={scenario} reason={reason} />
+                  ))}
+                </div>
+              </section>
+            ) : null}
 
             {scenarios.length > 0 ? (
               <div className="mt-6 grid gap-3 md:grid-cols-2">
@@ -331,6 +386,38 @@ function InfoBlock({ label, value }: { label: string; value: string }) {
   );
 }
 
+function AssignmentCard({ assignment }: { assignment: RoleplayAssignment }) {
+  return (
+    <Link
+      href={`/sales/roleplay?scenarioId=${encodeURIComponent(assignment.scenarioId)}`}
+      className="block rounded-[16px] border border-[#f4df94] bg-white px-4 py-3 transition hover:border-[#f0c655]"
+    >
+      <div className="text-[14px] font-black text-[#171717]">{assignment.scenarioTitle}</div>
+      <p className="mt-1 line-clamp-2 text-[12px] leading-5 text-[#7a5b00]">
+        {assignment.reason || "管理者から練習課題として割り当てられています。"}
+      </p>
+      <div className="mt-3 text-[12px] font-black text-[#8a6500]">開始する</div>
+    </Link>
+  );
+}
+
+function RecommendationCard({ scenario, reason }: { scenario: RoleplayScenario; reason: string }) {
+  return (
+    <Link
+      href={`/sales/roleplay?scenarioId=${encodeURIComponent(scenario.id)}`}
+      className="block rounded-[16px] border border-[#e6eaf0] bg-white px-4 py-3 transition hover:border-[#f0c655]"
+    >
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="truncate text-[14px] font-black text-[#171717]">{scenario.title}</div>
+          <p className="mt-1 line-clamp-2 text-[12px] leading-5 text-[#596273]">{reason}</p>
+        </div>
+        <DifficultyBadge difficulty={scenario.difficulty} />
+      </div>
+    </Link>
+  );
+}
+
 function DifficultyBadge({ difficulty }: { difficulty: RoleplayDifficulty }) {
   const label = difficulty === "easy" ? "やさしい" : difficulty === "hard" ? "難しい" : "標準";
   return <span className="shrink-0 rounded-full bg-[#fff3cf] px-2.5 py-1 text-[11px] font-black text-[#9c7600]">{label}</span>;
@@ -338,6 +425,62 @@ function DifficultyBadge({ difficulty }: { difficulty: RoleplayDifficulty }) {
 
 function Pill({ children }: { children: React.ReactNode }) {
   return <span className="rounded-full bg-[#f1f2f5] px-2.5 py-1 text-[11px] font-bold text-[#596273]">{children}</span>;
+}
+
+function buildRecommendedScenarios(meetings: MeetingRecord[], scenarios: RoleplayScenario[]) {
+  const analyzedMeetings = meetings
+    .filter((meeting) => meeting.aiSummary || meeting.status === "lost")
+    .sort((left, right) => (right.recordedAt?.getTime() ?? 0) - (left.recordedAt?.getTime() ?? 0));
+
+  if (analyzedMeetings.length === 0 || scenarios.length === 0) {
+    return [];
+  }
+
+  const recommendations: Array<{ scenario: RoleplayScenario; reason: string; score: number }> = [];
+
+  for (const scenario of scenarios) {
+    const relatedMeeting = analyzedMeetings.find((meeting) => {
+      const haystack = [
+        meeting.productType,
+        meeting.customerName,
+        meeting.aiSummary?.overview,
+        ...(meeting.aiSummary?.bullets ?? []),
+      ].join(" ");
+      const keywords = [
+        scenario.productName,
+        scenario.title,
+        scenario.goal,
+        ...scenario.objections,
+      ].filter(Boolean);
+
+      return keywords.some((keyword) => haystack.includes(keyword.slice(0, Math.min(5, keyword.length))));
+    }) ?? analyzedMeetings[0];
+
+    let score = 0;
+    if (relatedMeeting.productType && scenario.productName && relatedMeeting.productType === scenario.productName) {
+      score += 3;
+    }
+    if (relatedMeeting.status === "lost") {
+      score += 2;
+    }
+    if (relatedMeeting.aiSummary) {
+      score += 1;
+    }
+
+    recommendations.push({
+      scenario,
+      reason:
+        relatedMeeting.status === "lost"
+          ? `${relatedMeeting.customerName || "直近商談"}で失注/要確認があるため、次回商談前の練習におすすめです。`
+          : `${relatedMeeting.customerName || "直近商談"}のAI要約から、近いテーマの練習としておすすめです。`,
+      score,
+    });
+  }
+
+  return recommendations
+    .sort((left, right) => right.score - left.score)
+    .slice(0, 4)
+    .map(({ scenario, reason }) => ({ scenario, reason }));
 }
 
 function splitLines(value: string) {

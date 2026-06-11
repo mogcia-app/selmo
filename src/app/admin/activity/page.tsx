@@ -29,7 +29,7 @@ const activityFilters: Array<{ label: string; value: SalesActivityType | "all" }
   { label: "貼り付け", value: "transcript_pasted" },
   { label: "検索", value: "knowledge_searched" },
   { label: "ロープレ", value: "roleplay_completed" },
-  { label: "AI分析", value: "ai_analysis_completed" },
+  { label: "分析結果", value: "ai_analysis_completed" },
 ];
 
 export default function AdminActivityPage() {
@@ -85,7 +85,7 @@ export default function AdminActivityPage() {
         <PageHeader
           eyebrow="SALES ACTIVITY"
           title="営業活動ログ"
-          description="営業メンバーのアップロード、ナレッジ検索、ロープレ、AI分析完了を時系列で確認できます。"
+          description="営業メンバーのアップロード、ナレッジ検索、ロープレ、salesの分析結果を時系列で確認できます。"
           action={
             <Link
               href="/admin/meetings"
@@ -105,7 +105,7 @@ export default function AdminActivityPage() {
         <section className="mt-6 grid gap-4 md:grid-cols-3">
           <Metric label="今日の活動" value={`${todayEventCount}件`} note="営業メンバーの操作ログ" />
           <Metric label="ナレッジ検索" value={`${searchEventCount}件`} note="検索キーワードを記録" />
-          <Metric label="AI分析完了" value={`${analysisEventCount}件`} note="要約生成済みの通知" />
+          <Metric label="分析結果" value={`${analysisEventCount}件`} note="sales側で作成済み" />
         </section>
 
         <section className="mt-5 grid gap-5 xl:grid-cols-[minmax(0,1.25fr)_minmax(380px,0.75fr)]">
@@ -189,7 +189,7 @@ export default function AdminActivityPage() {
             )}
           </Panel>
 
-          <Panel title="最近のAI分析">
+          <Panel title="最近のsales分析結果">
             {recentAnalyzedMeetings.length > 0 ? (
               <div className="space-y-3">
                 {recentAnalyzedMeetings.map((meeting) => {
@@ -205,8 +205,8 @@ export default function AdminActivityPage() {
               </div>
             ) : (
               <EmptyState
-                title="AI分析済みの商談はまだありません"
-                body="要約が生成された商談が、要約つきで表示されます。"
+                title="salesの分析結果はまだありません"
+                body="sales側で分析結果が作成された商談が、要約つきで表示されます。"
               />
             )}
           </Panel>
@@ -277,7 +277,7 @@ function readActivityLabel(type: SalesActivityType) {
   if (type === "transcript_pasted") return "貼り付け";
   if (type === "knowledge_searched") return "検索";
   if (type === "roleplay_completed") return "ロープレ";
-  return "AI分析";
+  return "分析結果";
 }
 
 function isToday(date: Date | null) {

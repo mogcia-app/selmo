@@ -1,37 +1,253 @@
+"use client";
+
+import { FirebaseError } from "firebase/app";
+import { FormEvent, useEffect, useState } from "react";
+
+import {
+  EmptyState,
+  KpiCard,
+  PageHeader,
+  PageShell,
+  Panel,
+  StatusBadge,
+} from "@/app/admin/_components/admin-insights";
+import { useAuth } from "@/features/auth/auth-provider";
+import {
+  createSalesManual,
+  subscribeToSalesManuals,
+  updateSalesManual,
+  type SalesManual,
+} from "@/lib/firebase/manuals";
+
 export default function AdminManualsPage() {
-  const items = [
-    ["01", "必要なヒアリングをしているか", "ACTIVE"],
-    ["02", "商材説明ができているか", "ACTIVE"],
-    ["03", "料金説明ができているか", "ACTIVE"],
-    ["04", "顧客の不安に対応しているか", "ACTIVE"],
-    ["05", "クロージングできているか", "ACTIVE"],
-    ["06", "次回アクションを明確にしているか", "DRAFT"],
-  ] as const;
+  const { profile } = useAuth();
+  const [manuals, setManuals] = useState<SalesManual[]>([]);
+  const [editingManual, setEditingManual] = useState<SalesManual | null>(null);
+  const [createOpen, setCreateOpen] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const activeManuals = manuals.filter((manual) => manual.status === "active");
+
+  useEffect(() => {
+    if (!profile?.companyId) return;
+    return subscribeToSalesManuals(
+      profile.companyId,
+      setManuals,
+      (nextError: FirebaseError) => setError(nextError.message),
+    );
+  }, [profile?.companyId]);
 
   return (
-    <main className="mx-auto min-h-screen max-w-[1480px] px-6 py-10 md:px-10">
-      <header className="mb-8 border-b border-[var(--line)] pb-6">
-        <h1 className="font-editorial text-[38px] font-bold leading-[1.05] text-[var(--ink)]">
-          マニュアル管理
-        </h1>
-        <p className="font-mono-ui mt-3 text-[10px] uppercase tracking-[0.22em] text-[var(--gray)]">
-          Checklist governance
-        </p>
-      </header>
+    <PageShell>
+      <div className="mx-auto max-w-[1480px]">
+        <PageHeader
+          eyebrow="SALES MANUAL"
+          title="営業成功基準"
+          description="会社の勝ちパターン、必須ヒアリング、反論対応、クロージング基準を登録します。sales側の分析結果はこの基準に沿って表示されます。"
+          action={
+            <button
+              type="button"
+              onClick={() => setCreateOpen(true)}
+              className="rounded-[14px] border border-[#f0c655] bg-[#ffd84d] px-5 py-3 text-[13px] font-black text-[#171717]"
+            >
+              マニュアル追加
+            </button>
+          }
+        />
+        {error ? <ErrorBox message={error} /> : null}
 
-      <section className="border border-[var(--line)] bg-[var(--paper)]">
-        <div className="divide-y divide-[var(--line-soft)]">
-          {items.map(([num, label, status]) => (
-            <div key={label} className="flex items-center justify-between gap-4 px-6 py-4">
-              <div className="flex items-center gap-4">
-                <span className="font-mono-ui text-[11px] text-[var(--gray)]">{num}</span>
-                <span className="text-[14px] text-[var(--ink)]">{label}</span>
-              </div>
-              <span className="font-mono-ui text-[11px] text-[var(--gray-2)]">{status}</span>
+        <section className="mt-6 grid gap-4 md:grid-cols-3">
+          <KpiCard label="登録マニュアル" value={`${manuals.length}件`} note="salesManuals" />
+          <KpiCard label="有効基準" value={`${activeManuals.length}件`} note="sales分析に反映" />
+          <KpiCard label="分析結果" value={activeManuals.length > 0 ? "基準あり" : "汎用"} note="商談/ロープレ" />
+        </section>
+
+        <Panel title="マニュアル一覧">
+          {manuals.length > 0 ? (
+            <div className="grid gap-4 lg:grid-cols-2">
+              {manuals.map((manual) => (
+                <article key={manual.id} className="rounded-[18px] border border-[#eef1f5] bg-[#fcfcfd] px-5 py-5">
+                  <div className="flex items-start justify-between gap-4">
+                    <div className="min-w-0">
+                      <h2 className="truncate text-[20px] font-black text-[#171717]">{manual.title}</h2>
+                      <p className="mt-2 line-clamp-3 text-[13px] leading-6 text-[#596273]">{manual.content || "本文未登録"}</p>
+                    </div>
+                    <StatusBadge tone={manual.status === "active" ? "good" : "normal"} label={manual.status === "active" ? "有効" : "下書き"} />
+                  </div>
+                  <div className="mt-4 grid gap-3 md:grid-cols-2">
+                    <MiniInfo label="評価基準" value={`${manual.criteria.length}件`} />
+                    <MiniInfo label="必須ヒアリング" value={`${manual.requiredQuestions.length}件`} />
+                    <MiniInfo label="反論対応" value={`${manual.objectionHandling.length}件`} />
+                    <MiniInfo label="クロージング" value={`${manual.closingRules.length}件`} />
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setEditingManual(manual)}
+                    className="mt-4 rounded-[12px] border border-[#e4e8ef] bg-white px-3 py-2 text-[12px] font-bold text-[#343b48]"
+                  >
+                    編集
+                  </button>
+                </article>
+              ))}
             </div>
-          ))}
-        </div>
-      </section>
-    </main>
+          ) : (
+            <EmptyState title="営業成功基準はまだありません" body="マニュアルを登録すると、sales側の商談分析結果が会社基準に沿った表示へ切り替わります。" />
+          )}
+        </Panel>
+
+        {createOpen && profile?.uid && profile.companyId ? (
+          <ManualDialog
+            companyId={profile.companyId}
+            userId={profile.uid}
+            onClose={() => setCreateOpen(false)}
+          />
+        ) : null}
+        {editingManual && profile?.uid && profile.companyId ? (
+          <ManualDialog
+            companyId={profile.companyId}
+            userId={profile.uid}
+            manual={editingManual}
+            onClose={() => setEditingManual(null)}
+          />
+        ) : null}
+      </div>
+    </PageShell>
   );
+}
+
+function ManualDialog({
+  companyId,
+  userId,
+  manual,
+  onClose,
+}: {
+  companyId: string;
+  userId: string;
+  manual?: SalesManual;
+  onClose: () => void;
+}) {
+  const [title, setTitle] = useState(manual?.title ?? "");
+  const [content, setContent] = useState(manual?.content ?? "");
+  const [criteria, setCriteria] = useState((manual?.criteria ?? []).join("\n"));
+  const [requiredQuestions, setRequiredQuestions] = useState((manual?.requiredQuestions ?? []).join("\n"));
+  const [scoringRules, setScoringRules] = useState((manual?.scoringRules ?? []).join("\n"));
+  const [objectionHandling, setObjectionHandling] = useState((manual?.objectionHandling ?? []).join("\n"));
+  const [closingRules, setClosingRules] = useState((manual?.closingRules ?? []).join("\n"));
+  const [status, setStatus] = useState<"active" | "draft">(manual?.status ?? "active");
+  const [isSaving, setIsSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!title.trim()) {
+      setError("タイトルを入力してください。");
+      return;
+    }
+
+    const payload = {
+      companyId,
+      title: title.trim(),
+      content: content.trim(),
+      criteria: splitLines(criteria),
+      requiredQuestions: splitLines(requiredQuestions),
+      scoringRules: splitLines(scoringRules),
+      objectionHandling: splitLines(objectionHandling),
+      closingRules: splitLines(closingRules),
+      status,
+      createdBy: userId,
+    };
+
+    setIsSaving(true);
+    setError(null);
+    try {
+      if (manual) {
+        await updateSalesManual(manual.id, payload);
+      } else {
+        await createSalesManual(payload);
+      }
+      onClose();
+    } catch (nextError) {
+      setError(nextError instanceof Error ? nextError.message : "保存に失敗しました。");
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#171717]/24 px-4 py-6">
+      <form onSubmit={handleSubmit} className="max-h-[92vh] w-full max-w-[860px] overflow-y-auto rounded-[24px] border border-[#eceef4] bg-white p-6 shadow-[0_24px_70px_rgba(17,24,39,0.18)]">
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <h2 className="text-[24px] font-black text-[#171717]">{manual ? "マニュアル編集" : "マニュアル追加"}</h2>
+            <p className="mt-1 text-[13px] leading-6 text-[#7a808c]">1行ごとに評価項目を入力すると、sales側の分析結果に反映されます。</p>
+          </div>
+          <button type="button" onClick={onClose} className="text-[24px] leading-none text-[#9aa1ac]" aria-label="閉じる">×</button>
+        </div>
+        {error ? <ErrorBox message={error} /> : null}
+
+        <div className="mt-5 grid gap-4 md:grid-cols-2">
+          <Field label="タイトル">
+            <input value={title} onChange={(event) => setTitle(event.target.value)} className={inputClassName} placeholder="例：新規商談 成功基準" />
+          </Field>
+          <Field label="状態">
+            <select value={status} onChange={(event) => setStatus(event.target.value as "active" | "draft")} className={inputClassName}>
+              <option value="active">有効</option>
+              <option value="draft">下書き</option>
+            </select>
+          </Field>
+          <Field label="概要" className="md:col-span-2">
+            <textarea value={content} onChange={(event) => setContent(event.target.value)} className={textareaClassName} placeholder="このマニュアルで重視する営業基準" />
+          </Field>
+          <Field label="評価基準">
+            <textarea value={criteria} onChange={(event) => setCriteria(event.target.value)} className={textareaClassName} placeholder={"例：課題を顧客の言葉で確認している\n例：料金説明の前に価値を提示している"} />
+          </Field>
+          <Field label="必須ヒアリング">
+            <textarea value={requiredQuestions} onChange={(event) => setRequiredQuestions(event.target.value)} className={textareaClassName} placeholder={"例：現在の課題\n例：決裁者\n例：予算感"} />
+          </Field>
+          <Field label="スコアルール">
+            <textarea value={scoringRules} onChange={(event) => setScoringRules(event.target.value)} className={textareaClassName} placeholder={"例：課題確認なしは減点\n例：次回アクション明確なら加点"} />
+          </Field>
+          <Field label="反論対応">
+            <textarea value={objectionHandling} onChange={(event) => setObjectionHandling(event.target.value)} className={textareaClassName} placeholder={"例：高いと言われたら費用対効果で返す\n例：競合比較は違いを3点で説明"} />
+          </Field>
+          <Field label="クロージング基準" className="md:col-span-2">
+            <textarea value={closingRules} onChange={(event) => setClosingRules(event.target.value)} className={textareaClassName} placeholder={"例：次回日時を確定する\n例：判断条件を合意する"} />
+          </Field>
+        </div>
+
+        <div className="mt-6 flex justify-end gap-3">
+          <button type="button" onClick={onClose} className="h-11 rounded-[14px] border border-[#e4e8ef] bg-white px-5 text-[14px] font-bold text-[#596273]">キャンセル</button>
+          <button type="submit" disabled={isSaving} className="h-11 rounded-[14px] border border-[#f0c655] bg-[#ffd84d] px-6 text-[14px] font-black text-[#171717] disabled:opacity-60">{isSaving ? "保存中" : "保存する"}</button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
+const inputClassName = "mt-2 h-12 w-full rounded-[14px] border border-[#e4e8ef] bg-white px-4 text-[14px] outline-none focus:border-[#e0bd4b]";
+const textareaClassName = "mt-2 min-h-[116px] w-full resize-y rounded-[14px] border border-[#e4e8ef] bg-white px-4 py-3 text-[14px] leading-7 outline-none focus:border-[#e0bd4b]";
+
+function Field({ label, className = "", children }: { label: string; className?: string; children: React.ReactNode }) {
+  return (
+    <label className={className}>
+      <span className="text-[13px] font-bold text-[#343b48]">{label}</span>
+      {children}
+    </label>
+  );
+}
+
+function MiniInfo({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-[14px] border border-[#eef1f5] bg-white px-4 py-3">
+      <div className="text-[12px] font-bold text-[#8a909b]">{label}</div>
+      <div className="mt-1 text-[15px] font-black text-[#171717]">{value}</div>
+    </div>
+  );
+}
+
+function splitLines(value: string) {
+  return value.split(/\r?\n/).map((item) => item.trim()).filter(Boolean);
+}
+
+function ErrorBox({ message }: { message: string }) {
+  return <div className="mt-5 rounded-[16px] border border-[#f4d4d4] bg-[#fff8f8] px-4 py-3 text-[13px] font-medium text-[#b4232a]">{message}</div>;
 }

@@ -21,14 +21,14 @@ export default function AdminRepDetailPage() {
           <div className="mt-6 grid gap-4 md:grid-cols-2">
             <MetricCard label="成約率" value="47.4%" />
             <MetricCard label="平均通話時間" value="38分" />
-            <MetricCard label="マニュアル準拠率" value="92%" />
+            <MetricCard label="会社基準の達成率" value="92%" />
             <MetricCard label="平均トーク比率" value="42:58" />
           </div>
         </div>
 
         <div className="border border-[var(--line)] bg-[var(--paper)] p-6">
           <div className="font-editorial text-[24px] font-semibold text-[var(--ink)]">
-            AIコメント
+            指導コメント
           </div>
           <p className="mt-4 text-[14px] leading-7 text-[var(--ink)]">
             ヒアリングの深さと不安への応答は安定しています。価格提示後の次回アクション確定をさらに徹底すると、

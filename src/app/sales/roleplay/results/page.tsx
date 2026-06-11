@@ -104,6 +104,9 @@ function ResultCard({ result }: { result: RoleplayResult }) {
         <ListBlock title="良かった点" items={result.strengths} />
         <ListBlock title="改善ポイント" items={result.improvements} />
       </div>
+      <div className="mt-3">
+        <ListBlock title="次回使う改善フレーズ" items={result.improvementPhrases} />
+      </div>
     </article>
   );
 }

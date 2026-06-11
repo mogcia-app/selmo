@@ -174,6 +174,7 @@ export function MeetingDetailScreen({
         body: JSON.stringify({
           companyId: profile?.companyId ?? meeting?.companyId ?? null,
           userId: profile?.uid ?? meeting?.userId ?? null,
+          productName: meeting?.productType ?? null,
           transcriptText,
         }),
         timeoutMs: null,
@@ -447,7 +448,7 @@ export function MeetingDetailScreen({
     }));
   }, [editableLogs.length, filteredPreviewLogs, meeting?.transcriptionProbeText]);
 
-  const aiSummary = useMemo(
+  const aiSummary = useMemo<NonNullable<MeetingRecord["aiSummary"]>>(
     () => meeting?.aiSummary ?? buildAiSummary(meeting?.transcriptionProbeText, editableLogs),
     [editableLogs, meeting?.aiSummary, meeting?.transcriptionProbeText],
   );
@@ -805,6 +806,10 @@ export function MeetingDetailScreen({
               <ActionPanel actions={analysisPanels.actions} mentionedNextDate={mentionedNextDate} />
             </div>
           </article>
+
+          {aiSummary.manualCompliance ? (
+            <ManualComplianceInsight compliance={aiSummary.manualCompliance} />
+          ) : null}
 
           <article className="mt-6 rounded-[24px] border border-[#eceef4] bg-white p-6 shadow-[0_6px_18px_rgba(17,24,39,0.04)]">
             <div className="text-[18px] font-bold text-[#171717]">商談評価サマリー</div>
@@ -1600,6 +1605,66 @@ function SummaryBulletPanel({
         ))}
       </ul>
     </article>
+  );
+}
+
+function ManualComplianceInsight({
+  compliance,
+}: {
+  compliance: NonNullable<NonNullable<MeetingRecord["aiSummary"]>["manualCompliance"]>;
+}) {
+  const isManual = compliance.mode === "manual";
+
+  return (
+    <article className="mt-5 rounded-[24px] border border-[#f0e3c1] bg-[#fffaf0] p-6 shadow-[0_6px_18px_rgba(17,24,39,0.04)]">
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+        <div>
+          <div className="flex flex-wrap items-center gap-2">
+            <h3 className="text-[18px] font-bold text-[#171717]">
+              {isManual ? "会社基準に沿った改善ポイント" : "AI汎用分析"}
+            </h3>
+            <span className="rounded-full border border-[#f0d992] bg-white px-3 py-1 text-[12px] font-bold text-[#8a6500]">
+              {isManual ? "会社基準: 適用済み" : "会社基準: 未適用"}
+            </span>
+          </div>
+          <p className="mt-2 text-[13px] leading-6 text-[#6f6250]">
+            {isManual
+              ? "管理者が登録した成功基準・商品情報をもとに、次の商談で直すべきポイントを整理しています。"
+              : "会社基準が未登録のため、AIの一般的な営業観点で改善ポイントを整理しています。"}
+          </p>
+        </div>
+        <div className="rounded-[18px] border border-[#f0d992] bg-white px-5 py-4 text-center">
+          <div className="text-[12px] font-bold text-[#8a909b]">準拠スコア</div>
+          <div className="mt-1 text-[28px] font-black text-[#171717]">
+            {compliance.score === null ? "-" : compliance.score}
+            {compliance.score === null ? null : <span className="ml-1 text-[14px] font-bold text-[#8a909b]">点</span>}
+          </div>
+        </div>
+      </div>
+
+      <div className="mt-5 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+        <ManualComplianceList title="できていた基準" items={compliance.matchedCriteria} />
+        <ManualComplianceList title="次に直す基準" items={compliance.missingCriteria} />
+        <ManualComplianceList title="商品・競合観点" items={compliance.productNotes} />
+        <ManualComplianceList title="次回使うフレーズ" items={compliance.improvementPhrases} />
+      </div>
+    </article>
+  );
+}
+
+function ManualComplianceList({ title, items }: { title: string; items: string[] }) {
+  return (
+    <div className="rounded-[18px] border border-[#f0e3c1] bg-white p-4">
+      <div className="text-[13px] font-bold text-[#8a6500]">{title}</div>
+      <ul className="mt-3 space-y-2 text-[13px] leading-6 text-[#343b48]">
+        {(items.length > 0 ? items : ["未検出"]).map((item) => (
+          <li key={item} className="flex gap-2">
+            <span className="text-[#c4991b]">•</span>
+            <span>{item}</span>
+          </li>
+        ))}
+      </ul>
+    </div>
   );
 }
 

@@ -28,7 +28,7 @@ export default function AdminMeetingDetailPage() {
         <PageHeader
           eyebrow="MEETING DETAIL"
           title={meeting?.customerName ?? "商談詳細レビュー"}
-          description="文字起こし、AI要約、改善点を確認し、指導対象にするか判断します。"
+          description="salesの分析結果、文字起こし、改善点を指導用レビューとして確認します。"
           action={<Link href="/admin/meetings" className="rounded-[14px] border border-[#e2e6ee] bg-white px-4 py-3 text-[13px] font-bold text-[#343b48]">一覧へ戻る</Link>}
         />
         {error ? <ErrorBox message={error} /> : null}
@@ -54,26 +54,57 @@ export default function AdminMeetingDetailPage() {
                   )}
                 </Panel>
 
-                <Panel title="AI要約">
+                <Panel title="AI分析結果を確認">
                   {meeting.aiSummary ? (
-                    <div className="rounded-[16px] border border-[#eef1f5] bg-[#fcfcfd] px-4 py-4">
-                      <p className="text-[14px] leading-7 text-[#343b48]">{meeting.aiSummary.overview}</p>
-                      <ul className="mt-3 space-y-1 text-[13px] leading-6 text-[#596273]">
-                        {meeting.aiSummary.bullets.map((bullet) => <li key={bullet}>・{bullet}</li>)}
-                      </ul>
+                    <div className="space-y-3">
+                      <div className="rounded-[16px] border border-[#eef1f5] bg-[#fcfcfd] px-4 py-4">
+                        <p className="text-[14px] leading-7 text-[#343b48]">{meeting.aiSummary.overview}</p>
+                        <ul className="mt-3 space-y-1 text-[13px] leading-6 text-[#596273]">
+                          {meeting.aiSummary.bullets.map((bullet) => <li key={bullet}>・{bullet}</li>)}
+                        </ul>
+                      </div>
+                      {meeting.aiSummary.manualCompliance ? (
+                        <div className="rounded-[16px] border border-[#f0e3c1] bg-[#fffaf0] px-4 py-4">
+                          <div className="flex flex-wrap items-start justify-between gap-3">
+                            <div>
+                              <h3 className="text-[14px] font-black text-[#171717]">salesの分析結果</h3>
+                              <p className="mt-1 text-[12px] leading-5 text-[#6f6250]">
+                                sales側で作成された分析結果をレビュー用に表示しています。
+                              </p>
+                            </div>
+                            <div className="text-right">
+                              <span className="inline-flex rounded-full border border-[#f0d992] bg-white px-3 py-1 text-[12px] font-black text-[#8a6500]">
+                                {meeting.aiSummary.manualCompliance.mode === "manual" ? "会社基準: 適用済み" : "会社基準: 未適用"}
+                              </span>
+                              <div className="mt-2 text-[13px] font-black text-[#8a6500]">
+                                準拠スコア {meeting.aiSummary.manualCompliance.score === null ? "-" : `${meeting.aiSummary.manualCompliance.score}点`}
+                              </div>
+                            </div>
+                          </div>
+                          <div className="mt-3 grid gap-3 md:grid-cols-2">
+                            <ReviewList title="salesに表示された達成基準" items={meeting.aiSummary.manualCompliance.matchedCriteria} />
+                            <ReviewList title="salesに表示された不足基準" items={meeting.aiSummary.manualCompliance.missingCriteria} />
+                            <ReviewList title="商品観点" items={meeting.aiSummary.manualCompliance.productNotes} />
+                            <ReviewList title="次回フレーズ" items={meeting.aiSummary.manualCompliance.improvementPhrases} />
+                          </div>
+                        </div>
+                      ) : null}
                     </div>
                   ) : (
-                    <EmptyState title="AI要約はまだありません" body="AI要約を実行すると、要点が表示されます。" />
+                    <EmptyState title="salesの分析結果はまだありません" body="sales側で商談分析が完了すると、要点が表示されます。" />
                   )}
                 </Panel>
               </div>
 
               <div className="space-y-5">
-                <Panel title="レビュー観点">
+                <Panel title="指導用レビュー">
                   <div className="space-y-3">
                     <ReviewRow label="良かった点" value="集計準備中" />
                     <ReviewRow label="改善点" value="集計準備中" />
-                    <ReviewRow label="マニュアル準拠状況" value={meeting.conversationLogStatus === "completed" ? "集計準備中" : "分析待ち"} />
+                    <ReviewRow
+                      label="会社基準の適用"
+                      value={meeting.aiSummary?.manualCompliance?.mode === "manual" ? "適用済み" : meeting.aiSummary ? "未適用" : "分析待ち"}
+                    />
                     <ReviewRow label="失注要因" value={meeting.status === "lost" ? "集計準備中" : "対象外"} />
                     <ReviewRow label="指導対象フラグ" value={meeting.status === "lost" ? "要確認" : "通常"} />
                   </div>
@@ -85,9 +116,9 @@ export default function AdminMeetingDetailPage() {
                 </Panel>
 
                 <Panel title="ロープレ課題">
-                  <p className="text-[13px] leading-6 text-[#596273]">この商談内容をもとに、ロープレシナリオへ変換できます。</p>
+                  <p className="text-[13px] leading-6 text-[#596273]">この商談内容をもとに、営業マンへロープレ課題を割り当てます。</p>
                   <Link href="/admin/roleplay" className="mt-4 inline-flex h-11 w-full items-center justify-center rounded-[14px] border border-[#f0c655] bg-[#ffd84d] text-[13px] font-black text-[#171717]">
-                    ロープレ課題に変換
+                    ロープレ課題を作成
                   </Link>
                 </Panel>
               </div>
@@ -118,6 +149,17 @@ function ReviewRow({ label, value }: { label: string; value: string }) {
     <div className="flex items-center justify-between gap-3 rounded-[16px] border border-[#eef1f5] bg-[#fcfcfd] px-4 py-3">
       <span className="text-[13px] font-bold text-[#343b48]">{label}</span>
       {isFlag ? <StatusBadge tone="risk" label={value} /> : value === "集計準備中" ? <Placeholder /> : <span className="text-[13px] font-bold text-[#596273]">{value}</span>}
+    </div>
+  );
+}
+
+function ReviewList({ title, items }: { title: string; items: string[] }) {
+  return (
+    <div className="rounded-[14px] border border-[#f0e3c1] bg-white px-3 py-3">
+      <div className="text-[12px] font-black text-[#8a6500]">{title}</div>
+      <ul className="mt-2 space-y-1 text-[12px] leading-5 text-[#596273]">
+        {(items.length > 0 ? items : ["未検出"]).map((item) => <li key={item}>・{item}</li>)}
+      </ul>
     </div>
   );
 }
