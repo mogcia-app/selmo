@@ -55,6 +55,29 @@ export default function AdminManualsPage() {
         />
         {error ? <ErrorBox message={error} /> : null}
 
+        <section className="mt-6 rounded-[24px] border border-[#f0c655] bg-[#fffaf0] px-5 py-5 shadow-[0_10px_28px_rgba(245,189,7,0.08)] md:px-6">
+          <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+            <div className="min-w-0">
+              <div className="inline-flex rounded-full bg-[#ffd84d] px-3 py-1 text-[12px] font-black text-[#171717]">
+                まずここから
+              </div>
+              <h2 className="mt-3 text-[22px] font-black tracking-[-0.03em] text-[#171717]">
+                会社の営業マニュアルを追加する
+              </h2>
+              <p className="mt-2 max-w-[780px] text-[13px] leading-6 text-[#596273]">
+                評価基準・必須ヒアリング・反論対応・クロージング基準を登録すると、sales側の商談分析とロープレ分析が会社基準に沿って表示されます。
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setCreateOpen(true)}
+              className="h-12 shrink-0 rounded-[16px] border border-[#171717] bg-[#171717] px-6 text-[14px] font-black text-white transition hover:bg-[#343b48]"
+            >
+              ＋ マニュアルを追加
+            </button>
+          </div>
+        </section>
+
         <section className="mt-6 grid gap-4 md:grid-cols-3">
           <KpiCard label="登録マニュアル" value={`${manuals.length}件`} note="salesManuals" />
           <KpiCard label="有効基準" value={`${activeManuals.length}件`} note="sales分析に反映" />

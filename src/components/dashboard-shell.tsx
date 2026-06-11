@@ -39,12 +39,12 @@ const adminSections: Array<{ label: string; items: NavItem[] }> = [
       { href: "/admin/knowledge", label: "ナレッジ管理", num: "05" },
       { href: "/admin/roleplay", label: "ロープレ管理", num: "06" },
       { href: "/admin/products", label: "商材管理", num: "07" },
+      { href: "/admin/manuals", label: "営業基準マニュアル", num: "08" },
     ],
   },
   {
     label: "03 — System",
     items: [
-      { href: "/meetings/upload", label: "音声アップロード", num: "08" },
       { href: "/admin/users", label: "ユーザー管理", num: "09" },
     ],
   },
@@ -203,7 +203,7 @@ export function DashboardShell({ children, variant }: DashboardShellProps) {
                 />
                 <div className="min-w-0 flex-1">
                   <div className="truncate text-[14px] font-semibold text-[#20242c]">
-                    {profile?.name ?? "山田 太郎"}
+                    {profile?.name ?? profile?.email ?? "アカウント"}
                   </div>
                   <div className="mt-0.5 text-[12px] text-[#7d8490]">
                     {profile?.role === "admin" ? "管理者" : "営業担当"}
@@ -218,24 +218,31 @@ export function DashboardShell({ children, variant }: DashboardShellProps) {
         </>
       ) : (
         <>
-      <aside className="relative border-b border-[var(--line)] bg-[var(--ink)] px-6 py-7 text-[var(--paper)] md:min-h-screen md:border-b-0 md:border-r">
-        <div className="border-b border-white/15 pb-6">
-          <div className="font-editorial text-[24px] font-bold leading-[1.15]">
-            声紋営業録
-            <span className="block text-[14px] text-[var(--accent-2)]">SEIMON</span>
-          </div>
-          <div className="font-mono-ui mt-2 text-[9px] uppercase tracking-[0.22em] text-white/55">
-            Sales Meeting Intelligence · v1.0
-          </div>
+      <aside className="relative border-b border-[#eceef4] bg-white px-5 py-8 md:min-h-screen md:border-b-0 md:border-r">
+        <div className="text-[13px] font-semibold tracking-[0.34em] text-[#171717]">
+          selmo<span className="text-[#ffc400]">.</span>
+        </div>
+        <div className="mt-2 text-[11px] uppercase tracking-[0.24em] text-[#9aa1ad]">
+          manager console
         </div>
 
-        <nav className="mt-7 space-y-7">
+        <div className="mt-8 px-4 py-5">
+          <Image
+            src="/sels1.png"
+            alt="selmo"
+            width={170}
+            height={130}
+            className="mx-auto h-auto w-[112px] object-contain"
+          />
+        </div>
+
+        <nav className="mt-7 space-y-6">
           {sections.map((section) => (
             <div key={section.label}>
-              <div className="font-mono-ui mb-3 px-[2px] text-[9px] uppercase tracking-[0.22em] text-white/40">
+              <div className="mb-3 px-2 text-[11px] font-semibold uppercase tracking-[0.22em] text-[#a3aab5]">
                 {section.label}
               </div>
-              <div className="space-y-1">
+              <div className="space-y-2">
                 {section.items.map((item) => {
                   const isActive = isNavItemActive(pathname, item.href);
 
@@ -243,19 +250,28 @@ export function DashboardShell({ children, variant }: DashboardShellProps) {
                     <Link
                       key={item.href}
                       href={item.href}
-                      className={`flex items-center justify-between border-l-2 px-[10px] py-[9px] text-[13.5px] transition ${
+                      className={`group flex items-center gap-3 rounded-[18px] px-4 py-3.5 text-[15px] font-medium transition ${
                         isActive
-                          ? "border-[var(--accent-2)] bg-white/10 text-[var(--paper)]"
-                          : "border-transparent text-white/80 hover:bg-white/5 hover:text-[var(--paper)]"
+                          ? "bg-[linear-gradient(180deg,#fff2c8_0%,#ffe7a0_100%)] text-[#171717] shadow-[0_8px_18px_rgba(245,189,7,0.18)]"
+                          : "text-[#616875] hover:bg-[#f7f7fa] hover:text-[#171717]"
                       }`}
                     >
-                      <span>{item.label}</span>
                       <span
-                        className={`font-mono-ui text-[10px] ${
-                          isActive ? "text-[var(--accent-2)]" : "text-white/35"
+                        className={`inline-flex h-7 w-7 items-center justify-center rounded-full text-[11px] font-black transition ${
+                          isActive
+                            ? "bg-white text-[#d79d00]"
+                            : "bg-[#f1f2f5] text-[#8d94a1] group-hover:text-[#171717]"
                         }`}
                       >
                         {item.num}
+                      </span>
+                      <span className="flex-1">{item.label}</span>
+                      <span
+                        className={`text-[12px] transition ${
+                          isActive ? "text-[#d79d00]" : "text-[#c6ccd5] group-hover:text-[#8d94a1]"
+                        }`}
+                      >
+                        ›
                       </span>
                     </Link>
                   );
@@ -265,52 +281,50 @@ export function DashboardShell({ children, variant }: DashboardShellProps) {
           ))}
         </nav>
 
-        <div className="mt-8 flex items-center gap-3 border-t border-white/15 pt-5 md:absolute md:bottom-6 md:left-6 md:right-6">
-          <div className="flex h-[34px] w-[34px] items-center justify-center rounded-full bg-[var(--accent-2)] text-[13px] font-bold text-[var(--ink)]">
+        <Link
+          href="/sales/account"
+          className="mt-8 block rounded-[20px] border border-[#e8ebf0] bg-white px-4 py-3.5 shadow-[0_8px_22px_rgba(17,24,39,0.04)] transition hover:border-[#f0c655] hover:bg-[#fffdf7] md:absolute md:bottom-6 md:left-5 md:right-5 md:mt-0"
+        >
+          <div className="flex items-center gap-3">
+          <div className="flex h-11 w-11 items-center justify-center rounded-full bg-[#fff1bf] text-[14px] font-black text-[#8a6500]">
             {initials}
           </div>
-          <div className="min-w-0">
-            <div className="truncate text-[13px] text-[var(--paper)]">
+          <div className="min-w-0 flex-1">
+            <div className="truncate text-[14px] font-semibold text-[#20242c]">
               {profile?.name ?? profile?.email ?? "Guest"}
             </div>
-            <div className="font-mono-ui text-[10px] uppercase tracking-[0.1em] text-white/50">
-              {profile?.role ?? variant}
+            <div className="mt-0.5 text-[12px] text-[#7d8490]">
+              管理者
             </div>
           </div>
-        </div>
+          <span className="text-[13px] text-[#9aa1ad]">›</span>
+          </div>
+        </Link>
       </aside>
 
-      <div className="min-w-0 bg-[var(--paper)]">
-        <header className="sticky top-0 z-10 flex flex-col gap-4 border-b border-[var(--line-soft)] bg-[var(--paper)] px-6 py-[18px] md:flex-row md:items-center md:justify-between md:px-10">
-          <div className="font-mono-ui flex items-center gap-[10px] text-[10px] uppercase tracking-[0.2em] text-[var(--gray)]">
+      <div className="min-w-0 bg-[#f5f5f6]">
+        <header className="sticky top-0 z-10 flex flex-col gap-4 border-b border-[#eceef4] bg-white/92 px-5 py-4 backdrop-blur md:flex-row md:items-center md:justify-between md:px-8">
+          <div className="flex items-center gap-2 text-[12px] font-semibold uppercase tracking-[0.18em] text-[#9aa1ad]">
             <span>Selmo</span>
-            <span className="text-[var(--line-soft)]">/</span>
-            <span className="text-[var(--ink)]">{currentLabel}</span>
+            <span className="text-[#d8dde6]">/</span>
+            <span className="text-[#171717]">{currentLabel}</span>
           </div>
 
           <div className="flex flex-wrap items-center gap-3 md:gap-[14px]">
-            <span className="font-mono-ui border-l border-[var(--line-soft)] pl-[14px] text-[11px] text-[var(--gray)]">
+            <span className="rounded-full border border-[#e8ebf0] bg-[#f7f7fa] px-3 py-2 text-[12px] font-semibold text-[#7d8490]">
               {nowLabel}
             </span>
             {variant === "admin" ? (
-              <>
-                <button
-                  type="button"
-                  className="border border-[var(--line)] bg-transparent px-4 py-[9px] text-[12.5px] font-medium text-[var(--ink)] transition hover:bg-[var(--paper-2)]"
-                >
-                  CSV出力
-                </button>
-                <Link
-                  href="/register"
-                  className="bg-[var(--accent)] px-4 py-[9px] text-[12.5px] font-medium text-[var(--paper)] transition hover:bg-[#9a2818]"
-                >
-                  ＋ ユーザー登録
-                </Link>
-              </>
+              <button
+                type="button"
+                className="rounded-[14px] border border-[#e8ebf0] bg-white px-4 py-2.5 text-[13px] font-semibold text-[#343b48] transition hover:border-[#f0c655] hover:bg-[#fffdf7]"
+              >
+                CSV出力
+              </button>
             ) : (
               <Link
                 href="/meetings/upload"
-                className="bg-[var(--ink)] px-4 py-[9px] text-[12.5px] font-medium text-[var(--paper)] transition hover:bg-[var(--line)]"
+                className="rounded-[14px] border border-[#171717] bg-[#171717] px-4 py-2.5 text-[13px] font-black text-white transition hover:bg-[#343b48]"
               >
                 ＋ 打ち合わせアップロード
               </Link>

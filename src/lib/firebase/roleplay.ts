@@ -107,9 +107,11 @@ export function subscribeToRoleplayScenarios(
   onError?: (error: FirestoreError) => void,
 ): Unsubscribe {
   const { firestore } = assertFirebaseClient();
-  const scenariosQuery = companyId
-    ? query(collection(firestore, "roleplayScenarios"), where("companyId", "==", companyId))
-    : collection(firestore, "roleplayScenarios");
+  if (!companyId) {
+    callback([]);
+    return () => undefined;
+  }
+  const scenariosQuery = query(collection(firestore, "roleplayScenarios"), where("companyId", "==", companyId));
 
   return onSnapshot(
     scenariosQuery,
@@ -129,17 +131,17 @@ export function subscribeToRoleplayResults(
   onError?: (error: FirestoreError) => void,
 ): Unsubscribe {
   const { firestore } = assertFirebaseClient();
-  const resultsQuery = input.companyId
-    ? input.isAdmin
-      ? query(collection(firestore, "roleplayResults"), where("companyId", "==", input.companyId))
-      : query(
-          collection(firestore, "roleplayResults"),
-          where("companyId", "==", input.companyId),
-          where("userId", "==", input.userId),
-        )
-    : input.isAdmin
-      ? collection(firestore, "roleplayResults")
-      : query(collection(firestore, "roleplayResults"), where("userId", "==", input.userId));
+  if (!input.companyId) {
+    callback([]);
+    return () => undefined;
+  }
+  const resultsQuery = input.isAdmin
+    ? query(collection(firestore, "roleplayResults"), where("companyId", "==", input.companyId))
+    : query(
+        collection(firestore, "roleplayResults"),
+        where("companyId", "==", input.companyId),
+        where("userId", "==", input.userId),
+      );
 
   let isActive = true;
 
@@ -173,15 +175,17 @@ export function subscribeToRoleplayAssignments(
   onError?: (error: FirestoreError) => void,
 ): Unsubscribe {
   const { firestore } = assertFirebaseClient();
-  const assignmentsQuery = input.companyId
-    ? input.isAdmin
-      ? query(collection(firestore, "roleplayAssignments"), where("companyId", "==", input.companyId))
-      : query(
-          collection(firestore, "roleplayAssignments"),
-          where("companyId", "==", input.companyId),
-          where("userId", "==", input.userId ?? ""),
-        )
-    : collection(firestore, "roleplayAssignments");
+  if (!input.companyId) {
+    callback([]);
+    return () => undefined;
+  }
+  const assignmentsQuery = input.isAdmin
+    ? query(collection(firestore, "roleplayAssignments"), where("companyId", "==", input.companyId))
+    : query(
+        collection(firestore, "roleplayAssignments"),
+        where("companyId", "==", input.companyId),
+        where("userId", "==", input.userId ?? ""),
+      );
 
   return onSnapshot(
     assignmentsQuery,

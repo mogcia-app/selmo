@@ -33,7 +33,7 @@ export default function AdminMembersPage() {
           <KpiCard label="ロープレ実施" value={`${roleplayResults.length}回`} note="結果保存済みの件数" />
         </section>
 
-        <Panel title="営業マン一覧" actionLabel="ユーザー登録" href="/register">
+        <Panel title="営業マン一覧">
           {memberRows.length > 0 ? (
             <div className="overflow-x-auto">
               <table className="w-full min-w-[980px] text-left">
@@ -45,7 +45,7 @@ export default function AdminMembersPage() {
                     <th className="px-4 py-3 font-bold">成約率</th>
                     <th className="px-4 py-3 font-bold">平均スコア</th>
                     <th className="px-4 py-3 font-bold">ロープレ</th>
-                    <th className="px-4 py-3 font-bold">最終ログイン</th>
+                    <th className="px-4 py-3 font-bold">最終活動</th>
                     <th className="px-4 py-3 font-bold">ステータス</th>
                     <th className="px-4 py-3 font-bold">詳細</th>
                   </tr>
@@ -59,7 +59,7 @@ export default function AdminMembersPage() {
                       <td className="px-4 py-4 text-[13px] font-bold text-[#343b48]">{member.winRate === null ? <Placeholder /> : `${member.winRate}%`}</td>
                       <td className="px-4 py-4 text-[13px] font-bold text-[#343b48]">{member.averageScore === null ? <Placeholder /> : `${member.averageScore}点`}</td>
                       <td className="px-4 py-4 text-[13px] font-bold text-[#343b48]">{member.roleplayCount}回</td>
-                      <td className="px-4 py-4"><Placeholder>{member.lastLogin}</Placeholder></td>
+                      <td className="px-4 py-4 text-[13px] font-bold text-[#596273]">{member.lastActivity}</td>
                       <td className="px-4 py-4"><StatusBadge tone={member.tone} label={member.guidance} /></td>
                       <td className="px-4 py-4">
                         <Link href={`/admin/members/${member.id}`} className="text-[13px] font-bold text-[#2672d9]">
@@ -72,7 +72,7 @@ export default function AdminMembersPage() {
               </table>
             </div>
           ) : (
-            <EmptyState title="営業メンバーはまだ登録されていません" body="ユーザー登録後、営業メンバー別の状況が表示されます。" />
+            <EmptyState title="営業メンバーはまだいません" body="営業メンバーが追加されると、メンバー別の状況が表示されます。" />
           )}
         </Panel>
       </div>

@@ -17,6 +17,7 @@ import {
   getOutcomeTone,
   useAdminInsights,
 } from "@/app/admin/_components/admin-insights";
+import type { MeetingRecord } from "@/lib/firebase/meetings";
 
 export default function AdminMemberDetailPage() {
   const params = useParams<{ userId: string }>();
@@ -25,6 +26,9 @@ export default function AdminMemberDetailPage() {
   const profile = salesUsers.find((user) => user.uid === params.userId);
   const userMeetings = meetings.filter((meeting) => meeting.userId === params.userId);
   const userResults = roleplayResults.filter((result) => result.userId === params.userId);
+  const userKnowledgeItems = knowledgeItems.filter((item) => item.ownerId === params.userId);
+  const lostReason = buildLostReason(userMeetings);
+  const latestRoleplayFeedback = userResults[0]?.improvementPhrases?.[0] ?? userResults[0]?.summary ?? member?.guidance ?? "商談ログを確認";
   const winRate = calcWinRate(userMeetings);
 
   return (
@@ -41,9 +45,9 @@ export default function AdminMemberDetailPage() {
 
         <section className="mt-6 grid gap-4 md:grid-cols-4">
           <KpiCard label="商談件数" value={`${userMeetings.length}件`} note="このメンバーの商談" />
-          <KpiCard label="成約率" value={winRate === null ? "-" : `${winRate}%`} note={winRate === null ? "集計準備中" : "商談結果より算出"} />
+          <KpiCard label="成約率" value={winRate === null ? "-" : `${winRate}%`} note={winRate === null ? "商談なし" : "商談結果より算出"} />
           <KpiCard label="ロープレ実施" value={`${userResults.length}回`} note="結果保存済み" />
-          <KpiCard label="平均スコア" value={member?.averageScore === null || !member ? "-" : `${member.averageScore}点`} note={member?.averageScore === null ? "集計準備中" : "ロープレ結果より算出"} />
+          <KpiCard label="平均スコア" value={member?.averageScore === null || !member ? "-" : `${member.averageScore}点`} note={member?.averageScore === null ? "結果なし" : "ロープレ結果より算出"} />
         </section>
 
         <section className="mt-5 grid gap-5 xl:grid-cols-[minmax(0,1.25fr)_minmax(360px,0.75fr)]">
@@ -104,21 +108,23 @@ export default function AdminMemberDetailPage() {
           <div className="space-y-5">
             <Panel title="指導判断">
               <div className="space-y-3">
-                <InsightRow label="よくある失注理由" value="集計準備中" />
-                <InsightRow label="改善ポイント" value={member?.guidance ?? "集計準備中"} />
-                <InsightRow label="ナレッジ閲覧状況" value="集計準備中" />
-                <InsightRow label="作成済みナレッジ" value={`${knowledgeItems.filter((item) => item.ownerId === params.userId).length}件`} />
+                <InsightRow label="よくある失注理由" value={lostReason} />
+                <InsightRow label="改善ポイント" value={latestRoleplayFeedback} />
+                <InsightRow label="ナレッジ作成状況" value={`${userKnowledgeItems.length}件`} />
+                <InsightRow label="作成済みナレッジ" value={`${userKnowledgeItems.length}件`} />
               </div>
             </Panel>
 
             <Panel title="上司メモ">
-              <textarea className="min-h-[150px] w-full resize-y rounded-[14px] border border-[#e4e8ef] bg-white px-4 py-3 text-[14px] leading-7 outline-none focus:border-[#e0bd4b]" placeholder="指導時のメモを入力" />
-              <p className="mt-2 text-[12px] text-[#8a909b]">メモ保存は次フェーズで実装予定です。</p>
+              <div className="rounded-[16px] border border-[#eef1f5] bg-[#fcfcfd] px-4 py-4 text-[13px] leading-6 text-[#596273]">
+                指導メモは、商談詳細ページの上司コメントまたはロープレ課題割り当てと合わせて管理してください。
+              </div>
             </Panel>
 
             <Panel title="次回指導メモ">
-              <textarea className="min-h-[150px] w-full resize-y rounded-[14px] border border-[#e4e8ef] bg-white px-4 py-3 text-[14px] leading-7 outline-none focus:border-[#e0bd4b]" placeholder="次回1on1や育成テーマを入力" />
-              <p className="mt-2 text-[12px] text-[#8a909b]">保存先は未設計のため、現在は入力欄のみです。</p>
+              <div className="rounded-[16px] border border-[#eef1f5] bg-[#fcfcfd] px-4 py-4 text-[13px] leading-6 text-[#596273]">
+                次回テーマ: {latestRoleplayFeedback}
+              </div>
             </Panel>
           </div>
         </section>
@@ -131,9 +137,16 @@ function InsightRow({ label, value }: { label: string; value: string }) {
   return (
     <div className="rounded-[16px] border border-[#eef1f5] bg-[#fcfcfd] px-4 py-3">
       <div className="text-[12px] font-bold text-[#8a909b]">{label}</div>
-      <div className="mt-1 text-[14px] font-bold text-[#343b48]">{value === "集計準備中" ? <Placeholder /> : value}</div>
+      <div className="mt-1 text-[14px] font-bold text-[#343b48]">{value === "データなし" ? <Placeholder /> : value}</div>
     </div>
   );
+}
+
+function buildLostReason(meetings: MeetingRecord[]) {
+  const lostMeetings = meetings.filter((meeting) => meeting.status === "lost");
+  if (lostMeetings.length === 0) return "失注商談なし";
+  const latest = lostMeetings[0];
+  return latest.aiSummary?.bullets[0] ?? latest.aiSummary?.overview ?? "失注商談の詳細を確認";
 }
 
 function ErrorBox({ message }: { message: string }) {

@@ -163,9 +163,11 @@ export function subscribeToKnowledgeCategories(
   onError?: (error: FirestoreError) => void,
 ): Unsubscribe {
   const { firestore } = assertFirebaseClient();
-  const categoriesQuery = companyId
-    ? query(collection(firestore, "knowledgeCategories"), where("companyId", "==", companyId))
-    : query(collection(firestore, "knowledgeCategories"), orderBy("updatedAt", "desc"));
+  if (!companyId) {
+    callback([]);
+    return () => undefined;
+  }
+  const categoriesQuery = query(collection(firestore, "knowledgeCategories"), where("companyId", "==", companyId));
 
   return onSnapshot(
     categoriesQuery,
@@ -185,9 +187,11 @@ export function subscribeToKnowledgeProducts(
   onError?: (error: FirestoreError) => void,
 ): Unsubscribe {
   const { firestore } = assertFirebaseClient();
-  const productsQuery = companyId
-    ? query(collection(firestore, "knowledgeProducts"), where("companyId", "==", companyId))
-    : query(collection(firestore, "knowledgeProducts"), orderBy("updatedAt", "desc"));
+  if (!companyId) {
+    callback([]);
+    return () => undefined;
+  }
+  const productsQuery = query(collection(firestore, "knowledgeProducts"), where("companyId", "==", companyId));
 
   return onSnapshot(
     productsQuery,
@@ -207,20 +211,20 @@ export function subscribeToVisibleKnowledgeItems(
   onError?: (error: FirestoreError) => void,
 ): Unsubscribe {
   const { firestore } = assertFirebaseClient();
-  const sharedQuery = input.companyId
-    ? query(
-        collection(firestore, "knowledgeItems"),
-        where("companyId", "==", input.companyId),
-        where("scope", "==", "shared"),
-      )
-    : query(collection(firestore, "knowledgeItems"), where("scope", "==", "shared"));
-  const personalQuery = input.companyId
-    ? query(
-        collection(firestore, "knowledgeItems"),
-        where("companyId", "==", input.companyId),
-        where("ownerId", "==", input.userId),
-      )
-    : query(collection(firestore, "knowledgeItems"), where("ownerId", "==", input.userId));
+  if (!input.companyId) {
+    callback([]);
+    return () => undefined;
+  }
+  const sharedQuery = query(
+    collection(firestore, "knowledgeItems"),
+    where("companyId", "==", input.companyId),
+    where("scope", "==", "shared"),
+  );
+  const personalQuery = query(
+    collection(firestore, "knowledgeItems"),
+    where("companyId", "==", input.companyId),
+    where("ownerId", "==", input.userId),
+  );
 
   let isActive = true;
 
@@ -258,9 +262,11 @@ export function subscribeToAllKnowledgeItems(
   onError?: (error: FirestoreError) => void,
 ): Unsubscribe {
   const { firestore } = assertFirebaseClient();
-  const itemsQuery = companyId
-    ? query(collection(firestore, "knowledgeItems"), where("companyId", "==", companyId))
-    : collection(firestore, "knowledgeItems");
+  if (!companyId) {
+    callback([]);
+    return () => undefined;
+  }
+  const itemsQuery = query(collection(firestore, "knowledgeItems"), where("companyId", "==", companyId));
 
   return onSnapshot(
     itemsQuery,

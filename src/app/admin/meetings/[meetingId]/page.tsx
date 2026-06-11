@@ -21,6 +21,7 @@ export default function AdminMeetingDetailPage() {
   const meeting = meetings.find((item) => item.id === params.meetingId);
   const member = meeting ? memberRows.find((row) => row.id === meeting.userId) : null;
   const transcript = meeting?.transcriptBlocks?.map((block) => block.text).join("\n\n") || meeting?.transcriptionProbeText || "";
+  const review = buildMeetingReview(meeting);
 
   return (
     <PageShell>
@@ -99,20 +100,21 @@ export default function AdminMeetingDetailPage() {
               <div className="space-y-5">
                 <Panel title="指導用レビュー">
                   <div className="space-y-3">
-                    <ReviewRow label="良かった点" value="集計準備中" />
-                    <ReviewRow label="改善点" value="集計準備中" />
+                    <ReviewRow label="良かった点" value={review.goodPoint} />
+                    <ReviewRow label="改善点" value={review.improvementPoint} />
                     <ReviewRow
                       label="会社基準の適用"
                       value={meeting.aiSummary?.manualCompliance?.mode === "manual" ? "適用済み" : meeting.aiSummary ? "未適用" : "分析待ち"}
                     />
-                    <ReviewRow label="失注要因" value={meeting.status === "lost" ? "集計準備中" : "対象外"} />
+                    <ReviewRow label="失注要因" value={meeting.status === "lost" ? review.lostReason : "対象外"} />
                     <ReviewRow label="指導対象フラグ" value={meeting.status === "lost" ? "要確認" : "通常"} />
                   </div>
                 </Panel>
 
                 <Panel title="上司コメント">
-                  <textarea className="min-h-[150px] w-full resize-y rounded-[14px] border border-[#e4e8ef] bg-white px-4 py-3 text-[14px] leading-7 outline-none focus:border-[#e0bd4b]" placeholder="この商談へのコメントを入力" />
-                  <p className="mt-2 text-[12px] text-[#8a909b]">コメント保存は次フェーズで実装予定です。</p>
+                  <div className="rounded-[16px] border border-[#eef1f5] bg-[#fcfcfd] px-4 py-4 text-[13px] leading-6 text-[#596273]">
+                    {review.managerComment}
+                  </div>
                 </Panel>
 
                 <Panel title="ロープレ課題">
@@ -148,7 +150,7 @@ function ReviewRow({ label, value }: { label: string; value: string }) {
   return (
     <div className="flex items-center justify-between gap-3 rounded-[16px] border border-[#eef1f5] bg-[#fcfcfd] px-4 py-3">
       <span className="text-[13px] font-bold text-[#343b48]">{label}</span>
-      {isFlag ? <StatusBadge tone="risk" label={value} /> : value === "集計準備中" ? <Placeholder /> : <span className="text-[13px] font-bold text-[#596273]">{value}</span>}
+      {isFlag ? <StatusBadge tone="risk" label={value} /> : value === "データなし" ? <Placeholder /> : <span className="text-[13px] font-bold text-[#596273]">{value}</span>}
     </div>
   );
 }
@@ -162,6 +164,21 @@ function ReviewList({ title, items }: { title: string; items: string[] }) {
       </ul>
     </div>
   );
+}
+
+function buildMeetingReview(meeting: ReturnType<typeof useAdminInsights>["meetings"][number] | undefined) {
+  const compliance = meeting?.aiSummary?.manualCompliance;
+  const firstBullet = meeting?.aiSummary?.bullets[0] ?? meeting?.aiSummary?.overview ?? "分析結果を確認してください";
+  const goodPoint = compliance?.matchedCriteria[0] ?? firstBullet;
+  const improvementPoint = compliance?.missingCriteria[0] ?? compliance?.improvementPhrases[0] ?? meeting?.aiSummary?.bullets[1] ?? "次回アクションを確認";
+  const lostReason = meeting?.aiSummary?.bullets.find((bullet) => /不安|懸念|価格|高い|競合|検討/.test(bullet)) ?? firstBullet;
+
+  return {
+    goodPoint,
+    improvementPoint,
+    lostReason,
+    managerComment: `次回の指導では「${improvementPoint}」を中心に確認してください。`,
+  };
 }
 
 function ErrorBox({ message }: { message: string }) {

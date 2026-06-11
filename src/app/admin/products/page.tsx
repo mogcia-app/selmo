@@ -8,7 +8,6 @@ import {
   PageHeader,
   PageShell,
   Panel,
-  Placeholder,
   useAdminInsights,
 } from "@/app/admin/_components/admin-insights";
 import {
@@ -64,7 +63,7 @@ export default function AdminProductsPage() {
                     <div className="mt-4 grid gap-3 md:grid-cols-2">
                       <Info label="商品概要" value={findTab(linkedKnowledge, ["概要", "商品概要"])} />
                       <Info label="料金" value={findTab(linkedKnowledge, ["料金", "価格"])} />
-                      <Info label="よくある反論" value="集計準備中" />
+                      <Info label="よくある反論" value={formatListSummary(product.commonObjections)} />
                       <Info label="FAQ" value={findTab(linkedKnowledge, ["Q&A", "FAQ"])} />
                     </div>
 
@@ -251,7 +250,7 @@ function Info({ label, value }: { label: string; value: string }) {
   return (
     <div className="rounded-[14px] border border-[#eef1f5] bg-white px-4 py-3">
       <div className="text-[12px] font-bold text-[#8a909b]">{label}</div>
-      <div className="mt-1 text-[13px] font-bold text-[#343b48]">{value === "集計準備中" ? <Placeholder /> : value}</div>
+      <div className="mt-1 text-[13px] font-bold text-[#343b48]">{value}</div>
     </div>
   );
 }
@@ -270,7 +269,12 @@ function Field({ label, className = "", children }: { label: string; className?:
 
 function findTab(items: Array<{ tabTitle: string; title: string }>, candidates: string[]) {
   const item = items.find((candidate) => candidates.includes(candidate.tabTitle));
-  return item?.title ?? "集計準備中";
+  return item?.title ?? "未登録";
+}
+
+function formatListSummary(items: string[]) {
+  if (items.length === 0) return "未登録";
+  return items.slice(0, 2).join(" / ");
 }
 
 function splitLines(value: string) {

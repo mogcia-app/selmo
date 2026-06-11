@@ -1,6 +1,8 @@
 "use client";
 
 import Link from "next/link";
+import { FirebaseError } from "firebase/app";
+import { useEffect } from "react";
 import { useMemo, useState } from "react";
 
 import {
@@ -9,21 +11,41 @@ import {
   PageHeader,
   PageShell,
   Panel,
-  Placeholder,
   useAdminInsights,
 } from "@/app/admin/_components/admin-insights";
+import { useAuth } from "@/features/auth/auth-provider";
+import { subscribeToSalesActivityEvents, type SalesActivityEvent } from "@/lib/firebase/activity";
 
 export default function AdminKnowledgePage() {
+  const { profile } = useAuth();
   const { knowledgeItems, products, categories, meetings, error } = useAdminInsights();
+  const [events, setEvents] = useState<SalesActivityEvent[]>([]);
+  const [eventError, setEventError] = useState<string | null>(null);
   const [productId, setProductId] = useState("");
   const [categoryId, setCategoryId] = useState("");
   const sharedItems = knowledgeItems.filter((item) => item.scope === "shared");
+  const searchEvents = events.filter((event) => event.type === "knowledge_searched");
   const filteredItems = sharedItems.filter((item) => {
     if (productId && item.productId !== productId) return false;
     if (categoryId && item.categoryId !== categoryId) return false;
     return true;
   });
-  const words = useMemo(() => buildSearchLikeWords(meetings), [meetings]);
+  const words = useMemo(() => buildSearchWords(searchEvents, meetings), [meetings, searchEvents]);
+  const noResultWords = useMemo(() => buildNoResultWords(searchEvents), [searchEvents]);
+  const totalSearchHits = searchEvents.reduce((sum, event) => sum + readNumber(event.metadata.resultCount), 0);
+
+  useEffect(() => {
+    if (!profile?.companyId) {
+      setEvents([]);
+      return;
+    }
+
+    return subscribeToSalesActivityEvents(
+      profile.companyId,
+      setEvents,
+      (nextError: FirebaseError) => setEventError(nextError.message),
+    );
+  }, [profile?.companyId]);
 
   return (
     <PageShell>
@@ -32,15 +54,15 @@ export default function AdminKnowledgePage() {
           eyebrow="KNOWLEDGE ENABLEMENT"
           title="ナレッジ管理"
           description="公式ナレッジと共有ナレッジを整備し、営業が検索で答えに辿り着ける状態を作ります。"
-          action={<Link href="/sales/knowledge/new?kind=knowledge&scope=shared" className="rounded-[14px] border border-[#f0c655] bg-[#ffd84d] px-5 py-3 text-[13px] font-black text-[#171717]">公式ナレッジ作成</Link>}
+          action={<Link href="/admin/knowledge/new" className="rounded-[14px] border border-[#f0c655] bg-[#ffd84d] px-5 py-3 text-[13px] font-black text-[#171717]">公式ナレッジ作成</Link>}
         />
-        {error ? <ErrorBox message={error} /> : null}
+        {error || eventError ? <ErrorBox message={error ?? eventError ?? ""} /> : null}
 
         <section className="mt-6 grid gap-4 md:grid-cols-4">
           <KpiCard label="公式/共有ナレッジ" value={`${sharedItems.length}件`} note="scope: shared" />
           <KpiCard label="商品数" value={`${products.length}件`} note="商品別ナレッジ入口" />
-          <KpiCard label="閲覧数" value="-" note="集計準備中" />
-          <KpiCard label="検索ヒット数" value="-" note="集計準備中" />
+          <KpiCard label="検索回数" value={`${searchEvents.length}回`} note="ナレッジ検索ログ" />
+          <KpiCard label="検索ヒット数" value={`${totalSearchHits}件`} note="検索結果件数の合計" />
         </section>
 
         <section className="mt-5 grid gap-5 xl:grid-cols-[minmax(0,1.35fr)_minmax(360px,0.65fr)]">
@@ -78,11 +100,15 @@ export default function AdminKnowledgePage() {
               {words.length > 0 ? (
                 <WordList words={words} />
               ) : (
-                <EmptyState title="検索ワードは集計準備中です" body="検索履歴や商談ログが蓄積されると表示します。" />
+                <EmptyState title="検索ワードはまだありません" body="検索履歴や商談ログが蓄積されると表示します。" />
               )}
             </Panel>
             <Panel title="検索されているがナレッジがないワード">
-              <Placeholder>集計準備中</Placeholder>
+              {noResultWords.length > 0 ? (
+                <WordList words={noResultWords} />
+              ) : (
+                <EmptyState title="未ヒットワードはありません" body="検索結果0件のキーワードが発生すると、ここに表示されます。" />
+              )}
             </Panel>
           </div>
         </section>
@@ -105,7 +131,14 @@ function WordList({ words }: { words: Array<{ word: string; count: number }> }) 
   );
 }
 
-function buildSearchLikeWords(meetings: ReturnType<typeof useAdminInsights>["meetings"]) {
+function buildSearchWords(events: SalesActivityEvent[], meetings: ReturnType<typeof useAdminInsights>["meetings"]) {
+  const eventWords = events
+    .map((event) => readString(event.metadata.query))
+    .filter(Boolean);
+  if (eventWords.length > 0) {
+    return countWords(eventWords);
+  }
+
   const words = ["料金", "価格", "導入", "比較", "予算", "高い", "検討", "サポート"];
   const counts = new Map<string, number>();
   meetings.forEach((meeting) => {
@@ -116,6 +149,29 @@ function buildSearchLikeWords(meetings: ReturnType<typeof useAdminInsights>["mee
     });
   });
   return Array.from(counts.entries()).map(([word, count]) => ({ word, count })).sort((a, b) => b.count - a.count);
+}
+
+function buildNoResultWords(events: SalesActivityEvent[]) {
+  return countWords(
+    events
+      .filter((event) => readNumber(event.metadata.resultCount) === 0)
+      .map((event) => readString(event.metadata.query))
+      .filter(Boolean),
+  );
+}
+
+function countWords(words: string[]) {
+  const counts = new Map<string, number>();
+  words.forEach((word) => counts.set(word, (counts.get(word) ?? 0) + 1));
+  return Array.from(counts.entries()).map(([word, count]) => ({ word, count })).sort((a, b) => b.count - a.count);
+}
+
+function readString(value: unknown) {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function readNumber(value: unknown) {
+  return typeof value === "number" && Number.isFinite(value) ? value : 0;
 }
 
 function ErrorBox({ message }: { message: string }) {

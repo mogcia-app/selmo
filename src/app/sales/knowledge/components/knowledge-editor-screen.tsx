@@ -26,15 +26,25 @@ import {
 type KnowledgeEditorScreenProps = {
   mode: "create" | "edit";
   knowledgeId?: string;
+  audience?: "sales" | "admin";
 };
 
-export function KnowledgeEditorScreen({ mode, knowledgeId }: KnowledgeEditorScreenProps) {
+export function KnowledgeEditorScreen({ mode, knowledgeId, audience = "sales" }: KnowledgeEditorScreenProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { profile } = useAuth();
   const userId = profile?.uid;
   const companyId = profile?.companyId;
   const canCreateShared = profile?.role === "admin";
+  const isAdminAuthoring = audience === "admin";
+  const backHref = isAdminAuthoring ? "/admin/knowledge" : "/sales/knowledge";
+  const pageTitle = isAdminAuthoring
+    ? mode === "edit"
+      ? "公式ナレッジを編集"
+      : "公式ナレッジを作成"
+    : mode === "edit"
+      ? "ナレッジを編集"
+      : "ナレッジを作成";
   const [categories, setCategories] = useState<KnowledgeCategory[]>([]);
   const [products, setProducts] = useState<KnowledgeProduct[]>([]);
   const [knowledge, setKnowledge] = useState<KnowledgeItem | null>(null);
@@ -49,7 +59,7 @@ export function KnowledgeEditorScreen({ mode, knowledgeId }: KnowledgeEditorScre
     readKind(searchParams.get("kind")) ?? "knowledge",
   );
   const [scope, setScope] = useState<CreateKnowledgeItemInput["scope"]>(
-    searchParams.get("scope") === "shared" ? "shared" : "personal",
+    isAdminAuthoring || searchParams.get("scope") === "shared" ? "shared" : "personal",
   );
   const [tagsText, setTagsText] = useState("");
   const [links, setLinks] = useState<KnowledgeLink[]>([]);
@@ -96,13 +106,19 @@ export function KnowledgeEditorScreen({ mode, knowledgeId }: KnowledgeEditorScre
     setCategoryId(knowledge.categoryId ?? "");
     setProductId(knowledge.productId ?? "");
     setKind(knowledge.kind);
-    setScope(canCreateShared ? knowledge.scope : "personal");
+    setScope(isAdminAuthoring ? "shared" : canCreateShared ? knowledge.scope : "personal");
     setTagsText(knowledge.tags.join(", "));
     setLinks(knowledge.links);
     setAttachments(knowledge.attachments);
     setPendingFiles([]);
     setUploadProgress({});
-  }, [canCreateShared, knowledge]);
+  }, [canCreateShared, isAdminAuthoring, knowledge]);
+
+  useEffect(() => {
+    if (isAdminAuthoring) {
+      setScope("shared");
+    }
+  }, [isAdminAuthoring]);
 
   const selectedProduct = useMemo(
     () => products.find((product) => product.id === productId),
@@ -164,7 +180,7 @@ export function KnowledgeEditorScreen({ mode, knowledgeId }: KnowledgeEditorScre
       categoryId: categoryId || null,
       productId: productId || null,
       ownerId: userId,
-      scope: canCreateShared ? nextScope : "personal",
+      scope: isAdminAuthoring ? "shared" : canCreateShared ? nextScope : "personal",
       kind,
       tags,
       links,
@@ -192,7 +208,11 @@ export function KnowledgeEditorScreen({ mode, knowledgeId }: KnowledgeEditorScre
           attachments: nextAttachments,
         });
       }
-      router.replace(`/sales/knowledge/categories/${payload.categoryId ?? "how-to"}/knowledge/${nextId}`);
+      router.replace(
+        isAdminAuthoring
+          ? "/admin/knowledge"
+          : `/sales/knowledge/categories/${payload.categoryId ?? "how-to"}/knowledge/${nextId}`,
+      );
     } catch (nextError) {
       setError(nextError instanceof Error ? nextError.message : "ナレッジの保存に失敗しました。");
     } finally {
@@ -281,14 +301,14 @@ export function KnowledgeEditorScreen({ mode, knowledgeId }: KnowledgeEditorScre
         <header className="flex flex-wrap items-center justify-between gap-4">
           <div className="flex items-center gap-4">
             <Link
-              href="/sales/knowledge"
+              href={backHref}
               className="inline-flex h-11 w-11 items-center justify-center rounded-full border border-[#e6eaf0] bg-white text-[#171717] shadow-[0_8px_18px_rgba(17,24,39,0.05)]"
               aria-label="ナレッジへ戻る"
             >
               <ArrowLeftIcon />
             </Link>
             <h1 className="text-[22px] font-bold tracking-[-0.03em] text-[#171717]">
-              {mode === "edit" ? "ナレッジを編集" : "ナレッジを作成"}
+              {pageTitle}
             </h1>
           </div>
 
@@ -298,7 +318,7 @@ export function KnowledgeEditorScreen({ mode, knowledgeId }: KnowledgeEditorScre
               disabled={isSaving}
               className="inline-flex h-11 items-center justify-center rounded-[14px] border border-[#e4e8ef] bg-white px-5 text-[13px] font-bold text-[#343b48] shadow-[0_8px_18px_rgba(17,24,39,0.04)] disabled:opacity-60"
             >
-              下書きを保存
+              {isAdminAuthoring ? "公式ナレッジを保存" : "下書きを保存"}
             </button>
             <a
               href="#preview"
@@ -309,10 +329,10 @@ export function KnowledgeEditorScreen({ mode, knowledgeId }: KnowledgeEditorScre
             <button
               type="button"
               disabled={isSaving}
-              onClick={() => void saveKnowledge(canCreateShared ? "shared" : "personal")}
+              onClick={() => void saveKnowledge(isAdminAuthoring ? "shared" : canCreateShared ? "shared" : "personal")}
               className="inline-flex h-11 items-center justify-center rounded-[14px] border border-[#f0c655] bg-[#ffd84d] px-6 text-[13px] font-bold text-[#171717] shadow-[0_8px_18px_rgba(245,189,7,0.16)] disabled:opacity-60"
             >
-              {isSaving ? "保存中" : "公開する"}
+              {isSaving ? "保存中" : isAdminAuthoring ? "公式として保存" : "公開する"}
             </button>
             <span className="inline-flex h-11 w-11 items-center justify-center rounded-full bg-[#171717] shadow-[0_10px_18px_rgba(17,24,39,0.12)]">
               <Image src="/nareji.png" alt="ナレッジ" width={30} height={30} className="h-[30px] w-[30px] object-contain" />
@@ -323,6 +343,13 @@ export function KnowledgeEditorScreen({ mode, knowledgeId }: KnowledgeEditorScre
         {error ? (
           <div className="mt-5 rounded-[16px] border border-[#f4d4d4] bg-[#fff8f8] px-4 py-3 text-[13px] font-medium text-[#b4232a]">
             {error}
+          </div>
+        ) : null}
+
+        {isAdminAuthoring ? (
+          <div className="mt-5 rounded-[18px] border border-[#f0e3c1] bg-[#fffaf0] px-5 py-4 text-[13px] leading-6 text-[#6f6250]">
+            このページで作成したナレッジは、全salesが検索・閲覧できる公式ナレッジとして保存されます。
+            個人メモではなく、商談準備や回答品質の基準になる内容として登録してください。
           </div>
         ) : null}
 
@@ -611,30 +638,48 @@ export function KnowledgeEditorScreen({ mode, knowledgeId }: KnowledgeEditorScre
               <h2 className="text-[18px] font-bold text-[#171717]">公開設定</h2>
               <div className="mt-5 space-y-5">
                 <Field label="公開範囲">
-                  <div className="grid gap-3">
-                    <RadioButton checked={scope === "personal"} onClick={() => setScope("personal")}>
-                      自分のみ
-                    </RadioButton>
-                    {canCreateShared ? (
-                      <RadioButton checked={scope === "shared"} onClick={() => setScope("shared")}>
-                        全体に公開
+                  {isAdminAuthoring ? (
+                    <div className="rounded-[16px] border border-[#f0e3c1] bg-[#fffaf0] px-4 py-3">
+                      <div className="text-[13px] font-bold text-[#8a6500]">全salesに公開</div>
+                      <p className="mt-1 text-[12px] leading-5 text-[#6f6250]">
+                        adminで作成するナレッジは、公式ナレッジとして全営業担当に表示されます。
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="grid gap-3">
+                      <RadioButton checked={scope === "personal"} onClick={() => setScope("personal")}>
+                        自分のみ
                       </RadioButton>
-                    ) : null}
-                  </div>
+                      {canCreateShared ? (
+                        <RadioButton checked={scope === "shared"} onClick={() => setScope("shared")}>
+                          全体に公開
+                        </RadioButton>
+                      ) : null}
+                    </div>
+                  )}
                 </Field>
                 <Field label="ステータス">
-                  <div className="grid gap-3">
-                    <RadioButton checked>下書き</RadioButton>
-                    <RadioButton checked={false}>公開する</RadioButton>
-                  </div>
+                  {isAdminAuthoring ? (
+                    <div className="rounded-[16px] border border-[#e4e8ef] bg-white px-4 py-3">
+                      <div className="text-[13px] font-bold text-[#171717]">公式として公開</div>
+                      <p className="mt-1 text-[12px] leading-5 text-[#7a808c]">
+                        保存後、sales側のナレッジ一覧と検索結果に表示されます。
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="grid gap-3">
+                      <RadioButton checked>下書き</RadioButton>
+                      <RadioButton checked={false}>公開する</RadioButton>
+                    </div>
+                  )}
                 </Field>
                 <button
                   type="button"
                   disabled={isSaving}
-                  onClick={() => void saveKnowledge(canCreateShared ? "shared" : "personal")}
+                  onClick={() => void saveKnowledge(isAdminAuthoring ? "shared" : canCreateShared ? "shared" : "personal")}
                   className="inline-flex h-12 w-full items-center justify-center rounded-[14px] border border-[#f0c655] bg-[#ffd84d] px-6 text-[14px] font-bold text-[#171717] shadow-[0_8px_18px_rgba(245,189,7,0.16)] disabled:opacity-60"
                 >
-                  {isSaving ? "保存中" : "公開する"}
+                  {isSaving ? "保存中" : isAdminAuthoring ? "公式として保存" : "公開する"}
                 </button>
               </div>
             </section>

@@ -9,7 +9,18 @@ import {
   signOut,
   type User,
 } from "firebase/auth";
-import { collection, doc, getDoc, onSnapshot, serverTimestamp, setDoc, type FirestoreError, type Unsubscribe } from "firebase/firestore";
+import {
+  collection,
+  doc,
+  getDoc,
+  onSnapshot,
+  query,
+  serverTimestamp,
+  setDoc,
+  where,
+  type FirestoreError,
+  type Unsubscribe,
+} from "firebase/firestore";
 
 import { assertFirebaseClient } from "@/lib/firebase/client";
 import type { UserRole } from "@/types/domain";
@@ -168,11 +179,17 @@ export async function fetchUserProfile(uid: string): Promise<AppUserProfile | nu
 export function subscribeToUserProfiles(
   callback: (profiles: AppUserProfile[]) => void,
   onError?: (error: FirestoreError) => void,
+  companyId?: string | null,
 ): Unsubscribe {
   const { firestore } = assertFirebaseClient();
+  if (!companyId) {
+    callback([]);
+    return () => undefined;
+  }
+  const usersQuery = query(collection(firestore, "users"), where("companyId", "==", companyId));
 
   return onSnapshot(
-    collection(firestore, "users"),
+    usersQuery,
     (snapshot) => {
       callback(
         snapshot.docs

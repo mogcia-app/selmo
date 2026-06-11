@@ -35,7 +35,7 @@ export default function AdminDashboardPage() {
     if (!profile?.companyId) return;
     const handleError = (nextError: FirebaseError) => setError(nextError.message);
     const unsubscribers = [
-      subscribeToUserProfiles(setUsers, handleError),
+      subscribeToUserProfiles(setUsers, handleError, profile.companyId),
       subscribeToMeetings({ role: "admin", userId: "admin", companyId: profile.companyId }, setMeetings, handleError),
       subscribeToKnowledgeProducts(profile?.companyId, setProducts, handleError),
       subscribeToRoleplayScenarios(profile.companyId, setRoleplayScenarios, handleError),
@@ -76,21 +76,26 @@ export default function AdminDashboardPage() {
   }, [roleplayResults]);
   const productRows = useMemo(() => buildProductRows(products, knowledgeItems), [knowledgeItems, products]);
   const repRows = useMemo(() => buildRepRows(activeSalesUsers, meetings, roleplayResults), [activeSalesUsers, meetings, roleplayResults]);
+  const attentionRows = useMemo(() => repRows.filter((row) => row.tone === "risk" || row.nextAction !== "通常フォロー").slice(0, 5), [repRows]);
+  const monthlyTrend = useMemo(() => buildMonthlyTrend(meetings), [meetings]);
+  const roleplayUsageRate = activeSalesUsers.length > 0
+    ? Math.round((new Set(roleplayResults.map((result) => result.userId)).size / activeSalesUsers.length) * 100)
+    : null;
 
   return (
-    <main className="min-h-screen bg-[#f7f8fb] px-6 py-8 md:px-10">
+    <main className="min-h-screen bg-[#f5f5f6] px-5 py-6 md:px-8 md:py-8">
       <div className="mx-auto max-w-[1480px]">
         <header className="flex flex-wrap items-start justify-between gap-5">
           <div>
-            <p className="text-[13px] font-bold text-[#8a6500]">MANAGER DASHBOARD</p>
-            <h1 className="mt-1 text-[34px] font-black tracking-[-0.04em] text-[#171717]">
+            <p className="text-[12px] font-bold uppercase tracking-[0.16em] text-[#8a6500]">MANAGER DASHBOARD</p>
+            <h1 className="mt-1 text-[32px] font-black tracking-[-0.04em] text-[#171717] md:text-[34px]">
               ダッシュボード
             </h1>
             <p className="mt-2 text-[14px] leading-7 text-[#596273]">
               チーム全体の営業状況と、ナレッジ・ロープレの運用状況を確認できます。
             </p>
           </div>
-          <div className="rounded-[14px] border border-[#e2e6ee] bg-white px-4 py-3 text-[13px] font-bold text-[#596273]">
+          <div className="rounded-full border border-[#e8ebf0] bg-white px-4 py-3 text-[13px] font-bold text-[#596273] shadow-[0_8px_22px_rgba(17,24,39,0.04)]">
             {formatMonthRange(new Date())}
           </div>
         </header>
@@ -104,24 +109,70 @@ export default function AdminDashboardPage() {
         <section className="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-5">
           <KpiCard icon={<UsersIcon />} label="営業マン数" value={`${salesUsers.length}人`} note={`アクティブ: ${activeSalesUsers.length}人`} />
           <KpiCard icon={<PhoneIcon />} label="通話/商談件数" value={`${meetings.length}件`} note={meetings.length > 0 ? "Firestore連携済み" : "商談データ待ち"} />
-          <KpiCard icon={<TargetIcon />} label="成約率" value={winRate === null ? "-" : `${winRate}%`} note={winRate === null ? "集計準備中" : `成約 ${wonMeetings}件`} />
+          <KpiCard icon={<TargetIcon />} label="成約率" value={winRate === null ? "-" : `${winRate}%`} note={winRate === null ? "商談なし" : `成約 ${wonMeetings}件`} />
           <KpiCard icon={<ClockIcon />} label="平均通話時間" value={avgDurationMin === null ? "-" : `${avgDurationMin}分`} note={avgDurationMin === null ? "音声時間データ待ち" : "音声メタデータより算出"} />
           <KpiCard icon={<BookIcon />} label="共有ナレッジ" value={`${sharedKnowledgeCount}件`} note={`商品: ${products.length}件 / 全体: ${knowledgeItems.length}件`} />
+        </section>
+
+        <section className="mt-5">
+          <Panel title="要対応メンバー" actionLabel="商談レビューへ" href="/admin/meetings">
+            {attentionRows.length > 0 ? (
+              <div className="grid gap-3 lg:grid-cols-2 xl:grid-cols-3">
+                {attentionRows.map((row) => (
+                  <article key={row.id} className="rounded-[18px] border border-[#f0e3c1] bg-[#fffaf0] px-4 py-4">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="flex min-w-0 items-center gap-3">
+                        <span className="inline-flex h-11 w-11 items-center justify-center rounded-full bg-[#ffd84d] text-[15px] font-black text-[#171717]">
+                          {row.name.slice(0, 1)}
+                        </span>
+                        <div className="min-w-0">
+                          <div className="truncate text-[15px] font-black text-[#171717]">{row.name}</div>
+                          <div className="truncate text-[12px] text-[#8a909b]">{row.email}</div>
+                        </div>
+                      </div>
+                      <StatusBadge tone={row.tone} label={row.status} />
+                    </div>
+                    <div className="mt-4 grid grid-cols-3 gap-2 rounded-[14px] bg-white px-3 py-3">
+                      <InlineStat label="商談" value={`${row.meetingCount}件`} />
+                      <InlineStat label="失注" value={`${row.lostCount}件`} />
+                      <InlineStat label="ロープレ" value={`${row.roleplayCount}回`} />
+                    </div>
+                    <div className="mt-4 rounded-[14px] bg-white px-3 py-3">
+                      <div className="text-[12px] font-bold text-[#8a909b]">次に見ること</div>
+                      <div className="mt-1 text-[13px] font-black text-[#343b48]">{row.nextAction}</div>
+                    </div>
+                    <div className="mt-4 flex items-center justify-between gap-3">
+                      <span className="text-[12px] font-bold text-[#8a909b]">最終活動: {row.latestActivity}</span>
+                      <Link href={`/admin/members/${row.id}`} className="rounded-[12px] bg-[#171717] px-3 py-2 text-[12px] font-black text-white">
+                        個別確認
+                      </Link>
+                    </div>
+                  </article>
+                ))}
+              </div>
+            ) : (
+              <EmptyState title="要対応メンバーはありません" body="失注や未分析、ロープレ不足が見つかるとここに表示されます。" />
+            )}
+          </Panel>
         </section>
 
         <section className="mt-5 grid gap-5 xl:grid-cols-[minmax(0,1.5fr)_minmax(360px,0.7fr)]">
           <Panel title="営業マン別サマリー" actionLabel="一覧を見る" href="/admin/reps">
             {repRows.length > 0 ? (
               <div className="overflow-x-auto">
-                <table className="w-full min-w-[720px] text-left">
+                <table className="w-full min-w-[1180px] text-left">
                   <thead>
                     <tr className="border-b border-[#eef1f5] text-[12px] text-[#7a808c]">
                       <th className="px-4 py-3 font-bold">営業マン</th>
                       <th className="px-4 py-3 font-bold">商談</th>
+                      <th className="px-4 py-3 font-bold">失注</th>
                       <th className="px-4 py-3 font-bold">成約率</th>
                       <th className="px-4 py-3 font-bold">ロープレ</th>
                       <th className="px-4 py-3 font-bold">平均スコア</th>
+                      <th className="px-4 py-3 font-bold">最終活動</th>
+                      <th className="px-4 py-3 font-bold">次回対応</th>
                       <th className="px-4 py-3 font-bold">状態</th>
+                      <th className="px-4 py-3 font-bold">詳細</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -139,19 +190,27 @@ export default function AdminDashboardPage() {
                           </div>
                         </td>
                         <td className="px-4 py-4 text-[13px] font-bold text-[#343b48]">{row.meetingCount}件</td>
+                        <td className="px-4 py-4 text-[13px] font-bold text-[#343b48]">{row.lostCount}件</td>
                         <td className="px-4 py-4">
                           <Progress value={row.winRate ?? 0} tone={row.tone} label={row.winRate === null ? "-" : `${row.winRate}%`} />
                         </td>
                         <td className="px-4 py-4 text-[13px] font-bold text-[#343b48]">{row.roleplayCount}回</td>
                         <td className="px-4 py-4 text-[13px] font-bold text-[#343b48]">{row.averageScore === null ? "-" : `${row.averageScore}点`}</td>
+                        <td className="px-4 py-4 text-[13px] font-bold text-[#596273]">{row.latestActivity}</td>
+                        <td className="px-4 py-4 text-[13px] font-bold text-[#343b48]">{row.nextAction}</td>
                         <td className="px-4 py-4"><StatusBadge tone={row.tone} label={row.status} /></td>
+                        <td className="px-4 py-4">
+                          <Link href={`/admin/members/${row.id}`} className="text-[13px] font-bold text-[#2672d9]">
+                            個別確認
+                          </Link>
+                        </td>
                       </tr>
                     ))}
                   </tbody>
                 </table>
               </div>
             ) : (
-              <EmptyState title="営業ユーザーはまだ登録されていません" body="ユーザー登録後、営業マン別の状況が表示されます。" />
+              <EmptyState title="営業ユーザーはまだいません" body="営業メンバーが追加されると、営業マン別の状況が表示されます。" />
             )}
           </Panel>
 
@@ -159,15 +218,19 @@ export default function AdminDashboardPage() {
             <Panel title="商材別 成約率" actionLabel="商品を見る" href="/sales/knowledge">
               {productRows.length > 0 ? (
                 <div className="space-y-3">
-                  {productRows.map((row) => (
+                  {productRows.map((row) => {
+                    const productMeetings = meetings.filter((meeting) => meeting.productType === row.name);
+                    const productWinRate = calcWinRate(productMeetings);
+                    return (
                     <div key={row.id} className="flex items-center justify-between gap-4 rounded-[16px] border border-[#eef1f5] bg-[#fcfcfd] px-4 py-3">
                       <div className="min-w-0">
                         <div className="truncate text-[14px] font-black text-[#171717]">{row.name}</div>
                         <div className="mt-1 text-[12px] text-[#8a909b]">ナレッジ {row.knowledgeCount}件</div>
                       </div>
-                      <span className="text-[13px] font-bold text-[#8a909b]">集計準備中</span>
+                      <span className="text-[13px] font-bold text-[#8a6500]">{productWinRate === null ? "商談なし" : `${productWinRate}%`}</span>
                     </div>
-                  ))}
+                    );
+                  })}
                 </div>
               ) : (
                 <EmptyState title="商品はまだありません" body="商品別ナレッジを追加すると、商材別の状況が表示されます。" />
@@ -182,7 +245,11 @@ export default function AdminDashboardPage() {
 
         <section className="mt-5 grid gap-5 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(360px,0.85fr)]">
           <Panel title="成約率の推移">
-            <AnalyticsPlaceholder title="推移グラフは集計準備中" body="月次の商談結果が蓄積されると、成約率の推移を表示します。" />
+            {monthlyTrend.length > 0 ? (
+              <TrendBars rows={monthlyTrend} />
+            ) : (
+              <AnalyticsPlaceholder title="商談データはまだありません" body="商談結果が蓄積されると、月別の成約率を表示します。" />
+            )}
           </Panel>
 
           <Panel title="ロープレ活用状況">
@@ -190,11 +257,11 @@ export default function AdminDashboardPage() {
               <MiniMetric label="シナリオ" value={`${roleplayScenarios.length}件`} />
               <MiniMetric label="実施回数" value={`${roleplayResults.length}回`} />
               <MiniMetric label="平均スコア" value={roleplayAverage === null ? "-" : `${roleplayAverage}点`} />
-              <MiniMetric label="活用率" value="集計準備中" />
+              <MiniMetric label="活用率" value={roleplayUsageRate === null ? "-" : `${roleplayUsageRate}%`} />
             </div>
           </Panel>
 
-          <Panel title="AIからのコメント">
+          <Panel title="指導コメント">
             <div className="rounded-[18px] border border-[#f0e3c1] bg-[#fffaf0] px-5 py-5">
               <p className="text-[14px] leading-7 text-[#343b48]">
                 {buildTeamComment({
@@ -207,9 +274,7 @@ export default function AdminDashboardPage() {
           </Panel>
         </section>
 
-        <p className="mt-6 text-[12px] text-[#8a909b]">
-          データはFirestore上の実データを表示しています。未連携の営業指標は「集計準備中」として表示しています。
-        </p>
+        <p className="mt-6 text-[12px] text-[#8a909b]">データはFirestore上の実データを表示しています。</p>
       </div>
     </main>
   );
@@ -217,7 +282,7 @@ export default function AdminDashboardPage() {
 
 function KpiCard({ icon, label, value, note }: { icon: React.ReactNode; label: string; value: string; note: string }) {
   return (
-    <article className="rounded-[18px] border border-[#e2e6ee] bg-white px-5 py-5 shadow-[0_8px_22px_rgba(17,24,39,0.04)]">
+    <article className="rounded-[22px] border border-[#eceef4] bg-white px-5 py-5 shadow-[0_10px_28px_rgba(17,24,39,0.05)]">
       <div className="flex items-center gap-4">
         <span className="inline-flex h-12 w-12 items-center justify-center rounded-full bg-[#fff3cf] text-[#f0b400]">
           {icon}
@@ -234,11 +299,11 @@ function KpiCard({ icon, label, value, note }: { icon: React.ReactNode; label: s
 
 function Panel({ title, actionLabel, href, children }: { title: string; actionLabel?: string; href?: string; children: React.ReactNode }) {
   return (
-    <section className="rounded-[20px] border border-[#e2e6ee] bg-white shadow-[0_8px_22px_rgba(17,24,39,0.04)]">
+    <section className="rounded-[24px] border border-[#eceef4] bg-white shadow-[0_10px_28px_rgba(17,24,39,0.05)]">
       <div className="flex items-center justify-between gap-4 border-b border-[#eef1f5] px-5 py-4">
         <h2 className="text-[18px] font-black text-[#171717]">{title}</h2>
         {actionLabel && href ? (
-          <Link href={href} className="text-[13px] font-bold text-[#2672d9]">
+          <Link href={href} className="rounded-full border border-[#ead8a8] bg-[#fffaf0] px-3 py-1.5 text-[12px] font-black text-[#8a6500] transition hover:bg-[#fff3cd]">
             {actionLabel}
           </Link>
         ) : null}
@@ -288,7 +353,7 @@ function KeywordList({ meetings }: { meetings: MeetingRecord[] }) {
   return (
     <div className="space-y-2">
       {keywords.map((keyword, index) => (
-        <div key={keyword.word} className="flex items-center gap-3 rounded-[14px] bg-[#fcfcfd] px-3 py-2">
+        <div key={keyword.word} className="flex items-center gap-3 rounded-[16px] border border-[#eef1f5] bg-[#fcfcfd] px-3 py-2.5">
           <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-[#ffd84d] text-[12px] font-black text-[#171717]">{index + 1}</span>
           <span className="min-w-0 flex-1 truncate text-[13px] font-bold text-[#343b48]">{keyword.word}</span>
           <span className="text-[12px] text-[#8a909b]">{keyword.count}回</span>
@@ -300,7 +365,7 @@ function KeywordList({ meetings }: { meetings: MeetingRecord[] }) {
 
 function AnalyticsPlaceholder({ title, body }: { title: string; body: string }) {
   return (
-    <div className="flex min-h-[180px] items-center justify-center rounded-[18px] border border-dashed border-[#dfe4ec] bg-[#fcfcfd] px-5 text-center">
+    <div className="flex min-h-[180px] items-center justify-center rounded-[20px] border border-dashed border-[#dfe4ec] bg-[#fcfcfd] px-5 text-center">
       <div>
         <h3 className="text-[17px] font-black text-[#171717]">{title}</h3>
         <p className="mx-auto mt-2 max-w-[360px] text-[13px] leading-6 text-[#7a808c]">{body}</p>
@@ -309,9 +374,30 @@ function AnalyticsPlaceholder({ title, body }: { title: string; body: string }) 
   );
 }
 
+function TrendBars({ rows }: { rows: Array<{ label: string; meetingCount: number; winRate: number }> }) {
+  return (
+    <div className="space-y-3">
+      {rows.map((row) => (
+        <div key={row.label} className="rounded-[16px] border border-[#eef1f5] bg-[#fcfcfd] px-4 py-3">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <div className="text-[13px] font-black text-[#171717]">{row.label}</div>
+              <div className="mt-1 text-[12px] text-[#8a909b]">{row.meetingCount}件</div>
+            </div>
+            <span className="text-[13px] font-black text-[#8a6500]">{row.winRate}%</span>
+          </div>
+          <div className="mt-3 h-2 rounded-full bg-[#edf0f5]">
+            <div className="h-full rounded-full bg-[#ffd84d]" style={{ width: `${Math.min(row.winRate, 100)}%` }} />
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function MiniMetric({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-[16px] border border-[#eef1f5] bg-[#fcfcfd] px-4 py-4">
+    <div className="rounded-[18px] border border-[#eef1f5] bg-[#fcfcfd] px-4 py-4">
       <div className="text-[12px] font-bold text-[#8a909b]">{label}</div>
       <div className="mt-2 text-[24px] font-black tracking-[-0.04em] text-[#171717]">{value}</div>
     </div>
@@ -326,27 +412,78 @@ function buildProductRows(products: KnowledgeProduct[], items: KnowledgeItem[]) 
   }));
 }
 
+function calcWinRate(meetings: MeetingRecord[]) {
+  if (meetings.length === 0) return null;
+  return Math.round((meetings.filter((meeting) => meeting.status === "won").length / meetings.length) * 1000) / 10;
+}
+
+function buildMonthlyTrend(meetings: MeetingRecord[]) {
+  const rowsByMonth = new Map<string, MeetingRecord[]>();
+  meetings.forEach((meeting) => {
+    if (!meeting.recordedAt) return;
+    const key = `${meeting.recordedAt.getFullYear()}/${String(meeting.recordedAt.getMonth() + 1).padStart(2, "0")}`;
+    rowsByMonth.set(key, [...(rowsByMonth.get(key) ?? []), meeting]);
+  });
+
+  return Array.from(rowsByMonth.entries())
+    .sort(([left], [right]) => left.localeCompare(right))
+    .slice(-6)
+    .map(([label, monthMeetings]) => ({
+      label,
+      meetingCount: monthMeetings.length,
+      winRate: calcWinRate(monthMeetings) ?? 0,
+    }));
+}
+
 function buildRepRows(users: AppUserProfile[], meetings: MeetingRecord[], results: RoleplayResult[]) {
-  return users.slice(0, 6).map((user) => {
+  return users.map((user) => {
     const userMeetings = meetings.filter((meeting) => meeting.userId === user.uid);
     const wonCount = userMeetings.filter((meeting) => meeting.status === "won").length;
+    const lostCount = userMeetings.filter((meeting) => meeting.status === "lost").length;
+    const unanalyzedCount = userMeetings.filter((meeting) => !meeting.aiSummary).length;
     const userResults = results.filter((result) => result.userId === user.uid);
+    const latestActivityAt = [
+      ...userMeetings.map((meeting) => meeting.recordedAt),
+      ...userResults.map((result) => result.createdAt),
+    ]
+      .filter((date): date is Date => Boolean(date))
+      .sort((left, right) => right.getTime() - left.getTime())[0] ?? null;
     const winRate = userMeetings.length > 0 ? Math.round((wonCount / userMeetings.length) * 1000) / 10 : null;
     const averageScore = userResults.length > 0 ? Math.round(userResults.reduce((sum, result) => sum + result.score, 0) / userResults.length) : null;
     const tone: "good" | "normal" | "risk" =
-      averageScore !== null && averageScore >= 80 ? "good" : winRate !== null && winRate < 20 ? "risk" : "normal";
+      lostCount > 0 || (winRate !== null && winRate < 20)
+        ? "risk"
+        : averageScore !== null && averageScore >= 80
+          ? "good"
+          : "normal";
+    const nextAction =
+      lostCount > 0
+        ? "失注商談を確認"
+        : unanalyzedCount > 0
+          ? "AI分析結果を確認"
+          : userResults.length === 0 && userMeetings.length > 0
+            ? "ロープレ課題を割り当て"
+            : "通常フォロー";
 
     return {
       id: user.uid,
       name: user.name ?? "未設定",
       email: user.email ?? "",
       meetingCount: userMeetings.length,
+      lostCount,
+      unanalyzedCount,
       winRate,
       roleplayCount: userResults.length,
       averageScore,
       tone,
       status: tone === "good" ? "好調" : tone === "risk" ? "要支援" : "確認中",
+      latestActivity: formatShortDate(latestActivityAt),
+      nextAction,
     };
+  }).sort((left, right) => {
+    const toneWeight = { risk: 0, normal: 1, good: 2 } as const;
+    if (toneWeight[left.tone] !== toneWeight[right.tone]) return toneWeight[left.tone] - toneWeight[right.tone];
+    return right.lostCount - left.lostCount;
   });
 }
 
@@ -392,6 +529,20 @@ function formatMonthRange(date: Date) {
   const end = new Date(year, month + 1, 0);
   const formatter = new Intl.DateTimeFormat("ja-JP", { year: "numeric", month: "2-digit", day: "2-digit" });
   return `${formatter.format(start)} 〜 ${formatter.format(end)}`;
+}
+
+function formatShortDate(date: Date | null) {
+  if (!date) return "未登録";
+  return new Intl.DateTimeFormat("ja-JP", { month: "2-digit", day: "2-digit" }).format(date);
+}
+
+function InlineStat({ label, value }: { label: string; value: string }) {
+  return (
+    <div>
+      <div className="text-[11px] font-bold text-[#8a909b]">{label}</div>
+      <div className="mt-1 text-[16px] font-black text-[#171717]">{value}</div>
+    </div>
+  );
 }
 
 function UsersIcon() {

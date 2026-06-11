@@ -90,7 +90,7 @@ export default function AdminRoleplayPage() {
         <section className="mt-6 grid gap-4 md:grid-cols-4">
           <KpiCard label="シナリオ" value={`${roleplayScenarios.length}件`} note="登録済み" />
           <KpiCard label="実施回数" value={`${roleplayResults.length}回`} note="結果保存済み" />
-          <KpiCard label="平均スコア" value={averageScore === null ? "-" : `${averageScore}点`} note={averageScore === null ? "集計準備中" : "全体平均"} />
+          <KpiCard label="平均スコア" value={averageScore === null ? "-" : `${averageScore}点`} note={averageScore === null ? "結果なし" : "全体平均"} />
           <KpiCard label="未実施者" value={`${inactiveMembers.length}人`} note="結果未保存の営業メンバー" />
           <KpiCard label="割り当て中" value={`${activeAssignments.length}件`} note="未完了の課題" />
         </section>
@@ -111,7 +111,7 @@ export default function AdminRoleplayPage() {
                       </div>
                       <span className="text-[13px] font-bold text-[#596273]">{formatDifficulty(scenario.difficulty)}</span>
                       <span className="text-[13px] font-bold text-[#596273]">{results.length}回実施</span>
-                      <span className="text-[13px] font-bold text-[#596273]">{score === null ? "集計準備中" : `${score}点`}</span>
+                      <span className="text-[13px] font-bold text-[#596273]">{score === null ? "結果なし" : `${score}点`}</span>
                     </div>
                   );
                 })}

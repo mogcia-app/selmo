@@ -1,57 +1,69 @@
-import Link from "next/link";
+"use client";
+
+import {
+  EmptyState,
+  PageHeader,
+  PageShell,
+  Panel,
+  StatusBadge,
+  useAdminInsights,
+} from "@/app/admin/_components/admin-insights";
 
 export default function AdminUsersPage() {
-  const users = [
-    ["管理者", "admin@example.com", "admin", "active"],
-    ["山田 麻衣", "sales-a@example.com", "sales", "active"],
-    ["鈴木 大輔", "sales-b@example.com", "sales", "active"],
-    ["佐藤 健一", "sales-c@example.com", "sales", "inactive"],
-  ] as const;
+  const { users, error } = useAdminInsights();
 
   return (
-    <main className="mx-auto min-h-screen max-w-[1480px] px-6 py-10 md:px-10">
-      <header className="mb-8 flex flex-col gap-4 border-b border-[var(--line)] pb-6 md:flex-row md:items-end md:justify-between">
-        <div>
-          <h1 className="font-editorial text-[38px] font-bold leading-[1.05] text-[var(--ink)]">
-            ユーザー管理
-          </h1>
-          <p className="font-mono-ui mt-3 text-[10px] uppercase tracking-[0.22em] text-[var(--gray)]">
-            Roles · access control
-          </p>
-        </div>
-        <Link
-          href="/register"
-          className="inline-flex border border-[var(--line)] bg-[var(--ink)] px-4 py-[10px] text-[12.5px] font-medium text-[var(--paper)] transition hover:bg-[var(--line)]"
-        >
-          ＋ ユーザー登録
-        </Link>
-      </header>
+    <PageShell>
+      <div className="mx-auto max-w-[1480px]">
+        <PageHeader
+          eyebrow="USERS"
+          title="ユーザー管理"
+          description="同じ会社に所属する管理者・営業担当のアカウントを確認します。"
+        />
 
-      <section className="overflow-hidden border border-[var(--line)] bg-[var(--paper)]">
-        <table className="w-full text-left">
-          <thead className="border-b border-[var(--line)] bg-[var(--paper-2)]">
-            <tr className="font-mono-ui text-[10px] uppercase tracking-[0.18em] text-[var(--gray)]">
-              <th className="px-5 py-4 font-medium">名前</th>
-              <th className="px-5 py-4 font-medium">メール</th>
-              <th className="px-5 py-4 font-medium">権限</th>
-              <th className="px-5 py-4 font-medium">状態</th>
-            </tr>
-          </thead>
-          <tbody>
-            {users.map(([name, email, role, status]) => (
-              <tr
-                key={email}
-                className="border-b border-[var(--line-soft)] last:border-b-0 hover:bg-[var(--paper-2)]"
-              >
-                <td className="px-5 py-4 text-[14px] text-[var(--ink)]">{name}</td>
-                <td className="px-5 py-4 text-[13px] text-[var(--gray-2)]">{email}</td>
-                <td className="px-5 py-4 text-[13px] text-[var(--gray-2)]">{role}</td>
-                <td className="px-5 py-4 text-[13px] text-[var(--gray-2)]">{status}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </section>
-    </main>
+        {error ? <ErrorBox message={error} /> : null}
+
+        <Panel title="ユーザー一覧">
+          {users.length > 0 ? (
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[760px] text-left">
+                <thead>
+                  <tr className="border-b border-[#eef1f5] text-[12px] font-bold text-[#7a808c]">
+                    <th className="px-5 py-4">名前</th>
+                    <th className="px-5 py-4">メール</th>
+                    <th className="px-5 py-4">権限</th>
+                    <th className="px-5 py-4">状態</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {users.map((user) => (
+                    <tr key={user.uid} className="border-b border-[#f0f2f6] last:border-b-0 hover:bg-[#fffdf7]">
+                      <td className="px-5 py-4 text-[14px] font-black text-[#171717]">{user.name ?? "未設定"}</td>
+                      <td className="px-5 py-4 text-[13px] text-[#596273]">{user.email ?? "未登録"}</td>
+                      <td className="px-5 py-4 text-[13px] font-bold text-[#343b48]">{formatRole(user.role)}</td>
+                      <td className="px-5 py-4">
+                        <StatusBadge tone={user.status === "active" ? "good" : "normal"} label={user.status === "active" ? "有効" : "停止中"} />
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <EmptyState title="ユーザーはまだありません" body="同じ会社のユーザーが追加されると、ここに表示されます。" />
+          )}
+        </Panel>
+      </div>
+    </PageShell>
   );
+}
+
+function formatRole(role: string) {
+  if (role === "owner") return "オーナー";
+  if (role === "admin") return "管理者";
+  return "営業担当";
+}
+
+function ErrorBox({ message }: { message: string }) {
+  return <div className="mt-5 rounded-[16px] border border-[#f4d4d4] bg-[#fff8f8] px-4 py-3 text-[13px] font-medium text-[#b4232a]">{message}</div>;
 }

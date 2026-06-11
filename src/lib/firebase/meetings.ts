@@ -427,17 +427,14 @@ export function subscribeToMeetings(
 ): Unsubscribe {
   const { firestore } = assertFirebaseClient();
   const meetingsRef = collection(firestore, "meetings");
+  if (!input.companyId) {
+    callback([]);
+    return () => undefined;
+  }
   const meetingsQueries =
-    input.companyId
-      ? input.role === "admin"
-        ? [query(meetingsRef, where("companyId", "==", input.companyId))]
-        : [
-            query(meetingsRef, where("companyId", "==", input.companyId), where("userId", "==", input.userId)),
-            query(meetingsRef, where("userId", "==", input.userId)),
-          ]
-      : input.role === "admin"
-        ? [query(meetingsRef)]
-        : [query(meetingsRef, where("userId", "==", input.userId))];
+    input.role === "admin"
+      ? [query(meetingsRef, where("companyId", "==", input.companyId))]
+      : [query(meetingsRef, where("companyId", "==", input.companyId), where("userId", "==", input.userId))];
 
   let isActive = true;
 

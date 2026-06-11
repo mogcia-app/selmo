@@ -32,7 +32,7 @@ export type AdminMemberRow = {
   winRate: number | null;
   averageScore: number | null;
   roleplayCount: number;
-  lastLogin: string;
+  lastActivity: string;
   tone: "good" | "normal" | "risk";
   guidance: string;
 };
@@ -53,7 +53,7 @@ export function useAdminInsights() {
     if (!profile?.companyId) return;
     const handleError = (nextError: FirebaseError) => setError(nextError.message);
     const unsubscribers = [
-      subscribeToUserProfiles(setUsers, handleError),
+      subscribeToUserProfiles(setUsers, handleError, profile.companyId),
       subscribeToMeetings({ role: "admin", userId: "admin", companyId: profile.companyId }, setMeetings, handleError),
       subscribeToKnowledgeProducts(profile.companyId, setProducts, handleError),
       subscribeToKnowledgeCategories(profile.companyId, setCategories, handleError),
@@ -100,6 +100,12 @@ export function buildMemberRows(users: AppUserProfile[], meetings: MeetingRecord
     const userMeetings = meetings.filter((meeting) => meeting.userId === user.uid);
     const wonCount = userMeetings.filter((meeting) => meeting.status === "won").length;
     const userResults = results.filter((result) => result.userId === user.uid);
+    const latestActivityAt = [
+      ...userMeetings.map((meeting) => meeting.recordedAt),
+      ...userResults.map((result) => result.createdAt),
+    ]
+      .filter((date): date is Date => Boolean(date))
+      .sort((left, right) => right.getTime() - left.getTime())[0] ?? null;
     const winRate = userMeetings.length > 0 ? Math.round((wonCount / userMeetings.length) * 1000) / 10 : null;
     const averageScore = userResults.length > 0 ? Math.round(userResults.reduce((sum, result) => sum + result.score, 0) / userResults.length) : null;
     const tone: "good" | "normal" | "risk" =
@@ -114,7 +120,7 @@ export function buildMemberRows(users: AppUserProfile[], meetings: MeetingRecord
       winRate,
       averageScore,
       roleplayCount: userResults.length,
-      lastLogin: "集計準備中",
+      lastActivity: formatDate(latestActivityAt),
       tone,
       guidance: tone === "risk" ? "失注理由とロープレ課題を確認" : tone === "good" ? "好事例として共有候補" : "商談ログを確認",
     };
@@ -122,10 +128,12 @@ export function buildMemberRows(users: AppUserProfile[], meetings: MeetingRecord
 }
 
 export function getMeetingScore(meeting: MeetingRecord) {
-  if (meeting.conversationLogStatus === "completed" || meeting.aiSummaryStatus === "completed") {
-    return "集計準備中";
-  }
-  return "集計準備中";
+  const manualScore = meeting.aiSummary?.manualCompliance?.score;
+  if (typeof manualScore === "number") return `${manualScore}点`;
+  if (meeting.aiSummaryStatus === "completed" || meeting.aiSummary) return "分析済み";
+  if (meeting.transcriptBlockStatus === "completed" || meeting.conversationLogStatus === "completed") return "要約待ち";
+  if (meeting.processingStatus === "uploaded") return "処理待ち";
+  return "未分析";
 }
 
 export function getMeetingOutcomeLabel(status: MeetingOutcome | string) {
@@ -157,7 +165,7 @@ export function calcWinRate(meetings: MeetingRecord[]) {
 }
 
 export function PageShell({ children }: { children: React.ReactNode }) {
-  return <main className="min-h-screen bg-[#f7f8fb] px-6 py-8 md:px-10">{children}</main>;
+  return <main className="min-h-screen bg-[#f5f5f6] px-5 py-6 md:px-8 md:py-8">{children}</main>;
 }
 
 export function PageHeader({
@@ -174,8 +182,8 @@ export function PageHeader({
   return (
     <header className="flex flex-wrap items-start justify-between gap-5">
       <div>
-        <p className="text-[13px] font-bold text-[#8a6500]">{eyebrow}</p>
-        <h1 className="mt-1 text-[34px] font-black tracking-[-0.04em] text-[#171717]">{title}</h1>
+        <p className="text-[12px] font-bold uppercase tracking-[0.16em] text-[#8a6500]">{eyebrow}</p>
+        <h1 className="mt-1 text-[32px] font-black tracking-[-0.04em] text-[#171717] md:text-[34px]">{title}</h1>
         <p className="mt-2 max-w-[760px] text-[14px] leading-7 text-[#596273]">{description}</p>
       </div>
       {action}
@@ -195,11 +203,11 @@ export function Panel({
   children: React.ReactNode;
 }) {
   return (
-    <section className="rounded-[20px] border border-[#e2e6ee] bg-white shadow-[0_8px_22px_rgba(17,24,39,0.04)]">
+    <section className="rounded-[24px] border border-[#eceef4] bg-white shadow-[0_10px_28px_rgba(17,24,39,0.05)]">
       <div className="flex items-center justify-between gap-4 border-b border-[#eef1f5] px-5 py-4">
         <h2 className="text-[18px] font-black text-[#171717]">{title}</h2>
         {actionLabel && href ? (
-          <Link href={href} className="text-[13px] font-bold text-[#2672d9]">
+          <Link href={href} className="rounded-full border border-[#ead8a8] bg-[#fffaf0] px-3 py-1.5 text-[12px] font-black text-[#8a6500] transition hover:bg-[#fff3cd]">
             {actionLabel}
           </Link>
         ) : null}
@@ -211,7 +219,7 @@ export function Panel({
 
 export function KpiCard({ label, value, note }: { label: string; value: string; note: string }) {
   return (
-    <article className="rounded-[18px] border border-[#e2e6ee] bg-white px-5 py-5 shadow-[0_8px_22px_rgba(17,24,39,0.04)]">
+    <article className="rounded-[22px] border border-[#eceef4] bg-white px-5 py-5 shadow-[0_10px_28px_rgba(17,24,39,0.05)]">
       <div className="text-[13px] font-bold text-[#343b48]">{label}</div>
       <div className="mt-2 text-[30px] font-black tracking-[-0.04em] text-[#171717]">{value}</div>
       <div className="mt-1 text-[12px] text-[#7a808c]">{note}</div>
@@ -231,13 +239,13 @@ export function StatusBadge({ tone, label }: { tone: "good" | "normal" | "risk";
 
 export function EmptyState({ title, body }: { title: string; body: string }) {
   return (
-    <div className="rounded-[18px] border border-dashed border-[#dfe4ec] bg-[#fcfcfd] px-5 py-10 text-center">
+    <div className="rounded-[20px] border border-dashed border-[#dfe4ec] bg-[#fcfcfd] px-5 py-10 text-center">
       <h3 className="text-[17px] font-black text-[#171717]">{title}</h3>
       <p className="mx-auto mt-2 max-w-[360px] text-[13px] leading-6 text-[#7a808c]">{body}</p>
     </div>
   );
 }
 
-export function Placeholder({ children = "集計準備中" }: { children?: React.ReactNode }) {
+export function Placeholder({ children = "データなし" }: { children?: React.ReactNode }) {
   return <span className="text-[13px] font-bold text-[#8a909b]">{children}</span>;
 }

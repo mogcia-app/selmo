@@ -52,9 +52,11 @@ export function subscribeToSalesManuals(
   onError?: (error: FirestoreError) => void,
 ): Unsubscribe {
   const { firestore } = assertFirebaseClient();
-  const manualsQuery = companyId
-    ? query(collection(firestore, "salesManuals"), where("companyId", "==", companyId))
-    : collection(firestore, "salesManuals");
+  if (!companyId) {
+    callback([]);
+    return () => undefined;
+  }
+  const manualsQuery = query(collection(firestore, "salesManuals"), where("companyId", "==", companyId));
 
   return onSnapshot(
     manualsQuery,

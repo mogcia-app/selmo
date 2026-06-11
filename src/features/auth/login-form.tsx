@@ -170,10 +170,7 @@ export function LoginForm({
         <span>Google でログイン</span>
       </button>
 
-      <div className={`flex flex-col gap-2 pt-2 text-[var(--gray)] sm:flex-row sm:items-center sm:justify-between ${isAdmin ? "text-[12px]" : "text-sm"}`}>
-        <Link href="/register" className="transition hover:text-[var(--ink)]">
-          新規登録はこちら
-        </Link>
+      <div className={`flex justify-end pt-2 text-[var(--gray)] ${isAdmin ? "text-[12px]" : "text-sm"}`}>
         <Link
           href={isAdmin ? "/login" : "/admin/login"}
           className="transition hover:text-[var(--ink)]"
