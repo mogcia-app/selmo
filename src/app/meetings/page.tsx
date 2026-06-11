@@ -14,7 +14,7 @@ const productIconMap: Record<string, React.ReactNode> = {
 };
 
 export default function MeetingsPage() {
-  const { profile } = useAuth();
+  const { isLoading: isAuthLoading, profile } = useAuth();
   const [meetings, setMeetings] = useState<MeetingRecord[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -24,14 +24,25 @@ export default function MeetingsPage() {
   const [dateFilter, setDateFilter] = useState("all");
 
   useEffect(() => {
-    if (!profile?.uid || !profile.role) {
+    if (isAuthLoading) {
+      setIsLoading(true);
       return;
     }
+
+    if (!profile?.uid || !profile.role || !profile.companyId) {
+      setMeetings([]);
+      setIsLoading(false);
+      return;
+    }
+
+    setIsLoading(true);
+    setErrorMessage(null);
 
     const unsubscribe = subscribeToMeetings(
       {
         role: profile.role,
         userId: profile.uid,
+        companyId: profile.companyId,
       },
       (nextMeetings) => {
         setMeetings(nextMeetings);
@@ -48,7 +59,7 @@ export default function MeetingsPage() {
     );
 
     return unsubscribe;
-  }, [profile?.role, profile?.uid]);
+  }, [isAuthLoading, profile?.companyId, profile?.role, profile?.uid]);
 
   const productOptions = useMemo(() => {
     const options = new Set<string>();

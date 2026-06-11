@@ -5,6 +5,7 @@ import {
   Timestamp,
   collection,
   doc,
+  getDocs,
   getDoc,
   onSnapshot,
   serverTimestamp,
@@ -15,6 +16,7 @@ import {
   type Unsubscribe,
 } from "firebase/firestore";
 import {
+  deleteObject,
   getDownloadURL,
   ref,
   uploadBytesResumable,
@@ -23,6 +25,7 @@ import {
 
 import { assertFirebaseClient } from "@/lib/firebase/client";
 import { resolveCompanyId } from "@/lib/firebase/company";
+import { saveSalesActivityEvent } from "@/lib/firebase/activity";
 import {
   createAudioProcessingJob,
   saveSystemError,
@@ -124,6 +127,8 @@ export type CreateMeetingInput = {
   status: MeetingOutcome;
   audioFile?: File | null;
   audioDurationSec?: number | null;
+  transcriptText?: string | null;
+  audioRetentionLimit?: number | null;
   onUploadProgress?: (progress: number) => void;
 };
 
@@ -163,13 +168,76 @@ export async function createMeeting(input: CreateMeetingInput) {
     audioMimeType: input.audioFile?.type || "audio/mpeg",
     processingStatus: input.audioFile ? "uploading" : "uploaded",
     reanalysisCount: 0,
+    ...(input.transcriptText?.trim()
+      ? {
+          transcriptionProbeStatus: "completed",
+          transcriptionProbeModel: "manual-paste",
+          transcriptionProbeText: input.transcriptText.trim(),
+          transcriptionProbeLanguage: "ja",
+          transcriptionProbeError: null,
+          transcriptionProbeSegmentCount: 1,
+          transcriptionProbeSegments: [
+            {
+              startSec: 0,
+              endSec: 0,
+              text: input.transcriptText.trim(),
+              speaker: null,
+            },
+          ],
+          transcriptionProbeDurationSec: null,
+          transcriptionProbeTestedAt: now,
+          conversationLogStatus: "completed",
+          conversationLogModel: "manual-paste",
+          conversationLogs: buildConversationLogsFromText(input.transcriptText.trim()),
+          conversationLogCount: 1,
+          conversationLogError: null,
+          conversationLogTestedAt: now,
+        }
+      : {}),
     createdAt: now,
     updatedAt: now,
   });
 
+  await saveSalesActivityEvent({
+    companyId,
+    userId: input.userId,
+    type: input.transcriptText?.trim() ? "transcript_pasted" : "meeting_uploaded",
+    title: input.transcriptText?.trim() ? "文字起こし貼り付け" : "商談アップロード",
+    summary: `${input.customerName || "未設定の商談"}を登録しました`,
+    detail: [
+      `顧客名: ${input.customerName || "未設定"}`,
+      `商材: ${input.productType || "未設定"}`,
+      `入力方法: ${input.transcriptText?.trim() ? "文字起こし貼り付け" : "音声アップロード"}`,
+      `ステータス: ${input.status}`,
+    ].join("\n"),
+    href: `/admin/meetings/${meetingRef.id}`,
+    metadata: {
+      meetingId: meetingRef.id,
+      customerName: input.customerName,
+      productType: input.productType,
+      inputMode: input.transcriptText?.trim() ? "transcript" : "audio",
+      status: input.status,
+    },
+  }).catch(() => undefined);
+
   if (!input.audioFile) {
+    await createMeetingNotification({
+      companyId,
+      userId: input.userId,
+      meetingId: meetingRef.id,
+      title: input.transcriptText?.trim() ? "文字起こしを登録しました" : "商談を登録しました",
+      body: input.transcriptText?.trim()
+        ? "貼り付けた文字起こしから、要約や分析を開始できます。"
+        : "商談情報を保存しました。",
+    }).catch(() => undefined);
     return meetingRef.id;
   }
+
+  await enforceAudioRetentionLimit({
+    companyId,
+    userId: input.userId,
+    limit: input.audioRetentionLimit ?? null,
+  });
 
   await createAudioProcessingJob({
     companyId,
@@ -213,6 +281,13 @@ export async function createMeeting(input: CreateMeetingInput) {
       status: "waiting",
       errorMessage: null,
     });
+    await createMeetingNotification({
+      companyId,
+      userId: input.userId,
+      meetingId: meetingRef.id,
+      title: "アップロードが完了しました",
+      body: "音声ファイルの保存が完了しました。商談一覧から文字起こしを開始できます。",
+    }).catch(() => undefined);
 
     return meetingRef.id;
   } catch (error) {
@@ -240,6 +315,88 @@ export async function createMeeting(input: CreateMeetingInput) {
   }
 }
 
+async function enforceAudioRetentionLimit(input: {
+  companyId: string;
+  userId: string;
+  limit: number | null;
+}) {
+  if (!input.limit || input.limit < 1) {
+    return;
+  }
+
+  const { firestore, firebaseStorage } = assertFirebaseClient();
+  const snapshot = await getDocs(
+    query(
+      collection(firestore, "meetings"),
+      where("companyId", "==", input.companyId),
+      where("userId", "==", input.userId),
+    ),
+  );
+  const audioMeetings = snapshot.docs
+    .map((docSnapshot) => ({
+      id: docSnapshot.id,
+      record: mapMeetingRecord(docSnapshot.id, docSnapshot.data() as Record<string, unknown>),
+    }))
+    .filter(({ record }) => record.audioFilePath && !record.audioDeletedAt)
+    .sort((left, right) => {
+      const leftTime = left.record.recordedAt?.getTime() ?? 0;
+      const rightTime = right.record.recordedAt?.getTime() ?? 0;
+      return leftTime - rightTime;
+    });
+  const deleteCount = Math.max(0, audioMeetings.length - input.limit + 1);
+
+  for (const item of audioMeetings.slice(0, deleteCount)) {
+    const audioFilePath = item.record.audioFilePath;
+
+    if (!audioFilePath) {
+      continue;
+    }
+
+    await deleteObject(ref(firebaseStorage, audioFilePath)).catch(() => undefined);
+    await updateDoc(doc(firestore, "meetings", item.id), {
+      audioFilePath: null,
+      audioDownloadUrl: null,
+      audioDeletedAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    });
+  }
+}
+
+async function createMeetingNotification(input: {
+  companyId: string;
+  userId: string;
+  meetingId: string;
+  title: string;
+  body: string;
+}) {
+  const { firestore } = assertFirebaseClient();
+
+  await setDoc(doc(collection(firestore, "appNotifications")), {
+    companyId: input.companyId,
+    userId: input.userId,
+    meetingId: input.meetingId,
+    title: input.title,
+    body: input.body,
+    href: `/meetings/${input.meetingId}`,
+    read: false,
+    createdAt: serverTimestamp(),
+  });
+}
+
+function buildConversationLogsFromText(text: string): MeetingConversationLog[] {
+  return [
+    {
+      id: "log_1",
+      speaker: "unknown",
+      label: "文字起こし",
+      text,
+      sourceSegmentIndexes: [0],
+      confidence: "estimated",
+      kind: "speech",
+    },
+  ];
+}
+
 export async function fetchMeeting(meetingId: string) {
   const { firestore } = assertFirebaseClient();
   const snapshot = await getDoc(doc(firestore, "meetings", meetingId));
@@ -255,24 +412,44 @@ export function subscribeToMeetings(
   input: {
     role: "admin" | "sales";
     userId: string;
+    companyId?: string | null;
   },
   callback: (meetings: MeetingRecord[]) => void,
   onError?: (error: FirestoreError) => void,
 ): Unsubscribe {
   const { firestore } = assertFirebaseClient();
   const meetingsRef = collection(firestore, "meetings");
-  const meetingsQuery =
-    input.role === "admin"
-      ? query(meetingsRef)
-      : query(meetingsRef, where("userId", "==", input.userId));
+  const meetingsQueries =
+    input.companyId
+      ? input.role === "admin"
+        ? [query(meetingsRef, where("companyId", "==", input.companyId))]
+        : [
+            query(meetingsRef, where("companyId", "==", input.companyId), where("userId", "==", input.userId)),
+            query(meetingsRef, where("userId", "==", input.userId)),
+          ]
+      : input.role === "admin"
+        ? [query(meetingsRef)]
+        : [query(meetingsRef, where("userId", "==", input.userId))];
 
-  return onSnapshot(
-    meetingsQuery,
-    (snapshot) => {
-      const meetings = snapshot.docs
-        .map((docSnapshot) =>
-          mapMeetingRecord(docSnapshot.id, docSnapshot.data() as Record<string, unknown>),
-        )
+  let isActive = true;
+
+  Promise.all(meetingsQueries.map((meetingsQuery) => getDocs(meetingsQuery)))
+    .then((snapshots) => {
+      if (!isActive) {
+        return;
+      }
+
+      const recordsById = new Map<string, MeetingRecord>();
+      snapshots.forEach((snapshot) => {
+        snapshot.docs.forEach((docSnapshot) => {
+          recordsById.set(
+            docSnapshot.id,
+            mapMeetingRecord(docSnapshot.id, docSnapshot.data() as Record<string, unknown>),
+          );
+        });
+      });
+
+      const meetings = Array.from(recordsById.values())
         .sort((left, right) => {
           const leftTime = left.recordedAt?.getTime() ?? 0;
           const rightTime = right.recordedAt?.getTime() ?? 0;
@@ -280,13 +457,16 @@ export function subscribeToMeetings(
         });
 
       callback(meetings);
-    },
-    (error) => {
-      if (onError) {
-        onError(error);
+    })
+    .catch((error: FirestoreError) => {
+      if (isActive) {
+        onError?.(error);
       }
-    },
-  );
+    });
+
+  return () => {
+    isActive = false;
+  };
 }
 
 export function subscribeToMeeting(

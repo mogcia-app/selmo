@@ -28,16 +28,17 @@ export default function SalesRoleplayScenariosPage() {
   );
 
   useEffect(() => {
+    if (!profile?.companyId) return;
     const handleError = (nextError: FirebaseError) => setError(nextError.message);
     const unsubscribers = [
-      subscribeToRoleplayScenarios(setScenarios, handleError),
-      subscribeToKnowledgeProducts(setProducts, handleError),
+      subscribeToRoleplayScenarios(profile.companyId, setScenarios, handleError),
+      subscribeToKnowledgeProducts(profile.companyId, setProducts, handleError),
     ];
 
     return () => {
       unsubscribers.forEach((unsubscribe) => unsubscribe());
     };
-  }, []);
+  }, [profile?.companyId]);
 
   return (
     <main className="min-h-screen overflow-x-hidden bg-[#f7f8fb] px-5 py-5">
@@ -142,10 +143,11 @@ export default function SalesRoleplayScenariosPage() {
         </section>
       </div>
 
-      {dialogOpen && userId ? (
+      {dialogOpen && userId && profile?.companyId ? (
         <ScenarioCreateDialog
           products={products}
           userId={userId}
+          companyId={profile.companyId}
           onClose={() => setDialogOpen(false)}
           onCreated={() => setDialogOpen(false)}
           onError={setError}
@@ -158,12 +160,14 @@ export default function SalesRoleplayScenariosPage() {
 function ScenarioCreateDialog({
   products,
   userId,
+  companyId,
   onClose,
   onCreated,
   onError,
 }: {
   products: KnowledgeProduct[];
   userId: string;
+  companyId: string;
   onClose: () => void;
   onCreated: () => void;
   onError: (message: string | null) => void;
@@ -191,6 +195,7 @@ function ScenarioCreateDialog({
     onError(null);
     try {
       await createRoleplayScenario({
+        companyId,
         title: title.trim(),
         description: description.trim(),
         productId: productId || null,

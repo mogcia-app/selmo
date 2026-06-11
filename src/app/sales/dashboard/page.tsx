@@ -17,6 +17,23 @@ import {
   type RoleplayResult,
   type RoleplayScenario,
 } from "@/lib/firebase/roleplay";
+import type { CompanyPlan } from "@/lib/firebase/auth";
+
+type OodaCycleCard = {
+  label: "Observe" | "Orient" | "Decide" | "Act";
+  title: string;
+  count: number;
+  unit: string;
+  caption: string;
+  href: string;
+  tone: "observe" | "orient" | "decide" | "act";
+};
+
+type OodaProgress = {
+  label: "Observe" | "Orient" | "Decide" | "Act";
+  value: string;
+  caption: string;
+};
 
 export default function SalesDashboardPage() {
   const router = useRouter();
@@ -27,16 +44,17 @@ export default function SalesDashboardPage() {
   const [roleplayResults, setRoleplayResults] = useState<RoleplayResult[]>([]);
   const [searchTerm, setSearchTerm] = useState("");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [knowledgeError, setKnowledgeError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
-    if (!profile?.uid || !profile.role) {
+    if (!profile?.uid || !profile.role || !profile.companyId) {
       return;
     }
 
     const unsubscribers = [
       subscribeToMeetings(
-        { role: profile.role, userId: profile.uid },
+        { role: profile.role, userId: profile.uid, companyId: profile.companyId },
         (nextMeetings) => {
           setMeetings(nextMeetings);
           setIsLoading(false);
@@ -47,23 +65,27 @@ export default function SalesDashboardPage() {
         },
       ),
       subscribeToVisibleKnowledgeItems(
-        profile.uid,
-        setKnowledgeItems,
-        () => setErrorMessage("ナレッジデータの読み込みに失敗しました。"),
+        { userId: profile.uid, companyId: profile.companyId },
+        (nextItems) => {
+          setKnowledgeItems(nextItems);
+          setKnowledgeError(null);
+        },
+        () => setKnowledgeError("ナレッジデータを取得できませんでした。"),
       ),
       subscribeToRoleplayScenarios(
+        profile.companyId,
         setRoleplayScenarios,
         () => setErrorMessage("ロープレシナリオの読み込みに失敗しました。"),
       ),
       subscribeToRoleplayResults(
-        { userId: profile.uid, isAdmin: profile.role === "admin" },
+        { userId: profile.uid, companyId: profile.companyId, isAdmin: profile.role === "admin" },
         setRoleplayResults,
         () => setErrorMessage("ロープレ結果の読み込みに失敗しました。"),
       ),
     ];
 
     return () => unsubscribers.forEach((unsubscribe) => unsubscribe());
-  }, [profile?.role, profile?.uid]);
+  }, [profile?.companyId, profile?.role, profile?.uid]);
 
   const monthlyMeetings = useMemo(
     () => meetings.filter((meeting) => isCurrentMonth(meeting.recordedAt)),
@@ -73,27 +95,34 @@ export default function SalesDashboardPage() {
     () => roleplayResults.filter((result) => isCurrentMonth(result.createdAt)),
     [roleplayResults],
   );
-  const averageRoleplayScore = useMemo(() => {
-    if (roleplayResults.length === 0) {
-      return null;
-    }
-
-    const total = roleplayResults.reduce((sum, result) => sum + result.score, 0);
-    return Math.round(total / roleplayResults.length);
-  }, [roleplayResults]);
-  const recentMeetings = meetings.slice(0, 4);
-  const recentKnowledge = knowledgeItems.slice(0, 4);
+  const actionMeetings = useMemo(() => buildActionMeetings(meetings), [meetings]);
+  const recentMeetings = useMemo(() => meetings.slice(0, 5), [meetings]);
   const recommendedScenario = useMemo(
     () => selectRecommendedScenario(roleplayScenarios, roleplayResults),
     [roleplayResults, roleplayScenarios],
   );
-  const weeklyComment = useMemo(
-    () => buildWeeklyComment({
-      meetings: monthlyMeetings,
-      roleplayCount: monthlyRoleplayResults.length,
-      averageScore: averageRoleplayScore,
-    }),
-    [averageRoleplayScore, monthlyMeetings, monthlyRoleplayResults.length],
+  const recommendedKnowledge = useMemo(
+    () => selectRecommendedKnowledge(knowledgeItems, actionMeetings),
+    [actionMeetings, knowledgeItems],
+  );
+  const oodaCycleCards = useMemo(
+    () =>
+      buildOodaCycleCards({
+        meetings,
+        actionMeetings,
+        recommendedScenario,
+      }),
+    [actionMeetings, meetings, recommendedScenario],
+  );
+  const oodaProgress = useMemo(
+    () =>
+      buildOodaProgress({
+        meetings: monthlyMeetings,
+        actionMeetings,
+        roleplayCount: monthlyRoleplayResults.length,
+        knowledgeCount: knowledgeItems.length,
+      }),
+    [actionMeetings, knowledgeItems.length, monthlyMeetings, monthlyRoleplayResults.length],
   );
 
   function handleKnowledgeSearch(event: React.FormEvent<HTMLFormElement>) {
@@ -103,10 +132,10 @@ export default function SalesDashboardPage() {
   }
 
   return (
-    <main className="min-h-screen bg-[#f7f7f8] px-5 py-6 md:px-8 md:py-7">
-      <div className="mx-auto max-w-[1420px]">
-        <section className="rounded-[24px] border border-[#eceef4] bg-white px-6 py-6 shadow-[0_10px_28px_rgba(17,24,39,0.05)] md:px-8">
-          <div className="flex flex-col gap-6 xl:flex-row xl:items-center xl:justify-between">
+    <main className="min-h-screen bg-[#f5f5f6] px-4 py-5 md:px-7 md:py-7">
+      <div className="mx-auto max-w-[1440px] space-y-5">
+        <section className="rounded-[24px] border border-[#e7e9ef] bg-white px-5 py-6 shadow-[0_14px_34px_rgba(17,24,39,0.06)] md:px-8">
+          <div className="flex flex-col gap-5 xl:flex-row xl:items-center xl:justify-between">
             <div className="flex items-start gap-4">
               <Image
                 src="/da.png"
@@ -116,119 +145,129 @@ export default function SalesDashboardPage() {
                 className="mt-1 h-16 w-16 object-contain"
                 priority
               />
-              <div>
-                <div className="text-[13px] font-semibold text-[#b48600]">Sales Home</div>
-                <h1 className="mt-1 text-[28px] font-bold tracking-[-0.04em] text-[#171717]">
-                  今日の営業状況
+              <div className="min-w-0">
+                <div className="text-[12px] font-bold uppercase tracking-[0.18em] text-[#b48600]">
+                  AI Sales Coach
+                </div>
+                <h1 className="mt-2 text-[30px] font-bold text-[#171717] md:text-[34px]">
+                  今日やること
                 </h1>
-                <p className="mt-2 max-w-[720px] text-[15px] leading-7 text-[#7a808c]">
-                  商談をアップロードして、ナレッジで調べて、必要なロープレへすぐ移動できます。
+                <p className="mt-2 max-w-[760px] text-[15px] leading-7 text-[#707783]">
+                  商談・ナレッジ・ロープレから、今日見るべきことと改善アクションをまとめます。
                 </p>
               </div>
             </div>
 
             <div className="grid gap-3 sm:grid-cols-3">
-              <PrimaryLink href="/meetings/upload" label="音声をアップロード" icon={<UploadIcon />} />
-              <PrimaryLink href="/sales/knowledge" label="ナレッジを探す" icon={<SearchIcon />} />
-              <PrimaryLink href="/sales/roleplay" label="ロープレ開始" icon={<RoleplayIcon />} />
+              <PrimaryLink href="/meetings/upload" label="商談を追加" icon={<UploadIcon />} />
+              <PrimaryLink href="/sales/knowledge/search" label="ナレッジ検索" icon={<SearchIcon />} />
+              <PrimaryLink href="/sales/roleplay/scenarios" label="ロープレ開始" icon={<RoleplayIcon />} />
             </div>
           </div>
         </section>
 
         {errorMessage ? (
-          <div className="mt-5 rounded-[18px] border border-[#ffd2cc] bg-[#fff2ef] px-4 py-3 text-[14px] text-[#cf4b39]">
+          <div className="rounded-[18px] border border-[#ffd2cc] bg-[#fff2ef] px-4 py-3 text-[14px] text-[#cf4b39]">
             {errorMessage}
           </div>
         ) : null}
 
-        <section className="mt-5 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-          <MetricCard
-            label="今月の商談件数"
-            value={isLoading ? "読み込み中" : `${monthlyMeetings.length}件`}
-            caption="自分がアップロードした商談"
-          />
-          <MetricCard
-            label="今月のアップロード件数"
-            value={isLoading ? "読み込み中" : `${monthlyMeetings.length}件`}
-            caption="音声登録ベースで集計"
-          />
-          <MetricCard
-            label="平均AIスコア"
-            value={averageRoleplayScore === null ? "集計準備中" : `${averageRoleplayScore}点`}
-            caption="ロープレ結果から集計中"
-          />
-          <MetricCard
-            label="ロープレ実施回数"
-            value={`${monthlyRoleplayResults.length}回`}
-            caption="今月保存された結果"
-          />
+        <section className="rounded-[24px] border border-[#e7e9ef] bg-white p-5 shadow-[0_12px_30px_rgba(17,24,39,0.05)] md:p-6">
+          <div className="flex flex-wrap items-end justify-between gap-4">
+            <div>
+              <p className="text-[12px] font-bold uppercase tracking-[0.18em] text-[#b48600]">OODA Cycle</p>
+              <h2 className="mt-1 text-[24px] font-bold text-[#171717]">OODAサイクル</h2>
+            </div>
+            <span className="rounded-full bg-[#f7f7f8] px-3 py-1.5 text-[12px] font-bold text-[#7a808c]">
+              {isLoading ? "読み込み中" : "今日見るべき状態"}
+            </span>
+          </div>
+
+          <div className="mt-5 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+            {oodaCycleCards.map((card) => (
+              <OodaCycleShortcut key={card.label} card={card} />
+            ))}
+          </div>
         </section>
 
-        <section className="mt-5 grid gap-5 xl:grid-cols-[minmax(0,1.35fr)_420px]">
+        <section className="grid gap-5 xl:grid-cols-[minmax(0,1.2fr)_minmax(360px,0.8fr)]">
+          <AiUsageCard
+            plan={profile?.companyPlan ?? "standard"}
+            transcriptionQuota={profile?.monthlyTranscriptionQuota ?? 15}
+            roleplayQuota={profile?.monthlyRoleplayQuota ?? 15}
+            transcriptionUsed={monthlyMeetings.length}
+            roleplayUsed={monthlyRoleplayResults.length}
+          />
+
+          <article className="rounded-[24px] border border-[#e7e9ef] bg-white p-5 shadow-[0_12px_30px_rgba(17,24,39,0.05)] md:p-6">
+            <h2 className="text-[20px] font-bold text-[#171717]">ナレッジ検索</h2>
+            <div className="mt-1 flex h-[118px] justify-center overflow-hidden">
+              <Image
+                src="/kensaku1.png"
+                alt="ナレッジ検索"
+                width={220}
+                height={180}
+                className="h-[140px] w-auto object-contain"
+              />
+            </div>
+            <form onSubmit={handleKnowledgeSearch} className="-mt-7">
+              <label className="relative block">
+                <span className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-[#96a0ad]">
+                  <SearchIcon />
+                </span>
+                <input
+                  value={searchTerm}
+                  onChange={(event) => setSearchTerm(event.target.value)}
+                  placeholder="料金、反論、競合比較など"
+                  className="w-full rounded-[16px] border border-[#e6e8ee] bg-white py-3 pl-12 pr-4 text-[14px] text-[#171717] outline-none transition placeholder:text-[#96a0ad] focus:border-[#f0c655] focus:shadow-[0_0_0_3px_rgba(255,196,0,0.14)]"
+                />
+              </label>
+              <button
+                type="submit"
+                className="mt-3 h-11 w-full rounded-[16px] bg-[#ffc400] px-4 text-[14px] font-bold text-[#171717] transition hover:bg-[#f0b400]"
+              >
+                ナレッジ検索
+              </button>
+            </form>
+            <div className="mt-4 rounded-[18px] bg-[#f7f8fb] px-4 py-4 text-[13px] leading-6 text-[#6f7480]">
+              商談前に不安な論点を入れると、該当ナレッジやAI回答に移動できます。
+            </div>
+          </article>
+        </section>
+
+        <section className="grid gap-5 xl:grid-cols-[minmax(0,1.35fr)_minmax(360px,0.75fr)]">
           <div className="space-y-5">
-            <article className="rounded-[24px] border border-[#eceef4] bg-white p-5 shadow-[0_10px_28px_rgba(17,24,39,0.05)]">
-              <SectionHeader title="最近の商談/通話" href="/meetings" />
-              {recentMeetings.length === 0 ? (
+            <article className="rounded-[24px] border border-[#e7e9ef] bg-white p-5 shadow-[0_12px_30px_rgba(17,24,39,0.05)]">
+              <SectionHeader title="要対応商談" href="/meetings" />
+              {actionMeetings.length === 0 ? (
                 <EmptyState
-                  title="商談はまだありません"
-                  body="音声をアップロードすると、処理状況と分析結果がここに表示されます。"
+                  title="要対応の商談はありません"
+                  body="新しい商談を追加すると、AI分析状態や商談結果に応じて次回アクションを提示します。"
                   href="/meetings/upload"
-                  action="音声をアップロード"
+                  action="商談を追加"
                 />
               ) : (
-                <div className="mt-4 divide-y divide-[#f0f1f5]">
-                  {recentMeetings.map((meeting) => (
-                    <Link
-                      key={meeting.id}
-                      href={`/meetings/${meeting.id}`}
-                      className="grid gap-3 py-4 transition hover:bg-[#fffdf7] md:grid-cols-[1fr_160px_120px]"
-                    >
-                      <div>
-                        <div className="text-[15px] font-semibold text-[#20242c]">
-                          {meeting.customerName || "未設定の商談"}
-                        </div>
-                        <div className="mt-1 text-[13px] text-[#7a808c]">
-                          {meeting.productType || "商材未設定"} ・ {meeting.recordedAt ? formatDate(meeting.recordedAt) : "日時未設定"}
-                        </div>
-                      </div>
-                      <StatusBadge value={meeting.status} />
-                      <ProcessingText value={meeting.processingStatus} />
-                    </Link>
+                <div className="mt-4 space-y-3">
+                  {actionMeetings.slice(0, 5).map((meeting) => (
+                    <ActionMeetingRow key={meeting.id} meeting={meeting} />
                   ))}
                 </div>
               )}
             </article>
 
-            <article className="rounded-[24px] border border-[#eceef4] bg-white p-5 shadow-[0_10px_28px_rgba(17,24,39,0.05)]">
-              <SectionHeader title="最近使えるナレッジ" href="/sales/knowledge" />
-              {recentKnowledge.length === 0 ? (
+            <article className="rounded-[24px] border border-[#e7e9ef] bg-white p-5 shadow-[0_12px_30px_rgba(17,24,39,0.05)]">
+              <SectionHeader title="最近の商談" href="/meetings" />
+              {recentMeetings.length === 0 ? (
                 <EmptyState
-                  title="ナレッジはまだありません"
-                  body="共有ナレッジや自分用メモが作成されると、ここからすぐ開けます。"
-                  href="/sales/knowledge/new"
-                  action="ナレッジを作成"
+                  title="最近の商談はありません"
+                  body="商談音声をアップロードすると、ここから履歴と次回アクションを確認できます。"
+                  href="/meetings/upload"
+                  action="商談を追加"
                 />
               ) : (
-                <div className="mt-4 grid gap-3 md:grid-cols-2">
-                  {recentKnowledge.map((item) => (
-                    <Link
-                      key={item.id}
-                      href={buildKnowledgeHref(item)}
-                      className="rounded-[18px] border border-[#eef0f4] bg-[#fcfcfd] px-4 py-4 transition hover:border-[#f0c655] hover:bg-[#fffdf7]"
-                    >
-                      <div className="flex items-center justify-between gap-3">
-                        <span className="text-[12px] font-semibold text-[#b48600]">
-                          {item.scope === "shared" ? "共有" : "マイナレッジ"}
-                        </span>
-                        <span className="text-[12px] text-[#9aa1ac]">{item.tabTitle || "概要"}</span>
-                      </div>
-                      <div className="mt-2 line-clamp-1 text-[15px] font-semibold text-[#20242c]">
-                        {item.title || "無題のナレッジ"}
-                      </div>
-                      <p className="mt-2 line-clamp-2 text-[13px] leading-6 text-[#7a808c]">
-                        {item.description || "説明はまだありません。"}
-                      </p>
-                    </Link>
+                <div className="mt-4 divide-y divide-[#eef0f4]">
+                  {recentMeetings.map((meeting) => (
+                    <RecentMeetingRow key={meeting.id} meeting={meeting} />
                   ))}
                 </div>
               )}
@@ -236,64 +275,374 @@ export default function SalesDashboardPage() {
           </div>
 
           <aside className="space-y-5">
-            <article className="rounded-[24px] border border-[#eceef4] bg-white p-5 shadow-[0_10px_28px_rgba(17,24,39,0.05)]">
-              <h2 className="text-[18px] font-bold text-[#171717]">ナレッジ検索</h2>
-              <form onSubmit={handleKnowledgeSearch} className="mt-4">
-                <label className="relative block">
-                  <span className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-[#96a0ad]">
-                    <SearchIcon />
-                  </span>
-                  <input
-                    value={searchTerm}
-                    onChange={(event) => setSearchTerm(event.target.value)}
-                    placeholder="料金、反論、導入手順など"
-                    className="w-full rounded-[16px] border border-[#e6e8ee] bg-white py-3 pl-12 pr-4 text-[14px] text-[#171717] outline-none transition placeholder:text-[#96a0ad] focus:border-[#f0c655] focus:shadow-[0_0_0_3px_rgba(255,196,0,0.14)]"
-                  />
-                </label>
-                <button
-                  type="submit"
-                  className="mt-3 w-full rounded-[16px] bg-[#ffc400] px-4 py-3 text-[14px] font-bold text-[#171717] transition hover:bg-[#f0b400]"
-                >
-                  検索する
-                </button>
-              </form>
-            </article>
-
-            <article className="rounded-[24px] border border-[#eceef4] bg-white p-5 shadow-[0_10px_28px_rgba(17,24,39,0.05)]">
-              <h2 className="text-[18px] font-bold text-[#171717]">おすすめロープレ</h2>
-              {recommendedScenario ? (
-                <div className="mt-4 rounded-[18px] border border-[#f3e3a5] bg-[#fffaf0] px-4 py-4">
-                  <div className="text-[15px] font-bold text-[#20242c]">{recommendedScenario.title}</div>
-                  <p className="mt-2 line-clamp-3 text-[13px] leading-6 text-[#7a808c]">
-                    {recommendedScenario.description || recommendedScenario.goal || "シナリオ内容を確認して開始できます。"}
-                  </p>
-                  <Link
-                    href={`/sales/roleplay?scenarioId=${recommendedScenario.id}`}
-                    className="mt-4 inline-flex w-full items-center justify-center rounded-[14px] bg-[#171717] px-4 py-3 text-[14px] font-semibold text-white"
-                  >
-                    このシナリオで練習
-                  </Link>
-                </div>
-              ) : (
-                <EmptyState
-                  title="シナリオはまだありません"
-                  body="管理者がシナリオを追加すると、ここから練習できます。"
-                  href="/sales/roleplay/scenarios"
-                  action="シナリオを見る"
-                />
-              )}
-            </article>
-
-            <article className="rounded-[24px] border border-[#eceef4] bg-white p-5 shadow-[0_10px_28px_rgba(17,24,39,0.05)]">
-              <h2 className="text-[18px] font-bold text-[#171717]">AIからの今週の改善コメント</h2>
-              <div className="mt-4 rounded-[18px] bg-[#fff8e7] px-4 py-4 text-[14px] leading-7 text-[#5f6470]">
-                {weeklyComment}
-              </div>
-            </article>
+            <RecommendedRoleplayCard scenario={recommendedScenario} actionMeetings={actionMeetings} />
+            <RecommendedKnowledgeCard item={recommendedKnowledge} knowledgeError={knowledgeError} />
           </aside>
+        </section>
+
+        <section className="rounded-[24px] border border-[#e7e9ef] bg-white p-5 shadow-[0_12px_30px_rgba(17,24,39,0.05)] md:p-6">
+          <div className="flex flex-wrap items-end justify-between gap-4">
+            <div>
+              <p className="text-[12px] font-bold uppercase tracking-[0.18em] text-[#b48600]">Growth Log</p>
+              <h2 className="mt-1 text-[22px] font-bold text-[#171717]">成長記録</h2>
+            </div>
+            <span className="text-[13px] font-semibold text-[#8d94a1]">スコアより、行動量を見る場所</span>
+          </div>
+
+          <div className="mt-5 grid gap-4 md:grid-cols-4">
+            <GrowthCard label="商談件数" value={`${monthlyMeetings.length}件`} caption="今月アップロードされた商談" />
+            <GrowthCard label="ロープレ回数" value={`${monthlyRoleplayResults.length}回`} caption="今月保存された練習結果" />
+            <GrowthCard label="ナレッジ閲覧数" value={`${knowledgeItems.length}件`} caption="確認できるナレッジ数" />
+            <GrowthCard
+              label="AI活用回数"
+              value={`${monthlyMeetings.length + monthlyRoleplayResults.length}回`}
+              caption="商談分析とロープレの合計"
+            />
+          </div>
+
+          <div className="mt-5 border-t border-[#eef0f4] pt-5">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <h3 className="text-[16px] font-bold text-[#171717]">今月のOODA進捗</h3>
+              <span className="text-[12px] font-semibold text-[#9aa1ac]">行動の裏側にある確認メモ</span>
+            </div>
+            <div className="mt-3 grid gap-3 md:grid-cols-4">
+              {oodaProgress.map((item) => (
+                <OodaProgressCard key={item.label} item={item} />
+              ))}
+            </div>
+          </div>
         </section>
       </div>
     </main>
+  );
+}
+
+function OodaCycleShortcut({ card }: { card: OodaCycleCard }) {
+  const toneClass = {
+    observe: "border-[#f3d4a8] bg-[#fffaf0] text-[#9c7600]",
+    orient: "border-[#cfdcf8] bg-[#f5f8ff] text-[#4669b2]",
+    decide: "border-[#ffc9c0] bg-[#fff5f3] text-[#c4513f]",
+    act: "border-[#cfe9d7] bg-[#f2fbf5] text-[#3b8655]",
+  }[card.tone];
+
+  return (
+    <Link
+      href={card.href}
+      className="rounded-[20px] border border-[#e7e9ef] bg-white p-5 transition hover:-translate-y-0.5 hover:border-[#f0c655] hover:shadow-[0_14px_28px_rgba(17,24,39,0.08)]"
+    >
+      <div className={`inline-flex rounded-full border px-3 py-1 text-[12px] font-bold ${toneClass}`}>
+        {card.label}
+      </div>
+      <div className="mt-4 flex items-end justify-between gap-3">
+        <div>
+          <h3 className="text-[17px] font-bold text-[#171717]">{card.title}</h3>
+          <p className="mt-2 text-[13px] leading-6 text-[#68707d]">{card.caption}</p>
+        </div>
+        <div className="shrink-0 text-right">
+          <div className="text-[34px] font-bold leading-none text-[#171717]">{card.count}</div>
+          <div className="mt-1 text-[12px] font-bold text-[#8d94a1]">{card.unit}</div>
+        </div>
+      </div>
+      <div className="mt-4 text-[13px] font-bold text-[#9c7600]">開く</div>
+    </Link>
+  );
+}
+
+function AiUsageCard({
+  plan,
+  transcriptionQuota,
+  roleplayQuota,
+  transcriptionUsed,
+  roleplayUsed,
+}: {
+  plan: CompanyPlan;
+  transcriptionQuota: number | null;
+  roleplayQuota: number | null;
+  transcriptionUsed: number;
+  roleplayUsed: number;
+}) {
+  const planLabel = formatPlanLabel(plan);
+  const totalUsed = transcriptionUsed + roleplayUsed;
+  const sharedQuota = readSharedAiQuota(transcriptionQuota, roleplayQuota);
+
+  return (
+    <article className="rounded-[24px] border border-[#e7e9ef] bg-white p-5 text-[#171717] shadow-[0_12px_30px_rgba(17,24,39,0.05)] md:p-6">
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <p className="text-[12px] font-bold uppercase tracking-[0.18em] text-[#8a6500]">AI Usage</p>
+          <h2 className="mt-1 text-[26px] font-bold">今月のAI回数</h2>
+        </div>
+        <div className="inline-flex items-center gap-2 rounded-full border border-[#f0c655] bg-[#fffaf0] px-4 py-2 text-[13px] font-bold text-[#6f5500]">
+          <span className="h-2 w-2 rounded-full bg-[#ffc400]" />
+          <span>{planLabel}プラン</span>
+        </div>
+      </div>
+
+      <div className="mt-6">
+        <UsageGauge
+          used={totalUsed}
+          limit={sharedQuota}
+        />
+      </div>
+
+      <div className="mt-5 grid gap-3 md:grid-cols-2">
+        <AiUsageRatio
+          transcriptionUsed={transcriptionUsed}
+          roleplayUsed={roleplayUsed}
+        />
+        <AiChargeButton />
+      </div>
+    </article>
+  );
+}
+
+function UsageGauge({
+  used,
+  limit,
+}: {
+  used: number;
+  limit: number | null;
+}) {
+  const percentage =
+    limit === null
+      ? 100
+      : Math.min(100, Math.round((used / limit) * 100));
+
+  return (
+    <div className="mt-5">
+      <div className="flex items-end justify-between gap-4 text-[13px] font-semibold text-[#6f5500]">
+        <span>AI利用枠</span>
+        <span>{limit === null ? "要相談" : `使用 ${used}回 / 月${limit}回`}</span>
+      </div>
+      <div className="relative mt-3 pt-8">
+        <Image
+          src="/gag.png"
+          alt=""
+          width={44}
+          height={44}
+          className="absolute left-0 top-0 h-11 w-11 object-contain"
+        />
+        <div className="h-4 overflow-hidden rounded-full bg-[#e8ebf0]">
+          <div
+            className="h-full rounded-full bg-[#ffc400] transition-all"
+            style={{ width: `${percentage}%` }}
+          />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function readSharedAiQuota(transcriptionQuota: number | null, roleplayQuota: number | null) {
+  if (transcriptionQuota === null || roleplayQuota === null) {
+    return null;
+  }
+
+  return Math.min(transcriptionQuota, roleplayQuota);
+}
+
+function formatPlanLabel(plan: CompanyPlan) {
+  if (plan === "pro") {
+    return "Pro";
+  }
+
+  if (plan === "enterprise") {
+    return "Enterprise";
+  }
+
+  return "Standard";
+}
+
+function AiUsageRatio({
+  transcriptionUsed,
+  roleplayUsed,
+}: {
+  transcriptionUsed: number;
+  roleplayUsed: number;
+}) {
+  return (
+    <div className="rounded-[16px] border border-[#f0c655] bg-white/50 px-4 py-3">
+      <div className="text-[12px] font-bold text-[#8a6500]">利用内訳</div>
+      <div className="mt-3 flex items-center justify-between gap-3 text-[12px] font-bold text-[#6f5500]">
+        <span>文字起こし {transcriptionUsed}回</span>
+        <span>ロープレ {roleplayUsed}回</span>
+      </div>
+    </div>
+  );
+}
+
+function AiChargeButton() {
+  return (
+    <Link
+      href="/sales/account"
+      className="group rounded-[16px] border border-[#f0c655] bg-[#fffdf7] px-4 py-3 text-left transition hover:border-[#d9a900] hover:bg-[#fff7d6]"
+    >
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <div className="text-[12px] font-bold text-[#8a6500]">チャージ</div>
+          <div className="mt-1 text-[16px] font-bold text-[#171717]">AI回数を追加</div>
+        </div>
+        <span className="flex h-9 w-9 items-center justify-center rounded-full bg-[#ffc400] text-[20px] font-bold leading-none text-[#171717] transition group-hover:bg-[#f0b400]">
+          +
+        </span>
+      </div>
+      <div className="mt-3 flex items-center justify-between gap-3 border-t border-[#f2dfa0] pt-3 text-[12px] font-bold text-[#6f5500]">
+        <span>1回 6,500円</span>
+        <span>10回 65,000円</span>
+      </div>
+    </Link>
+  );
+}
+
+function ActionMeetingRow({ meeting }: { meeting: MeetingRecord }) {
+  return (
+    <Link
+      href={`/meetings/${meeting.id}`}
+      className="grid gap-3 rounded-[18px] border border-[#eef0f4] bg-[#fcfcfd] px-4 py-4 transition hover:border-[#f0c655] hover:bg-[#fffdf7] lg:grid-cols-[minmax(0,1fr)_120px_120px_170px_92px]"
+    >
+      <div className="min-w-0">
+        <div className="truncate text-[15px] font-bold text-[#20242c]">{meeting.customerName || "未設定の商談"}</div>
+        <div className="mt-1 text-[13px] text-[#7a808c]">
+          {meeting.productType || "商材未設定"} ・ {meeting.recordedAt ? formatDate(meeting.recordedAt) : "日時未設定"}
+        </div>
+      </div>
+      <StatusBadge value={meeting.status} />
+      <ProcessingText value={meeting.processingStatus} />
+      <div className="text-[13px] font-semibold leading-6 text-[#4d5563]">{buildNextAction(meeting)}</div>
+      <span className="inline-flex h-9 items-center justify-center rounded-[13px] border border-[#e5e8ef] bg-white px-3 text-[12px] font-bold text-[#171717]">
+        詳細
+      </span>
+    </Link>
+  );
+}
+
+function RecentMeetingRow({ meeting }: { meeting: MeetingRecord }) {
+  return (
+    <Link
+      href={`/meetings/${meeting.id}`}
+      className="grid gap-3 py-4 transition hover:bg-[#fffdf7] md:grid-cols-[minmax(0,1fr)_118px_110px_170px_82px]"
+    >
+      <div className="min-w-0">
+        <div className="truncate text-[15px] font-bold text-[#20242c]">{meeting.customerName || "未設定の商談"}</div>
+        <div className="mt-1 text-[13px] text-[#7a808c]">{meeting.recordedAt ? formatDate(meeting.recordedAt) : "日時未設定"}</div>
+      </div>
+      <StatusBadge value={meeting.status} />
+      <div className="text-[13px] font-bold text-[#596273]">{readMeetingAiScore(meeting)}</div>
+      <div className="text-[13px] font-semibold leading-6 text-[#4d5563]">{buildNextAction(meeting)}</div>
+      <span className="text-[13px] font-bold text-[#9c7600]">詳細</span>
+    </Link>
+  );
+}
+
+function RecommendedRoleplayCard({
+  scenario,
+  actionMeetings,
+}: {
+  scenario: RoleplayScenario | null;
+  actionMeetings: MeetingRecord[];
+}) {
+  if (!scenario) {
+    return (
+      <article className="rounded-[24px] border border-[#e7e9ef] bg-white p-5 shadow-[0_12px_30px_rgba(17,24,39,0.05)]">
+        <h2 className="text-[20px] font-bold text-[#171717]">推奨ロープレ</h2>
+        <EmptyState
+          title="シナリオはまだありません"
+          body="シナリオが追加されると、改善テーマに合わせて練習できます。"
+          href="/sales/roleplay/scenarios"
+          action="シナリオを見る"
+        />
+      </article>
+    );
+  }
+
+  return (
+    <article className="rounded-[24px] border border-[#e7e9ef] bg-white p-5 shadow-[0_12px_30px_rgba(17,24,39,0.05)]">
+      <h2 className="text-[20px] font-bold text-[#171717]">推奨ロープレ</h2>
+      <div className="mt-4 rounded-[18px] border border-[#f3e3a5] bg-[#fffaf0] px-4 py-4">
+        <div className="text-[16px] font-bold text-[#20242c]">{scenario.title}</div>
+        <p className="mt-2 text-[13px] leading-6 text-[#6f7480]">
+          {actionMeetings.some((meeting) => meeting.status === "lost")
+            ? "失注要因を次回商談に持ち越さないため推奨しています。"
+            : "次回商談前に説明と切り返しを整えるため推奨しています。"}
+        </p>
+        <div className="mt-3 rounded-[14px] bg-white px-3 py-2 text-[12px] font-bold text-[#8a6500]">
+          想定時間: 10分
+        </div>
+        <Link
+          href={`/sales/roleplay?scenarioId=${scenario.id}`}
+          className="mt-4 inline-flex h-11 w-full items-center justify-center rounded-[14px] bg-[#171717] px-4 text-[14px] font-semibold text-white"
+        >
+          開始する
+        </Link>
+      </div>
+    </article>
+  );
+}
+
+function RecommendedKnowledgeCard({
+  item,
+  knowledgeError,
+}: {
+  item: KnowledgeItem | null;
+  knowledgeError: string | null;
+}) {
+  return (
+    <article className="rounded-[24px] border border-[#e7e9ef] bg-white p-5 shadow-[0_12px_30px_rgba(17,24,39,0.05)]">
+      <h2 className="text-[20px] font-bold text-[#171717]">推奨ナレッジ</h2>
+      {knowledgeError ? (
+        <div className="mt-4 rounded-[18px] border border-[#f3d4a8] bg-[#fffaf0] px-4 py-4">
+          <div className="text-[14px] font-bold text-[#8a6500]">{knowledgeError}</div>
+          <Link
+            href="/sales/knowledge/search"
+            className="mt-4 inline-flex h-10 items-center justify-center rounded-[14px] border border-[#f0c655] bg-white px-4 text-[13px] font-bold text-[#171717]"
+          >
+            検索ページを開く
+          </Link>
+        </div>
+      ) : item ? (
+        <div className="mt-4 rounded-[18px] border border-[#d8e7ff] bg-[#f5f8ff] px-4 py-4">
+          <div className="text-[16px] font-bold text-[#20242c]">{item.title || "無題のナレッジ"}</div>
+          <p className="mt-2 text-[13px] leading-6 text-[#6f7480]">
+            {item.productId ? "商材に紐づく確認事項があるため推奨しています。" : "商談前の説明や反論対応を整えるため推奨しています。"}
+          </p>
+          <Link
+            href={buildKnowledgeHref(item)}
+            className="mt-4 inline-flex h-11 w-full items-center justify-center rounded-[14px] bg-[#171717] px-4 text-[14px] font-semibold text-white"
+          >
+            閲覧する
+          </Link>
+        </div>
+      ) : (
+        <EmptyState
+          title="推奨ナレッジはまだありません"
+          body="ナレッジを作成すると、商談準備に合わせて表示されます。"
+          href="/sales/knowledge/new"
+          action="ナレッジを作成"
+        />
+      )}
+    </article>
+  );
+}
+
+function GrowthCard({ label, value, caption }: { label: string; value: string; caption: string }) {
+  return (
+    <div className="rounded-[18px] border border-[#e8ebf0] bg-[#fcfcfd] px-5 py-4">
+      <div className="text-[13px] font-bold text-[#7a808c]">{label}</div>
+      <div className="mt-2 text-[28px] font-bold text-[#171717]">{value}</div>
+      <div className="mt-1 text-[12px] leading-5 text-[#9aa1ac]">{caption}</div>
+    </div>
+  );
+}
+
+function OodaProgressCard({ item }: { item: OodaProgress }) {
+  return (
+    <div className="rounded-[16px] border border-[#edf0f4] bg-[#fcfcfd] px-4 py-3">
+      <div className="flex items-center justify-between gap-3">
+        <span className="text-[13px] font-bold text-[#171717]">{item.label}</span>
+        <span className="text-[13px] font-bold text-[#b48600]">{item.value}</span>
+      </div>
+      <div className="mt-1 text-[12px] leading-5 text-[#8d94a1]">{item.caption}</div>
+    </div>
   );
 }
 
@@ -309,20 +658,10 @@ function PrimaryLink({ href, label, icon }: { href: string; label: string; icon:
   );
 }
 
-function MetricCard({ label, value, caption }: { label: string; value: string; caption: string }) {
-  return (
-    <article className="rounded-[22px] border border-[#eceef4] bg-white px-5 py-5 shadow-[0_10px_28px_rgba(17,24,39,0.05)]">
-      <div className="text-[13px] font-semibold text-[#7a808c]">{label}</div>
-      <div className="mt-3 min-h-[38px] text-[28px] font-bold tracking-[-0.04em] text-[#171717]">{value}</div>
-      <div className="mt-2 text-[12px] leading-5 text-[#9aa1ac]">{caption}</div>
-    </article>
-  );
-}
-
 function SectionHeader({ title, href }: { title: string; href: string }) {
   return (
     <div className="flex items-center justify-between gap-3">
-      <h2 className="text-[18px] font-bold text-[#171717]">{title}</h2>
+      <h2 className="text-[20px] font-bold text-[#171717]">{title}</h2>
       <Link href={href} className="text-[13px] font-semibold text-[#9c7600]">
         すべて見る
       </Link>
@@ -364,7 +703,7 @@ function StatusBadge({ value }: { value: MeetingRecord["status"] }) {
         : { label: "検討中", className: "bg-[#fff4df] text-[#b07c00]" };
 
   return (
-    <span className={`inline-flex h-7 w-fit items-center rounded-full px-3 text-[12px] font-semibold ${current.className}`}>
+    <span className={`inline-flex h-8 w-fit items-center rounded-full px-3 text-[12px] font-semibold ${current.className}`}>
       {current.label}
     </span>
   );
@@ -378,9 +717,13 @@ function ProcessingText({ value }: { value: MeetingRecord["processingStatus"] })
         ? "処理失敗"
         : value === "uploading"
           ? "アップロード中"
-          : value === "processing"
-            ? "処理中"
-            : "処理待ち";
+          : value === "uploaded"
+            ? "分析待ち"
+            : value === "transcribing"
+              ? "文字起こし中"
+              : value === "analyzing"
+                ? "分析中"
+                : "処理中";
   return <span className="text-[13px] font-semibold text-[#7a808c]">{label}</span>;
 }
 
@@ -401,24 +744,157 @@ function selectRecommendedScenario(scenarios: RoleplayScenario[], results: Rolep
   return scenarios.find((scenario) => !completedScenarioIds.has(scenario.id)) ?? scenarios[0];
 }
 
-function buildWeeklyComment(input: {
+function selectRecommendedKnowledge(items: KnowledgeItem[], actionMeetings: MeetingRecord[]) {
+  if (items.length === 0) {
+    return null;
+  }
+
+  const productTypes = new Set(actionMeetings.map((meeting) => meeting.productType).filter(Boolean));
+  return (
+    items.find((item) => item.productId && productTypes.size > 0) ??
+    items.find((item) => item.kind === "qa") ??
+    items[0]
+  );
+}
+
+function buildOodaCycleCards(input: {
   meetings: MeetingRecord[];
+  actionMeetings: MeetingRecord[];
+  recommendedScenario: RoleplayScenario | null;
+}): OodaCycleCard[] {
+  const unprocessedCount = input.meetings.filter((meeting) => meeting.processingStatus !== "completed").length;
+  const completedCount = input.meetings.filter((meeting) => meeting.processingStatus === "completed").length;
+  const actionCount = input.actionMeetings.length;
+
+  return [
+    {
+      label: "Observe",
+      title: "未分析の商談",
+      count: unprocessedCount,
+      unit: "件",
+      caption: "AI分析待ち、処理中、処理失敗の商談",
+      href: "/meetings",
+      tone: "observe",
+    },
+    {
+      label: "Orient",
+      title: "分析完了",
+      count: completedCount,
+      unit: "件",
+      caption: "要約や会話ログを確認できる商談",
+      href: "/meetings",
+      tone: "orient",
+    },
+    {
+      label: "Decide",
+      title: "要アクション",
+      count: actionCount,
+      unit: "件",
+      caption: "次回接触や失注要因確認が必要な商談",
+      href: input.actionMeetings[0] ? `/meetings/${input.actionMeetings[0].id}` : "/meetings",
+      tone: "decide",
+    },
+    {
+      label: "Act",
+      title: "ロープレ推奨",
+      count: input.recommendedScenario ? 1 : 0,
+      unit: "件",
+      caption: "次の商談前に練習したいシナリオ",
+      href: input.recommendedScenario ? `/sales/roleplay?scenarioId=${input.recommendedScenario.id}` : "/sales/roleplay/scenarios",
+      tone: "act",
+    },
+  ];
+}
+
+function buildActionMeetings(meetings: MeetingRecord[]) {
+  return [...meetings]
+    .filter((meeting) => meeting.status !== "won" || meeting.processingStatus === "failed")
+    .sort((left, right) => getMeetingPriority(right) - getMeetingPriority(left));
+}
+
+function getMeetingPriority(meeting: MeetingRecord) {
+  let score = 0;
+
+  if (meeting.processingStatus === "failed") {
+    score += 60;
+  }
+
+  if (meeting.status === "considering") {
+    score += 48;
+  }
+
+  if (meeting.status === "lost") {
+    score += 36;
+  }
+
+  if (meeting.processingStatus === "completed") {
+    score += 24;
+  }
+
+  if (meeting.aiSummary) {
+    score += 12;
+  }
+
+  if (meeting.recordedAt) {
+    score += Math.max(0, 10 - daysSince(meeting.recordedAt));
+  }
+
+  return score;
+}
+
+function buildNextAction(meeting: MeetingRecord) {
+  if (meeting.processingStatus === "failed") {
+    return "音声処理を再確認";
+  }
+
+  if (meeting.status === "lost") {
+    return "失注要因を確認";
+  }
+
+  if (meeting.status === "considering" && meeting.processingStatus === "completed") {
+    return "次回接触の論点整理";
+  }
+
+  if (meeting.processingStatus === "completed") {
+    return "AI要約を確認";
+  }
+
+  if (meeting.processingStatus === "uploaded" || meeting.processingStatus === "transcribing" || meeting.processingStatus === "analyzing") {
+    return "AI分析完了を待つ";
+  }
+
+  return "次回アクションを設定";
+}
+
+function buildOodaProgress(input: {
+  meetings: MeetingRecord[];
+  actionMeetings: MeetingRecord[];
   roleplayCount: number;
-  averageScore: number | null;
-}) {
-  if (input.meetings.length === 0 && input.roleplayCount === 0) {
-    return "今週はまず、商談音声を1件アップロードして分析の起点を作りましょう。あわせて商品別ナレッジを検索できる状態にしておくと、次の商談準備が早くなります。";
+  knowledgeCount: number;
+}): OodaProgress[] {
+  const completedMeetings = input.meetings.filter((meeting) => meeting.processingStatus === "completed").length;
+
+  return [
+    { label: "Observe", value: `${input.meetings.length}件`, caption: "今月の商談ログ" },
+    { label: "Orient", value: `${completedMeetings}件`, caption: "分析完了した商談" },
+    { label: "Decide", value: `${input.actionMeetings.length}件`, caption: "要対応の商談" },
+    { label: "Act", value: `${input.roleplayCount}回`, caption: `ナレッジ ${input.knowledgeCount}件` },
+  ];
+}
+
+function readMeetingAiScore(meeting: MeetingRecord) {
+  const record = meeting as MeetingRecord & {
+    aiScore?: unknown;
+    score?: unknown;
+    analysisScore?: unknown;
+  };
+  const score = [record.aiScore, record.analysisScore, record.score].find((value) => typeof value === "number");
+
+  if (typeof score === "number") {
+    return `${Math.round(score)}点`;
   }
 
-  if (input.averageScore !== null && input.averageScore < 70) {
-    return "ロープレ結果では改善余地が残っています。直近の商談で出た反論をナレッジで確認し、同じ商材のシナリオを1本練習してから次回商談に入るのがおすすめです。";
-  }
-
-  if (input.meetings.length > 0 && input.roleplayCount === 0) {
-    return "商談データは蓄積できています。次は失注理由や顧客の不安をもとに、関連するロープレを1回実施して切り返しを整えましょう。";
-  }
-
-  return "商談とロープレの動きが出ています。次回アクションが残っている商談を見直し、よく使う説明はナレッジ化して再利用できる状態にしておきましょう。";
+  return meeting.processingStatus === "completed" ? "算出待ち" : "-";
 }
 
 function isCurrentMonth(date: Date | null) {
@@ -428,6 +904,11 @@ function isCurrentMonth(date: Date | null) {
 
   const now = new Date();
   return date.getFullYear() === now.getFullYear() && date.getMonth() === now.getMonth();
+}
+
+function daysSince(date: Date) {
+  const diff = Date.now() - date.getTime();
+  return Math.floor(diff / (1000 * 60 * 60 * 24));
 }
 
 function formatDate(date: Date) {

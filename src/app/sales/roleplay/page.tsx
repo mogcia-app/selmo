@@ -14,11 +14,15 @@ import {
   type RoleplayScenario,
 } from "@/lib/firebase/roleplay";
 
+const monthlyLimitMessage =
+  "月間利用上限に達しました。管理者にプラン変更または上限変更を依頼してください。";
+
 export default function SalesRoleplayPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { profile } = useAuth();
   const userId = profile?.uid;
+  const companyId = profile?.companyId;
   const [scenarios, setScenarios] = useState<RoleplayScenario[]>([]);
   const [messages, setMessages] = useState<RoleplayMessage[]>([]);
   const [input, setInput] = useState("");
@@ -32,11 +36,13 @@ export default function SalesRoleplayPage() {
   );
 
   useEffect(() => {
+    if (!companyId) return;
     return subscribeToRoleplayScenarios(
+      companyId,
       setScenarios,
       (nextError: FirebaseError) => setError(nextError.message),
     );
-  }, []);
+  }, [companyId]);
 
   useEffect(() => {
     if (!scenario) return;
@@ -76,6 +82,10 @@ export default function SalesRoleplayPage() {
       });
       const data = (await response.json()) as { message?: string; error?: string };
       if (!response.ok) {
+        if (response.status === 429) {
+          throw new Error(monthlyLimitMessage);
+        }
+
         throw new Error(data.error ?? "AI顧客の応答に失敗しました。");
       }
       setMessages([
@@ -94,13 +104,14 @@ export default function SalesRoleplayPage() {
   };
 
   const handleFinish = async () => {
-    if (!scenario || !userId || messages.length < 2) return;
+    if (!scenario || !userId || !companyId || messages.length < 2) return;
 
     setIsSaving(true);
     setError(null);
     try {
       const evaluation = evaluateRoleplay(scenario, messages);
       await saveRoleplayResult({
+        companyId,
         scenarioId: scenario.id,
         scenarioTitle: scenario.title,
         productName: scenario.productName,

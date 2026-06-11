@@ -11,6 +11,7 @@ import {
 
 import { resolveCompanyId } from "@/lib/firebase/company";
 import { assertFirebaseClient } from "@/lib/firebase/client";
+import { saveSalesActivityEvent } from "@/lib/firebase/activity";
 
 export type KnowledgeSearchEventInput = {
   companyId?: string | null;
@@ -48,6 +49,21 @@ export async function saveKnowledgeSearchEvent(input: KnowledgeSearchEventInput)
     usedAi: input.usedAi,
     createdAt: serverTimestamp(),
   });
+
+  await saveSalesActivityEvent({
+    companyId: input.companyId,
+    userId: input.userId,
+    type: "knowledge_searched",
+    title: "ナレッジ検索",
+    summary: `「${input.query}」で検索しました`,
+    detail: `検索キーワード: ${input.query}\n検索結果: ${input.resultCount}件\nAI回答: ${input.usedAi ? "利用" : "未利用"}`,
+    href: null,
+    metadata: {
+      query: input.query,
+      resultCount: input.resultCount,
+      usedAi: input.usedAi,
+    },
+  }).catch(() => undefined);
 }
 
 export async function saveSystemError(input: SystemErrorInput) {

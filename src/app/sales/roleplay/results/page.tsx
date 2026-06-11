@@ -10,6 +10,7 @@ import { subscribeToRoleplayResults, type RoleplayResult } from "@/lib/firebase/
 export default function SalesRoleplayResultsPage() {
   const { profile } = useAuth();
   const userId = profile?.uid;
+  const companyId = profile?.companyId;
   const isAdmin = profile?.role === "admin";
   const [results, setResults] = useState<RoleplayResult[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -19,14 +20,14 @@ export default function SalesRoleplayResultsPage() {
   }, [results]);
 
   useEffect(() => {
-    if (!userId) return;
+    if (!userId || !companyId) return;
 
     return subscribeToRoleplayResults(
-      { userId, isAdmin },
+      { userId, companyId, isAdmin },
       setResults,
       (nextError: FirebaseError) => setError(nextError.message),
     );
-  }, [isAdmin, userId]);
+  }, [companyId, isAdmin, userId]);
 
   return (
     <main className="min-h-screen overflow-x-hidden bg-[#f7f8fb] px-5 py-5">

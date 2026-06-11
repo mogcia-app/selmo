@@ -4,6 +4,7 @@ import { FirebaseError } from "firebase/app";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 
+import { useAuth } from "@/features/auth/auth-provider";
 import { subscribeToUserProfiles, type AppUserProfile } from "@/lib/firebase/auth";
 import {
   subscribeToKnowledgeProducts,
@@ -20,6 +21,7 @@ import {
 } from "@/lib/firebase/roleplay";
 
 export default function AdminDashboardPage() {
+  const { profile } = useAuth();
   const [users, setUsers] = useState<AppUserProfile[]>([]);
   const [meetings, setMeetings] = useState<MeetingRecord[]>([]);
   const [products, setProducts] = useState<KnowledgeProduct[]>([]);
@@ -30,32 +32,33 @@ export default function AdminDashboardPage() {
   const adminUserId = users.find((user) => user.role === "admin")?.uid;
 
   useEffect(() => {
+    if (!profile?.companyId) return;
     const handleError = (nextError: FirebaseError) => setError(nextError.message);
     const unsubscribers = [
       subscribeToUserProfiles(setUsers, handleError),
-      subscribeToMeetings({ role: "admin", userId: "admin" }, setMeetings, handleError),
-      subscribeToKnowledgeProducts(setProducts, handleError),
-      subscribeToRoleplayScenarios(setRoleplayScenarios, handleError),
+      subscribeToMeetings({ role: "admin", userId: "admin", companyId: profile.companyId }, setMeetings, handleError),
+      subscribeToKnowledgeProducts(profile?.companyId, setProducts, handleError),
+      subscribeToRoleplayScenarios(profile.companyId, setRoleplayScenarios, handleError),
     ];
 
     return () => {
       unsubscribers.forEach((unsubscribe) => unsubscribe());
     };
-  }, []);
+  }, [profile?.companyId]);
 
   useEffect(() => {
-    if (!adminUserId) return;
+    if (!adminUserId || !profile?.companyId) return;
 
     const handleError = (nextError: FirebaseError) => setError(nextError.message);
     const unsubscribers = [
-      subscribeToVisibleKnowledgeItems(adminUserId, setKnowledgeItems, handleError),
-      subscribeToRoleplayResults({ userId: adminUserId, isAdmin: true }, setRoleplayResults, handleError),
+      subscribeToVisibleKnowledgeItems({ userId: adminUserId, companyId: profile?.companyId }, setKnowledgeItems, handleError),
+      subscribeToRoleplayResults({ userId: adminUserId, companyId: profile.companyId, isAdmin: true }, setRoleplayResults, handleError),
     ];
 
     return () => {
       unsubscribers.forEach((unsubscribe) => unsubscribe());
     };
-  }, [adminUserId]);
+  }, [adminUserId, profile?.companyId]);
 
   const salesUsers = useMemo(() => users.filter((user) => user.role === "sales"), [users]);
   const activeSalesUsers = useMemo(() => salesUsers.filter((user) => user.status === "active"), [salesUsers]);

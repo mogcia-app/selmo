@@ -14,12 +14,20 @@ import { collection, doc, getDoc, onSnapshot, serverTimestamp, setDoc, type Fire
 import { assertFirebaseClient } from "@/lib/firebase/client";
 import type { UserRole } from "@/types/domain";
 
+export type CompanyPlan = "standard" | "pro" | "enterprise";
+
+const STANDARD_AI_QUOTA = 15;
+const PRO_AI_QUOTA = 30;
+
 export type AppUserProfile = {
   uid: string;
   email: string | null;
   name: string | null;
   companyId: string | null;
   companyName: string | null;
+  companyPlan: CompanyPlan;
+  monthlyTranscriptionQuota: number | null;
+  monthlyRoleplayQuota: number | null;
   role: UserRole;
   status: "active" | "inactive";
 };
@@ -70,10 +78,11 @@ export async function registerUser({
   const companyId = credential.user.uid;
 
   await setDoc(doc(firestore, "companies", companyId), {
-    name: normalizedCompanyName,
-    monthlyFee: 0,
-    contractStartDate: serverTimestamp(),
-    billingCurrency: "JPY",
+    companyName: normalizedCompanyName,
+    plan: "standard",
+    monthlyTranscriptionQuota: STANDARD_AI_QUOTA,
+    monthlyRoleplayQuota: STANDARD_AI_QUOTA,
+    status: "active",
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
   });
@@ -140,12 +149,17 @@ export async function fetchUserProfile(uid: string): Promise<AppUserProfile | nu
     return null;
   }
 
+  const company = data.companyId ? await fetchCompanyProfile(data.companyId) : null;
+
   return {
     uid,
     email: data.email ?? null,
     name: data.name ?? null,
     companyId: data.companyId ?? null,
-    companyName: data.companyName ?? null,
+    companyName: company?.companyName ?? data.companyName ?? null,
+    companyPlan: company?.plan ?? "standard",
+    monthlyTranscriptionQuota: company?.monthlyTranscriptionQuota ?? STANDARD_AI_QUOTA,
+    monthlyRoleplayQuota: company?.monthlyRoleplayQuota ?? STANDARD_AI_QUOTA,
     role: data.role,
     status: data.status ?? "active",
   };
@@ -168,6 +182,9 @@ export function subscribeToUserProfiles(
               name?: string;
               companyId?: string;
               companyName?: string;
+              companyPlan?: CompanyPlan;
+              monthlyTranscriptionQuota?: unknown;
+              monthlyRoleplayQuota?: unknown;
               role?: UserRole;
               status?: "active" | "inactive";
             };
@@ -180,6 +197,9 @@ export function subscribeToUserProfiles(
               name: data.name ?? null,
               companyId: data.companyId ?? null,
               companyName: data.companyName ?? null,
+              companyPlan: readCompanyPlan(data.companyPlan),
+              monthlyTranscriptionQuota: readMonthlyQuota(data.monthlyTranscriptionQuota, readCompanyPlan(data.companyPlan)),
+              monthlyRoleplayQuota: readMonthlyQuota(data.monthlyRoleplayQuota, readCompanyPlan(data.companyPlan)),
               role: data.role,
               status: data.status ?? "active",
             };
@@ -189,4 +209,53 @@ export function subscribeToUserProfiles(
     },
     onError,
   );
+}
+
+async function fetchCompanyProfile(companyId: string) {
+  const { firestore } = assertFirebaseClient();
+  const snapshot = await getDoc(doc(firestore, "companies", companyId));
+
+  if (!snapshot.exists()) {
+    return null;
+  }
+
+  const data = snapshot.data() as {
+    companyName?: string;
+    name?: string;
+    plan?: string;
+    monthlyTranscriptionQuota?: unknown;
+    monthlyRoleplayQuota?: unknown;
+  };
+  const plan = readCompanyPlan(data.plan);
+
+  return {
+    companyName: data.companyName ?? data.name ?? null,
+    plan,
+    monthlyTranscriptionQuota: readMonthlyQuota(data.monthlyTranscriptionQuota, plan),
+    monthlyRoleplayQuota: readMonthlyQuota(data.monthlyRoleplayQuota, plan),
+  };
+}
+
+function readCompanyPlan(value: unknown): CompanyPlan {
+  if (value === "pro" || value === "enterprise") {
+    return value;
+  }
+
+  return "standard";
+}
+
+function readMonthlyQuota(value: unknown, plan: CompanyPlan) {
+  if (typeof value === "number" && Number.isFinite(value) && value >= 0) {
+    return Math.floor(value);
+  }
+
+  if (plan === "pro") {
+    return PRO_AI_QUOTA;
+  }
+
+  if (plan === "enterprise") {
+    return null;
+  }
+
+  return STANDARD_AI_QUOTA;
 }

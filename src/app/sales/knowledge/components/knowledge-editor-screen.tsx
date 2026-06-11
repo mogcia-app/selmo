@@ -33,6 +33,7 @@ export function KnowledgeEditorScreen({ mode, knowledgeId }: KnowledgeEditorScre
   const searchParams = useSearchParams();
   const { profile } = useAuth();
   const userId = profile?.uid;
+  const companyId = profile?.companyId;
   const canCreateShared = profile?.role === "admin";
   const [categories, setCategories] = useState<KnowledgeCategory[]>([]);
   const [products, setProducts] = useState<KnowledgeProduct[]>([]);
@@ -63,16 +64,17 @@ export function KnowledgeEditorScreen({ mode, knowledgeId }: KnowledgeEditorScre
   const [isAddingTab, setIsAddingTab] = useState(false);
 
   useEffect(() => {
+    if (!companyId) return;
     const handleError = (nextError: FirebaseError) => setError(nextError.message);
     const unsubscribers = [
-      subscribeToKnowledgeCategories(setCategories, handleError),
-      subscribeToKnowledgeProducts(setProducts, handleError),
+      subscribeToKnowledgeCategories(companyId, setCategories, handleError),
+      subscribeToKnowledgeProducts(companyId, setProducts, handleError),
     ];
 
     return () => {
       unsubscribers.forEach((unsubscribe) => unsubscribe());
     };
-  }, []);
+  }, [companyId]);
 
   useEffect(() => {
     if (mode !== "edit" || !knowledgeId) return;
@@ -135,7 +137,7 @@ export function KnowledgeEditorScreen({ mode, knowledgeId }: KnowledgeEditorScre
   }, [productId, tabOptions, tabTitle]);
 
   const saveKnowledge = async (nextScope = scope) => {
-    if (!userId) {
+    if (!userId || !companyId) {
       setError("ログイン情報を確認できませんでした。再読み込みしてからお試しください。");
       return;
     }
@@ -154,6 +156,7 @@ export function KnowledgeEditorScreen({ mode, knowledgeId }: KnowledgeEditorScre
     setError(null);
 
     const payload: CreateKnowledgeItemInput = {
+      companyId,
       title: title.trim(),
       description: buildAutoDescription(body, title, description),
       body: body.trim(),

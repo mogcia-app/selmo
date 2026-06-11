@@ -4,6 +4,7 @@ import {
   Timestamp,
   addDoc,
   collection,
+  getDocs,
   onSnapshot,
   query,
   serverTimestamp,
@@ -15,11 +16,13 @@ import {
 } from "firebase/firestore";
 
 import { assertFirebaseClient } from "@/lib/firebase/client";
+import { saveSalesActivityEvent } from "@/lib/firebase/activity";
 
 export type RoleplayDifficulty = "easy" | "normal" | "hard";
 
 export type RoleplayScenario = {
   id: string;
+  companyId: string | null;
   title: string;
   description: string;
   productId: string | null;
@@ -43,6 +46,7 @@ export type RoleplayMessage = {
 
 export type RoleplayResult = {
   id: string;
+  companyId: string | null;
   scenarioId: string;
   scenarioTitle: string;
   productName: string;
@@ -56,6 +60,7 @@ export type RoleplayResult = {
 };
 
 export type CreateRoleplayScenarioInput = {
+  companyId?: string | null;
   title: string;
   description: string;
   productId?: string | null;
@@ -70,13 +75,17 @@ export type CreateRoleplayScenarioInput = {
 };
 
 export function subscribeToRoleplayScenarios(
+  companyId: string | null | undefined,
   callback: (scenarios: RoleplayScenario[]) => void,
   onError?: (error: FirestoreError) => void,
 ): Unsubscribe {
   const { firestore } = assertFirebaseClient();
+  const scenariosQuery = companyId
+    ? query(collection(firestore, "roleplayScenarios"), where("companyId", "==", companyId))
+    : collection(firestore, "roleplayScenarios");
 
   return onSnapshot(
-    collection(firestore, "roleplayScenarios"),
+    scenariosQuery,
     (snapshot) =>
       callback(
         snapshot.docs
@@ -88,32 +97,54 @@ export function subscribeToRoleplayScenarios(
 }
 
 export function subscribeToRoleplayResults(
-  input: { userId: string; isAdmin?: boolean },
+  input: { userId: string; companyId?: string | null; isAdmin?: boolean },
   callback: (results: RoleplayResult[]) => void,
   onError?: (error: FirestoreError) => void,
 ): Unsubscribe {
   const { firestore } = assertFirebaseClient();
-  const resultsQuery = input.isAdmin
-    ? collection(firestore, "roleplayResults")
-    : query(collection(firestore, "roleplayResults"), where("userId", "==", input.userId));
+  const resultsQuery = input.companyId
+    ? input.isAdmin
+      ? query(collection(firestore, "roleplayResults"), where("companyId", "==", input.companyId))
+      : query(
+          collection(firestore, "roleplayResults"),
+          where("companyId", "==", input.companyId),
+          where("userId", "==", input.userId),
+        )
+    : input.isAdmin
+      ? collection(firestore, "roleplayResults")
+      : query(collection(firestore, "roleplayResults"), where("userId", "==", input.userId));
 
-  return onSnapshot(
-    resultsQuery,
-    (snapshot) =>
+  let isActive = true;
+
+  getDocs(resultsQuery)
+    .then((snapshot) => {
+      if (!isActive) {
+        return;
+      }
+
       callback(
         snapshot.docs
           .map(mapRoleplayResult)
           .sort((left, right) => (right.createdAt?.getTime() ?? 0) - (left.createdAt?.getTime() ?? 0))
           .slice(0, 30),
-      ),
-    onError,
-  );
+      );
+    })
+    .catch((error: FirestoreError) => {
+      if (isActive) {
+        onError?.(error);
+      }
+    });
+
+  return () => {
+    isActive = false;
+  };
 }
 
 export async function createRoleplayScenario(input: CreateRoleplayScenarioInput) {
   const { firestore } = assertFirebaseClient();
 
   await addDoc(collection(firestore, "roleplayScenarios"), {
+    companyId: input.companyId ?? null,
     title: input.title,
     description: input.description,
     productId: input.productId ?? null,
@@ -134,6 +165,7 @@ export async function saveRoleplayResult(input: Omit<RoleplayResult, "id" | "cre
   const { firestore } = assertFirebaseClient();
 
   await addDoc(collection(firestore, "roleplayResults"), {
+    companyId: input.companyId ?? null,
     scenarioId: input.scenarioId,
     scenarioTitle: input.scenarioTitle,
     productName: input.productName,
@@ -145,6 +177,27 @@ export async function saveRoleplayResult(input: Omit<RoleplayResult, "id" | "cre
     messages: input.messages,
     createdAt: serverTimestamp(),
   });
+
+  await saveSalesActivityEvent({
+    companyId: input.companyId,
+    userId: input.userId,
+    type: "roleplay_completed",
+    title: "ロープレ完了",
+    summary: `${input.scenarioTitle}を実施しました`,
+    detail: [
+      `シナリオ: ${input.scenarioTitle}`,
+      `商材: ${input.productName || "未設定"}`,
+      `スコア: ${input.score}点`,
+      `要約: ${input.summary || "未生成"}`,
+    ].join("\n"),
+    href: "/admin/roleplay",
+    metadata: {
+      scenarioId: input.scenarioId,
+      scenarioTitle: input.scenarioTitle,
+      productName: input.productName,
+      score: input.score,
+    },
+  }).catch(() => undefined);
 }
 
 function mapRoleplayScenario(snapshot: QueryDocumentSnapshot<DocumentData>): RoleplayScenario {
@@ -153,6 +206,7 @@ function mapRoleplayScenario(snapshot: QueryDocumentSnapshot<DocumentData>): Rol
 
   return {
     id: snapshot.id,
+    companyId: readNullableString(data.companyId),
     title: readString(data.title, "無題のシナリオ"),
     description: readString(data.description),
     productId: readNullableString(data.productId),
@@ -174,6 +228,7 @@ function mapRoleplayResult(snapshot: QueryDocumentSnapshot<DocumentData>): Rolep
 
   return {
     id: snapshot.id,
+    companyId: readNullableString(data.companyId),
     scenarioId: readString(data.scenarioId),
     scenarioTitle: readString(data.scenarioTitle, "ロープレ"),
     productName: readString(data.productName),

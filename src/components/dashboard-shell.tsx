@@ -3,8 +3,14 @@
 import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useEffect, useState } from "react";
 
 import { useAuth } from "@/features/auth/auth-provider";
+import {
+  markAppNotificationRead,
+  subscribeToAppNotifications,
+  type AppNotification,
+} from "@/lib/firebase/notifications";
 
 type DashboardShellProps = {
   children: React.ReactNode;
@@ -24,21 +30,22 @@ const adminSections: Array<{ label: string; items: NavItem[] }> = [
       { href: "/admin/dashboard", label: "ダッシュボード", num: "01" },
       { href: "/admin/members", label: "営業メンバー", num: "02" },
       { href: "/admin/meetings", label: "商談レビュー", num: "03" },
+      { href: "/admin/activity", label: "活動ログ", num: "04" },
     ],
   },
   {
     label: "02 — Enablement",
     items: [
-      { href: "/admin/knowledge", label: "ナレッジ管理", num: "04" },
-      { href: "/admin/roleplay", label: "ロープレ管理", num: "05" },
-      { href: "/admin/products", label: "商材管理", num: "06" },
+      { href: "/admin/knowledge", label: "ナレッジ管理", num: "05" },
+      { href: "/admin/roleplay", label: "ロープレ管理", num: "06" },
+      { href: "/admin/products", label: "商材管理", num: "07" },
     ],
   },
   {
     label: "03 — System",
     items: [
-      { href: "/meetings/upload", label: "音声アップロード", num: "07" },
-      { href: "/admin/users", label: "ユーザー管理", num: "08" },
+      { href: "/meetings/upload", label: "音声アップロード", num: "08" },
+      { href: "/admin/users", label: "ユーザー管理", num: "09" },
     ],
   },
 ];
@@ -59,6 +66,7 @@ const salesSections: Array<{ label: string; items: NavItem[] }> = [
 export function DashboardShell({ children, variant }: DashboardShellProps) {
   const pathname = usePathname();
   const { profile } = useAuth();
+  const [notifications, setNotifications] = useState<AppNotification[]>([]);
   const sections = variant === "admin" ? adminSections : salesSections;
   const initials = (profile?.name ?? profile?.email ?? "S").slice(0, 1);
   const currentLabel =
@@ -74,6 +82,19 @@ export function DashboardShell({ children, variant }: DashboardShellProps) {
     minute: "2-digit",
     timeZoneName: "short",
   }).format(new Date());
+
+  useEffect(() => {
+    if (variant !== "sales" || !profile?.companyId || !profile.uid) {
+      setNotifications([]);
+      return;
+    }
+
+    return subscribeToAppNotifications(
+      { companyId: profile.companyId, userId: profile.uid },
+      setNotifications,
+      () => setNotifications([]),
+    );
+  }, [profile?.companyId, profile?.uid, variant]);
 
   return (
     <div
@@ -143,7 +164,35 @@ export function DashboardShell({ children, variant }: DashboardShellProps) {
               </div>
             </nav>
 
-            <div className="mt-8 rounded-[20px] border border-[#e8ebf0] bg-white px-4 py-3.5 shadow-[0_8px_22px_rgba(17,24,39,0.04)] md:absolute md:bottom-6 md:left-5 md:right-5 md:mt-0">
+            {notifications.length > 0 ? (
+              <div className="mt-6 rounded-[18px] border border-[#f0c655] bg-[#fffaf0] px-4 py-3 shadow-[0_8px_20px_rgba(245,189,7,0.12)]">
+                <div className="mb-2 text-[11px] font-bold uppercase tracking-[0.18em] text-[#8a6500]">
+                  通知
+                </div>
+                {notifications.slice(0, 1).map((notification) => (
+                  <Link
+                    key={notification.id}
+                    href={notification.href}
+                    onClick={() => void markAppNotificationRead(notification.id)}
+                    className="block"
+                  >
+                    <div className="text-[13px] font-bold text-[#171717]">{notification.title}</div>
+                    <div className="mt-1 line-clamp-2 text-[12px] leading-5 text-[#6f7480]">
+                      {notification.body}
+                    </div>
+                  </Link>
+                ))}
+              </div>
+            ) : null}
+
+            <Link
+              href="/sales/account"
+              className={`mt-8 block rounded-[20px] border px-4 py-3.5 shadow-[0_8px_22px_rgba(17,24,39,0.04)] transition md:absolute md:bottom-6 md:left-5 md:right-5 md:mt-0 ${
+                pathname === "/sales/account"
+                  ? "border-[#f0c655] bg-[#fff8e4]"
+                  : "border-[#e8ebf0] bg-white hover:border-[#f0c655] hover:bg-[#fffdf7]"
+              }`}
+            >
               <div className="flex items-center gap-3">
                 <Image
                   src="/sels1.png"
@@ -160,9 +209,9 @@ export function DashboardShell({ children, variant }: DashboardShellProps) {
                     {profile?.role === "admin" ? "管理者" : "営業担当"}
                   </div>
                 </div>
-                <span className="text-[13px] text-[#9aa1ad]">⌄</span>
+                <span className="text-[13px] text-[#9aa1ad]">›</span>
               </div>
-            </div>
+            </Link>
           </aside>
 
           <div className="min-w-0 bg-[#f5f5f6]">{children}</div>

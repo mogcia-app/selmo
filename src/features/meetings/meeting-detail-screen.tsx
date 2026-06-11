@@ -6,6 +6,7 @@ import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { useAuth } from "@/features/auth/auth-provider";
+import { saveSalesActivityEvent } from "@/lib/firebase/activity";
 import {
   saveMeetingAiSummary,
   saveMeetingConversationLogs,
@@ -18,6 +19,8 @@ import { updateAudioProcessingJob } from "@/lib/firebase/operations";
 
 const transcriptionRequestTimeoutMs = 10 * 60 * 1000;
 const transientBannerDurationMs = 5 * 1000;
+const monthlyLimitMessage =
+  "月間利用上限に達しました。管理者にプラン変更または上限変更を依頼してください。";
 
 type DisplayLog = {
   id: string;
@@ -197,6 +200,20 @@ export function MeetingDetailScreen({
         error: null,
         processingStatus: "uploaded",
       });
+      await saveSalesActivityEvent({
+        companyId: profile?.companyId ?? meeting?.companyId ?? null,
+        userId: profile?.uid ?? meeting?.userId ?? "",
+        type: "ai_analysis_completed",
+        title: "AI分析完了",
+        summary: `${meeting?.customerName ?? "商談"}のAI要約を生成しました`,
+        detail: summaryPayload.summary?.overview ?? "AI要約を生成しました。",
+        href: `/admin/meetings/${meetingId}`,
+        metadata: {
+          meetingId,
+          customerName: meeting?.customerName ?? null,
+          productType: meeting?.productType ?? null,
+        },
+      }).catch(() => undefined);
       await updateAudioProcessingJob(meetingId, {
         status: "completed",
         errorMessage: null,
@@ -294,6 +311,10 @@ export function MeetingDetailScreen({
       };
 
       if (!response.ok) {
+        if (response.status === 429) {
+          throw new Error(monthlyLimitMessage);
+        }
+
         throw new Error(
           [payload.error, payload.detail].filter(Boolean).join(" / ") ||
             "文字起こしテストに失敗しました。",

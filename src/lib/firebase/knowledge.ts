@@ -7,6 +7,7 @@ import {
   collection,
   doc,
   increment,
+  getDocs,
   limit,
   onSnapshot,
   orderBy,
@@ -49,6 +50,7 @@ const knowledgeSearchAliases: Record<string, string[]> = {
 
 export type KnowledgeCategory = {
   id: string;
+  companyId: string | null;
   title: string;
   description: string;
   knowledgeCount: number;
@@ -58,6 +60,7 @@ export type KnowledgeCategory = {
 
 export type KnowledgeProduct = {
   id: string;
+  companyId: string | null;
   name: string;
   logoUrl: string;
   logoStoragePath: string;
@@ -68,6 +71,7 @@ export type KnowledgeProduct = {
 
 export type KnowledgeItem = {
   id: string;
+  companyId: string | null;
   title: string;
   description: string;
   body: string;
@@ -102,6 +106,7 @@ export type KnowledgeAttachment = {
 };
 
 export type CreateKnowledgeItemInput = {
+  companyId?: string | null;
   title: string;
   description?: string;
   body?: string;
@@ -127,98 +132,112 @@ export type KnowledgeSearchHistory = {
 };
 
 export function subscribeToKnowledgeCategories(
+  companyId: string | null | undefined,
   callback: (categories: KnowledgeCategory[]) => void,
   onError?: (error: FirestoreError) => void,
 ): Unsubscribe {
   const { firestore } = assertFirebaseClient();
-  const categoriesQuery = query(collection(firestore, "knowledgeCategories"), orderBy("updatedAt", "desc"));
+  const categoriesQuery = companyId
+    ? query(collection(firestore, "knowledgeCategories"), where("companyId", "==", companyId))
+    : query(collection(firestore, "knowledgeCategories"), orderBy("updatedAt", "desc"));
 
   return onSnapshot(
     categoriesQuery,
-    (snapshot) => callback(snapshot.docs.map(mapKnowledgeCategory)),
+    (snapshot) =>
+      callback(
+        snapshot.docs
+          .map(mapKnowledgeCategory)
+          .sort((left, right) => (right.updatedAt?.getTime() ?? 0) - (left.updatedAt?.getTime() ?? 0)),
+      ),
     onError,
   );
 }
 
 export function subscribeToKnowledgeProducts(
+  companyId: string | null | undefined,
   callback: (products: KnowledgeProduct[]) => void,
   onError?: (error: FirestoreError) => void,
 ): Unsubscribe {
   const { firestore } = assertFirebaseClient();
-  const productsQuery = query(collection(firestore, "knowledgeProducts"), orderBy("updatedAt", "desc"));
+  const productsQuery = companyId
+    ? query(collection(firestore, "knowledgeProducts"), where("companyId", "==", companyId))
+    : query(collection(firestore, "knowledgeProducts"), orderBy("updatedAt", "desc"));
 
   return onSnapshot(
     productsQuery,
-    (snapshot) => callback(snapshot.docs.map(mapKnowledgeProduct)),
+    (snapshot) =>
+      callback(
+        snapshot.docs
+          .map(mapKnowledgeProduct)
+          .sort((left, right) => (right.updatedAt?.getTime() ?? 0) - (left.updatedAt?.getTime() ?? 0)),
+      ),
     onError,
   );
 }
 
 export function subscribeToVisibleKnowledgeItems(
-  userId: string,
+  input: { userId: string; companyId?: string | null },
   callback: (items: KnowledgeItem[]) => void,
   onError?: (error: FirestoreError) => void,
 ): Unsubscribe {
   const { firestore } = assertFirebaseClient();
-  const itemsById = new Map<string, KnowledgeItem>();
+  const sharedQuery = input.companyId
+    ? query(
+        collection(firestore, "knowledgeItems"),
+        where("companyId", "==", input.companyId),
+        where("scope", "==", "shared"),
+      )
+    : query(collection(firestore, "knowledgeItems"), where("scope", "==", "shared"));
+  const personalQuery = input.companyId
+    ? query(
+        collection(firestore, "knowledgeItems"),
+        where("companyId", "==", input.companyId),
+        where("ownerId", "==", input.userId),
+      )
+    : query(collection(firestore, "knowledgeItems"), where("ownerId", "==", input.userId));
 
-  const emit = () => {
-    callback(
-      Array.from(itemsById.values()).sort(
-        (left, right) => (right.updatedAt?.getTime() ?? 0) - (left.updatedAt?.getTime() ?? 0),
-      ),
-    );
-  };
+  let isActive = true;
 
-  const sharedQuery = query(collection(firestore, "knowledgeItems"), where("scope", "==", "shared"));
-  const personalQuery = query(collection(firestore, "knowledgeItems"), where("ownerId", "==", userId));
+  Promise.all([getDocs(sharedQuery), getDocs(personalQuery)])
+    .then(([sharedSnapshot, personalSnapshot]) => {
+      if (!isActive) {
+        return;
+      }
 
-  const unsubscribeShared = onSnapshot(
-    sharedQuery,
-    (snapshot) => {
-      snapshot.docChanges().forEach((change) => {
-        if (change.type === "removed") {
-          itemsById.delete(change.doc.id);
-          return;
-        }
-
-        itemsById.set(change.doc.id, mapKnowledgeItem(change.doc));
+      const itemsById = new Map<string, KnowledgeItem>();
+      [...sharedSnapshot.docs, ...personalSnapshot.docs].forEach((snapshot) => {
+        itemsById.set(snapshot.id, mapKnowledgeItem(snapshot));
       });
-      emit();
-    },
-    onError,
-  );
 
-  const unsubscribePersonal = onSnapshot(
-    personalQuery,
-    (snapshot) => {
-      snapshot.docChanges().forEach((change) => {
-        if (change.type === "removed") {
-          itemsById.delete(change.doc.id);
-          return;
-        }
-
-        itemsById.set(change.doc.id, mapKnowledgeItem(change.doc));
-      });
-      emit();
-    },
-    onError,
-  );
+      callback(
+        Array.from(itemsById.values()).sort(
+          (left, right) => (right.updatedAt?.getTime() ?? 0) - (left.updatedAt?.getTime() ?? 0),
+        ),
+      );
+    })
+    .catch((error: FirestoreError) => {
+      if (isActive) {
+        onError?.(error);
+      }
+    });
 
   return () => {
-    unsubscribeShared();
-    unsubscribePersonal();
+    isActive = false;
   };
 }
 
 export function subscribeToAllKnowledgeItems(
+  companyId: string | null | undefined,
   callback: (items: KnowledgeItem[]) => void,
   onError?: (error: FirestoreError) => void,
 ): Unsubscribe {
   const { firestore } = assertFirebaseClient();
+  const itemsQuery = companyId
+    ? query(collection(firestore, "knowledgeItems"), where("companyId", "==", companyId))
+    : collection(firestore, "knowledgeItems");
 
   return onSnapshot(
-    collection(firestore, "knowledgeItems"),
+    itemsQuery,
     (snapshot) =>
       callback(
         snapshot.docs
@@ -230,24 +249,24 @@ export function subscribeToAllKnowledgeItems(
 }
 
 export function subscribeToKnowledgeItemsByCategory(
-  input: { categoryId: string; userId: string },
+  input: { categoryId: string; userId: string; companyId?: string | null },
   callback: (items: KnowledgeItem[]) => void,
   onError?: (error: FirestoreError) => void,
 ): Unsubscribe {
   return subscribeToVisibleKnowledgeItems(
-    input.userId,
+    { userId: input.userId, companyId: input.companyId },
     (items) => callback(items.filter((item) => item.categoryId === input.categoryId)),
     onError,
   );
 }
 
 export function subscribeToKnowledgeItemsByProduct(
-  input: { productId: string; userId: string },
+  input: { productId: string; userId: string; companyId?: string | null },
   callback: (items: KnowledgeItem[]) => void,
   onError?: (error: FirestoreError) => void,
 ): Unsubscribe {
   return subscribeToVisibleKnowledgeItems(
-    input.userId,
+    { userId: input.userId, companyId: input.companyId },
     (items) => callback(items.filter((item) => item.productId === input.productId)),
     onError,
   );
@@ -302,9 +321,10 @@ export async function saveKnowledgeSearch(userId: string, term: string) {
   });
 }
 
-export async function createKnowledgeCategory(input: { title: string; description?: string; userId: string }) {
+export async function createKnowledgeCategory(input: { title: string; description?: string; userId: string; companyId?: string | null }) {
   const { firestore } = assertFirebaseClient();
   await addDoc(collection(firestore, "knowledgeCategories"), {
+    companyId: input.companyId ?? null,
     title: input.title,
     description: input.description ?? "",
     knowledgeCount: 0,
@@ -315,9 +335,10 @@ export async function createKnowledgeCategory(input: { title: string; descriptio
   });
 }
 
-export async function createKnowledgeProduct(input: { name: string; logoUrl?: string; logoStoragePath?: string; userId: string }) {
+export async function createKnowledgeProduct(input: { name: string; logoUrl?: string; logoStoragePath?: string; userId: string; companyId?: string | null }) {
   const { firestore } = assertFirebaseClient();
   const productRef = await addDoc(collection(firestore, "knowledgeProducts"), {
+    companyId: input.companyId ?? null,
     name: input.name,
     logoUrl: input.logoUrl ?? "",
     logoStoragePath: input.logoStoragePath ?? "",
@@ -382,6 +403,7 @@ export async function createKnowledgeItem(input: CreateKnowledgeItemInput) {
 
   await runTransaction(firestore, async (transaction) => {
     transaction.set(itemRef, {
+      companyId: input.companyId ?? null,
       title: input.title,
       description: input.description ?? "",
       body: input.body ?? "",
@@ -594,6 +616,7 @@ function mapKnowledgeCategory(snapshot: QueryDocumentSnapshot<DocumentData>): Kn
 
   return {
     id: snapshot.id,
+    companyId: readNullableString(data.companyId),
     title: readString(data.title, "未設定カテゴリ"),
     description: readString(data.description),
     knowledgeCount: readNumber(data.knowledgeCount),
@@ -607,6 +630,7 @@ function mapKnowledgeProduct(snapshot: QueryDocumentSnapshot<DocumentData>): Kno
 
   return {
     id: snapshot.id,
+    companyId: readNullableString(data.companyId),
     name: readString(data.name, "未設定商品"),
     logoUrl: readString(data.logoUrl),
     logoStoragePath: readString(data.logoStoragePath),
@@ -623,6 +647,7 @@ function mapKnowledgeItem(snapshot: QueryDocumentSnapshot<DocumentData> | Docume
 
   return {
     id: snapshot.id,
+    companyId: readNullableString(data.companyId),
     title: readString(data.title, "無題のナレッジ"),
     description: readString(data.description),
     body: readString(data.body),

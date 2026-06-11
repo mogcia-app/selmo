@@ -21,6 +21,7 @@ export default function SalesKnowledgeProductPage() {
   const { profile } = useAuth();
   const productId = params.productId;
   const userId = profile?.uid;
+  const companyId = profile?.companyId;
   const [products, setProducts] = useState<KnowledgeProduct[]>([]);
   const [items, setItems] = useState<KnowledgeItem[]>([]);
   const [activeTab, setActiveTab] = useState<string>("all");
@@ -31,19 +32,20 @@ export default function SalesKnowledgeProductPage() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    if (!companyId) return;
     const handleError = (nextError: FirebaseError) => setError(nextError.message);
-    return subscribeToKnowledgeProducts(setProducts, handleError);
-  }, []);
+    return subscribeToKnowledgeProducts(companyId, setProducts, handleError);
+  }, [companyId]);
 
   useEffect(() => {
-    if (!userId || !productId) return;
+    if (!userId || !companyId || !productId) return;
 
     return subscribeToKnowledgeItemsByProduct(
-      { productId, userId },
+      { productId, userId, companyId },
       setItems,
       (nextError: FirebaseError) => setError(nextError.message),
     );
-  }, [productId, userId]);
+  }, [companyId, productId, userId]);
 
   const product = useMemo(
     () => products.find((candidate) => candidate.id === productId) ?? null,

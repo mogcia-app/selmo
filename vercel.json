@@ -1,0 +1,12 @@
+{
+  "crons": [
+    {
+      "path": "/api/email/weekly-admin-report",
+      "schedule": "0 0 * * 1"
+    },
+    {
+      "path": "/api/email/ai-usage-warning",
+      "schedule": "0 1 * * *"
+    }
+  ]
+}

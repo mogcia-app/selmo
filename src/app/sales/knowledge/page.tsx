@@ -42,25 +42,26 @@ export default function SalesKnowledgePage() {
   const [categoryDialogOpen, setCategoryDialogOpen] = useState(false);
   const [productDialogOpen, setProductDialogOpen] = useState(false);
   const userId = profile?.uid;
+  const companyId = profile?.companyId;
   const canCreateShared = profile?.role === "admin";
 
   useEffect(() => {
-    if (!userId) return;
+    if (!userId || !companyId) return;
 
     const handleError = (nextError: FirebaseError) => {
       setError(nextError.message);
     };
     const unsubscribers = [
-      subscribeToKnowledgeCategories(setCategories, handleError),
-      subscribeToKnowledgeProducts(setProducts, handleError),
-      subscribeToVisibleKnowledgeItems(userId, setItems, handleError),
+      subscribeToKnowledgeCategories(companyId, setCategories, handleError),
+      subscribeToKnowledgeProducts(companyId, setProducts, handleError),
+      subscribeToVisibleKnowledgeItems({ userId, companyId }, setItems, handleError),
       subscribeToRecentKnowledgeSearches(userId, setSearchHistory, handleError),
     ];
 
     return () => {
       unsubscribers.forEach((unsubscribe) => unsubscribe());
     };
-  }, [userId]);
+  }, [companyId, userId]);
 
   const personalItems = useMemo(
     () => items.filter((item) => item.ownerId === userId && item.scope === "personal").slice(0, 3),
@@ -79,17 +80,18 @@ export default function SalesKnowledgePage() {
   };
 
   const handleCreateCategory = async (input: { title: string; description?: string }) => {
-    if (!userId) return;
+    if (!userId || !companyId) return;
     await createKnowledgeCategory({
       title: input.title,
       description: input.description,
       userId,
+      companyId,
     });
   };
 
   const handleCreateProduct = async (input: { name: string; logoFile?: File | null }) => {
-    if (!userId) return;
-    const productId = await createKnowledgeProduct({ name: input.name, userId });
+    if (!userId || !companyId) return;
+    const productId = await createKnowledgeProduct({ name: input.name, userId, companyId });
 
     if (input.logoFile) {
       const logo = await uploadKnowledgeProductLogo({

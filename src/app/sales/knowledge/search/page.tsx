@@ -40,20 +40,21 @@ export default function SalesKnowledgeSearchPage() {
   const [error, setError] = useState<string | null>(null);
   const loggedSearchEventKeyRef = useRef<string | null>(null);
   const userId = profile?.uid;
+  const companyId = profile?.companyId;
 
   useEffect(() => {
     setSearchTerm(query);
   }, [query]);
 
   useEffect(() => {
-    if (!userId) return;
+    if (!userId || !companyId) return;
 
     return subscribeToVisibleKnowledgeItems(
-      userId,
+      { userId, companyId },
       setItems,
       (nextError: FirebaseError) => setError(nextError.message),
     );
-  }, [userId]);
+  }, [companyId, userId]);
 
   useEffect(() => {
     if (!userId || !query) return;

@@ -25,24 +25,26 @@ export default function SalesKnowledgeCategoryPage() {
   const { profile } = useAuth();
   const categoryId = params.categoryId;
   const userId = profile?.uid;
+  const companyId = profile?.companyId;
   const [categories, setCategories] = useState<KnowledgeCategory[]>([]);
   const [items, setItems] = useState<KnowledgeItem[]>([]);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    if (!companyId) return;
     const handleError = (nextError: FirebaseError) => setError(nextError.message);
-    return subscribeToKnowledgeCategories(setCategories, handleError);
-  }, []);
+    return subscribeToKnowledgeCategories(companyId, setCategories, handleError);
+  }, [companyId]);
 
   useEffect(() => {
-    if (!userId || !categoryId) return;
+    if (!userId || !companyId || !categoryId) return;
 
     return subscribeToKnowledgeItemsByCategory(
-      { categoryId, userId },
+      { categoryId, userId, companyId },
       setItems,
       (nextError: FirebaseError) => setError(nextError.message),
     );
-  }, [categoryId, userId]);
+  }, [categoryId, companyId, userId]);
 
   const category = useMemo(
     () =>

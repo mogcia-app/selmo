@@ -81,18 +81,30 @@ export default function AdminProductsPage() {
           )}
         </Panel>
 
-        {createOpen && profile?.uid ? (
-          <ProductDialog mode="create" userId={profile.uid} onClose={() => setCreateOpen(false)} />
+        {createOpen && profile?.uid && profile.companyId ? (
+          <ProductDialog mode="create" userId={profile.uid} companyId={profile.companyId} onClose={() => setCreateOpen(false)} />
         ) : null}
-        {editingProduct && profile?.uid ? (
-          <ProductDialog mode="edit" product={editingProduct} userId={profile.uid} onClose={() => setEditingProduct(null)} />
+        {editingProduct && profile?.uid && profile.companyId ? (
+          <ProductDialog mode="edit" product={editingProduct} userId={profile.uid} companyId={profile.companyId} onClose={() => setEditingProduct(null)} />
         ) : null}
       </div>
     </PageShell>
   );
 }
 
-function ProductDialog({ mode, product, userId, onClose }: { mode: "create" | "edit"; product?: KnowledgeProduct; userId: string; onClose: () => void }) {
+function ProductDialog({
+  mode,
+  product,
+  userId,
+  companyId,
+  onClose,
+}: {
+  mode: "create" | "edit";
+  product?: KnowledgeProduct;
+  userId: string;
+  companyId: string;
+  onClose: () => void;
+}) {
   const [name, setName] = useState(product?.name ?? "");
   const [logoFile, setLogoFile] = useState<File | null>(null);
   const [isSaving, setIsSaving] = useState(false);
@@ -112,7 +124,7 @@ function ProductDialog({ mode, product, userId, onClose }: { mode: "create" | "e
     setIsSaving(true);
     setError(null);
     try {
-      const productId = mode === "create" ? await createKnowledgeProduct({ name: nextName, userId }) : product?.id;
+      const productId = mode === "create" ? await createKnowledgeProduct({ name: nextName, userId, companyId }) : product?.id;
       if (!productId) throw new Error("商材IDを確認できませんでした。");
       let logoUrl = product?.logoUrl ?? "";
       let logoStoragePath = product?.logoStoragePath ?? "";

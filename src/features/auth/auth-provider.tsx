@@ -15,6 +15,7 @@ import {
   signInWithEmail,
   signOutUser,
   subscribeToAuthState,
+  type CompanyPlan,
   type AppUserProfile,
 } from "@/lib/firebase/auth";
 import type { UserRole } from "@/types/domain";
@@ -45,6 +46,8 @@ type AuthContextValue = {
 const AuthContext = createContext<AuthContextValue | null>(null);
 const AUTH_PROFILE_CACHE_KEY = "selmo.auth.profile";
 const AUTH_READY_EXTRA_DELAY_MS = 3000;
+const STANDARD_AI_QUOTA = 15;
+const PRO_AI_QUOTA = 30;
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [profile, setProfile] = useState<AppUserProfile | null>(null);
@@ -191,18 +194,47 @@ function readCachedProfile() {
       return null;
     }
 
+    const companyPlan = readCompanyPlan(parsed.companyPlan);
+
     return {
       uid: parsed.uid,
       email: typeof parsed.email === "string" ? parsed.email : null,
       name: typeof parsed.name === "string" ? parsed.name : null,
       companyId: typeof parsed.companyId === "string" ? parsed.companyId : null,
       companyName: typeof parsed.companyName === "string" ? parsed.companyName : null,
+      companyPlan,
+      monthlyTranscriptionQuota: readMonthlyQuota(parsed.monthlyTranscriptionQuota, companyPlan),
+      monthlyRoleplayQuota: readMonthlyQuota(parsed.monthlyRoleplayQuota, companyPlan),
       role: parsed.role,
       status: parsed.status,
     };
   } catch {
     return null;
   }
+}
+
+function readCompanyPlan(value: unknown): CompanyPlan {
+  if (value === "pro" || value === "enterprise") {
+    return value;
+  }
+
+  return "standard";
+}
+
+function readMonthlyQuota(value: unknown, plan: CompanyPlan) {
+  if (typeof value === "number" && Number.isFinite(value) && value >= 0) {
+    return Math.floor(value);
+  }
+
+  if (plan === "pro") {
+    return PRO_AI_QUOTA;
+  }
+
+  if (plan === "enterprise") {
+    return null;
+  }
+
+  return STANDARD_AI_QUOTA;
 }
 
 function writeCachedProfile(profile: AppUserProfile | null) {

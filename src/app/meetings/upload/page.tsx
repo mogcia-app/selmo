@@ -6,8 +6,16 @@ import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { useAuth } from "@/features/auth/auth-provider";
+import { saveSalesActivityEvent } from "@/lib/firebase/activity";
 import { subscribeToKnowledgeProducts, type KnowledgeProduct } from "@/lib/firebase/knowledge";
-import { createMeeting, subscribeToMeetings, type MeetingRecord } from "@/lib/firebase/meetings";
+import {
+  createMeeting,
+  saveMeetingAiSummary,
+  saveMeetingConversationLogs,
+  subscribeToMeetings,
+  type MeetingConversationLog,
+  type MeetingRecord,
+} from "@/lib/firebase/meetings";
 
 const maxRecommendedDurationSec = 120 * 60;
 const maxOpenAiTranscriptionFileSizeBytes = 25 * 1024 * 1024;
@@ -35,6 +43,8 @@ export default function MeetingUploadPage() {
   const [status, setStatus] = useState<"won" | "considering" | "lost">("considering");
   const [location, setLocation] = useState("");
   const [memo, setMemo] = useState("");
+  const [inputMode, setInputMode] = useState<"audio" | "transcript">("audio");
+  const [transcriptText, setTranscriptText] = useState("");
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [detectedDurationSec, setDetectedDurationSec] = useState<number | null>(null);
   const [uploadProgress, setUploadProgress] = useState(0);
@@ -43,11 +53,12 @@ export default function MeetingUploadPage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   useEffect(() => {
-    if (!isFirebaseReady) {
+    if (!isFirebaseReady || !profile?.companyId) {
       return;
     }
 
     const unsubscribe = subscribeToKnowledgeProducts(
+      profile.companyId,
       (nextProducts) => {
         setProducts(nextProducts);
         setProductType((current) => current || nextProducts[0]?.name || "");
@@ -56,25 +67,33 @@ export default function MeetingUploadPage() {
     );
 
     return unsubscribe;
-  }, [isFirebaseReady]);
+  }, [isFirebaseReady, profile?.companyId]);
 
   useEffect(() => {
-    if (!profile?.uid || !profile.role) {
+    if (!profile?.uid || !profile.role || !profile.companyId) {
       return;
     }
 
     const unsubscribe = subscribeToMeetings(
-      { role: profile.role, userId: profile.uid },
+      { role: profile.role, userId: profile.uid, companyId: profile.companyId },
       setMeetings,
       () => setMeetings([]),
     );
 
     return unsubscribe;
-  }, [profile?.role, profile?.uid]);
+  }, [profile?.companyId, profile?.role, profile?.uid]);
 
   const productOptions = useMemo(() => products.map((product) => product.name), [products]);
   const monthlyUploadCount = useMemo(
     () => meetings.filter((meeting) => isCurrentMonth(meeting.recordedAt)).length,
+    [meetings],
+  );
+  const audioRetentionLimit = useMemo(
+    () => readSharedAiQuota(profile?.monthlyTranscriptionQuota ?? 15, profile?.monthlyRoleplayQuota ?? 15),
+    [profile?.monthlyRoleplayQuota, profile?.monthlyTranscriptionQuota],
+  );
+  const savedAudioCount = useMemo(
+    () => meetings.filter((meeting) => meeting.audioFilePath && !meeting.audioDeletedAt).length,
     [meetings],
   );
 
@@ -95,8 +114,16 @@ export default function MeetingUploadPage() {
       return;
     }
 
-    if (!selectedFile) {
+    if (inputMode === "audio" && !selectedFile) {
       setErrorMessage("文字起こし検証のため、音声ファイルを選択してください。");
+      return;
+    }
+
+    const normalizedTranscriptText =
+      inputMode === "transcript" ? normalizePastedTranscript(transcriptText) : "";
+
+    if (inputMode === "transcript" && normalizedTranscriptText.length < 20) {
+      setErrorMessage("文字起こしテキストを20文字以上入力してください。");
       return;
     }
 
@@ -118,12 +145,30 @@ export default function MeetingUploadPage() {
         location: location.trim(),
         memo: memo.trim(),
         status,
-        audioFile: selectedFile,
-        audioDurationSec: detectedDurationSec,
+        audioFile: inputMode === "audio" ? selectedFile : null,
+        audioDurationSec: inputMode === "audio" ? detectedDurationSec : null,
+        transcriptText: inputMode === "transcript" ? normalizedTranscriptText : null,
+        audioRetentionLimit,
         onUploadProgress: setUploadProgress,
       });
 
-      setSuccessMessage(`打ち合わせ情報を保存しました。処理状況は一覧で確認できます。ID: ${meetingId}`);
+      const pastedTranscriptInsights =
+        inputMode === "transcript"
+          ? await generatePastedTranscriptInsights({
+              meetingId,
+              transcriptText: normalizedTranscriptText,
+              companyId: profile.companyId,
+              userId: profile.uid,
+            })
+          : null;
+
+      setSuccessMessage(
+        inputMode === "transcript"
+          ? pastedTranscriptInsights?.summaryCompleted
+            ? `文字起こしテキストを保存し、AI要約を生成しました。ID: ${meetingId}`
+            : `文字起こしテキストを保存しました。AI要約は詳細画面で再確認してください。ID: ${meetingId}`
+          : `アップロード完了しました。処理状況は一覧で確認できます。ID: ${meetingId}`,
+      );
       router.push("/meetings");
     } catch (error) {
       if (error instanceof FirebaseError) {
@@ -146,10 +191,10 @@ export default function MeetingUploadPage() {
             〈 打ち合わせ一覧へ戻る
           </div>
           <h1 className="text-[34px] font-bold tracking-[-0.04em] text-[#171717]">
-            打ち合わせアップロード
+            商談を追加
           </h1>
           <p className="mt-2 text-[16px] text-[#7a808c]">
-            音声ファイルを登録して、文字起こしと分析の準備を進めます。
+            音声ファイル、または既存の文字起こしテキストから商談分析を始められます。
           </p>
         </div>
 
@@ -163,80 +208,126 @@ export default function MeetingUploadPage() {
 
       <section className="grid gap-5 xl:grid-cols-[1.02fr_0.98fr]">
         <section className="rounded-[24px] border border-[#eceef4] bg-white p-5 shadow-[0_10px_28px_rgba(17,24,39,0.05)]">
-          <div className="mb-5 flex items-center gap-3">
+          <div className="mb-5 flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+            <div className="flex items-center gap-3">
             <div className="flex h-10 w-10 items-center justify-center rounded-full bg-[#fff8e4] text-[#f0b400]">
               <UploadGlyph />
             </div>
             <div>
               <h2 className="text-[24px] font-bold tracking-[-0.03em] text-[#171717]">
-                音声ファイル
+                入力方法
               </h2>
               <p className="text-[14px] text-[#7a808c]">
-                mp3 / wav / m4a に対応しています
+                音声アップロード、または文字起こし貼り付け
               </p>
             </div>
-          </div>
-
-          <div className="rounded-[22px] border border-dashed border-[#dfe3ea] bg-[#fafafa] px-6 py-9 text-center">
-            <Image
-              src="/uplod.png"
-              alt="selmo"
-              width={124}
-              height={124}
-              className="mx-auto h-[124px] w-[124px] object-contain"
-            />
-            <div className="mt-4 text-[22px] font-bold tracking-[-0.03em] text-[#171717]">
-              音声ファイルをアップロード
             </div>
-            <div className="mt-2 text-[14px] leading-7 text-[#7a808c]">
-              ドラッグ&ドロップ、またはクリックしてファイルを選択
-            </div>
-            <button
-              type="button"
-              onClick={() => fileInputRef.current?.click()}
-              className="mt-6 rounded-[14px] bg-[#171717] px-5 py-3 text-[14px] font-medium text-white transition hover:bg-[#2a2d33]"
-            >
-              ファイルを選択
-            </button>
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept=".mp3,.wav,.m4a,audio/mpeg,audio/wav,audio/mp4,audio/x-m4a"
-              className="hidden"
-              onChange={async (event) => {
-                const file = event.target.files?.[0] ?? null;
+            <Segmented
+              options={[
+                { label: "音声", value: "audio" },
+                { label: "文字起こし", value: "transcript" },
+              ]}
+              active={inputMode}
+              onChange={(value) => {
+                setInputMode(value as "audio" | "transcript");
                 setErrorMessage(null);
                 setSuccessMessage(null);
-                setUploadProgress(0);
-                setSelectedFile(null);
-                setDetectedDurationSec(null);
-
-                if (!file) {
-                  return;
-                }
-
-                if (!isSupportedAudioFile(file)) {
-                  setErrorMessage(
-                    "対応している形式は mp3 / wav / m4a です。別形式の場合は変換してから再度お試しください。",
-                  );
-                  return;
-                }
-
-                setSelectedFile(file);
-
-                try {
-                  const durationSec = await readAudioDuration(file);
-                  setDetectedDurationSec(durationSec);
-                } catch {
-                  setErrorMessage(
-                    "ファイルは選択できましたが、音声時間を取得できませんでした。アップロード自体は続行できます。",
-                  );
-                }
               }}
             />
           </div>
 
-          {selectedFile ? (
+          {inputMode === "audio" ? (
+            <>
+              <div className="rounded-[22px] border border-dashed border-[#dfe3ea] bg-[#fafafa] px-6 py-9 text-center">
+                <Image
+                  src="/uplod.png"
+                  alt="selmo"
+                  width={124}
+                  height={124}
+                  className="mx-auto h-[124px] w-[124px] object-contain"
+                />
+                <div className="mt-4 text-[22px] font-bold tracking-[-0.03em] text-[#171717]">
+                  音声ファイルをアップロード
+                </div>
+                <div className="mt-2 text-[14px] leading-7 text-[#7a808c]">
+                  mp3 / wav / m4a に対応しています
+                </div>
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  className="mt-6 rounded-[14px] bg-[#171717] px-5 py-3 text-[14px] font-medium text-white transition hover:bg-[#2a2d33]"
+                >
+                  ファイルを選択
+                </button>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept=".mp3,.wav,.m4a,audio/mpeg,audio/wav,audio/mp4,audio/x-m4a"
+                  className="hidden"
+                  onChange={async (event) => {
+                    const file = event.target.files?.[0] ?? null;
+                    setErrorMessage(null);
+                    setSuccessMessage(null);
+                    setUploadProgress(0);
+                    setSelectedFile(null);
+                    setDetectedDurationSec(null);
+
+                    if (!file) {
+                      return;
+                    }
+
+                    if (!isSupportedAudioFile(file)) {
+                      setErrorMessage(
+                        "対応している形式は mp3 / wav / m4a です。別形式の場合は変換してから再度お試しください。",
+                      );
+                      return;
+                    }
+
+                    setSelectedFile(file);
+
+                    try {
+                      const durationSec = await readAudioDuration(file);
+                      setDetectedDurationSec(durationSec);
+                    } catch {
+                      setErrorMessage(
+                        "ファイルは選択できましたが、音声時間を取得できませんでした。アップロード自体は続行できます。",
+                      );
+                    }
+                  }}
+                />
+              </div>
+
+              <div className="mt-5 rounded-[18px] border border-[#eceef4] bg-white px-5 py-4">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="text-[13px] font-semibold text-[#505866]">音声保存枠</div>
+                  <div className="text-[13px] font-bold text-[#8a6500]">
+                    {savedAudioCount} / {audioRetentionLimit ?? "-"}件
+                  </div>
+                </div>
+                <div className="mt-2 text-[13px] leading-6 text-[#7a808c]">
+                  上限に達している場合、最も古い音声ファイルだけを自動削除して新しい音声を保存します。商談履歴と分析結果は残ります。
+                </div>
+              </div>
+            </>
+          ) : (
+            <div className="rounded-[22px] border border-[#e6e8ee] bg-[#fafafa] px-5 py-5">
+              <div className="text-[18px] font-bold text-[#171717]">文字起こしテキストを貼り付け</div>
+              <p className="mt-2 text-[13px] leading-6 text-[#7a808c]">
+                Zoom / Teams / Notta などで作成済みの文字起こしを貼り付けると、音声なしで商談分析に進めます。
+              </p>
+              <textarea
+                value={transcriptText}
+                onChange={(event) => setTranscriptText(event.target.value)}
+                className={`${inputClassName} mt-4 min-h-[260px] resize-y leading-7`}
+                placeholder="営業: 本日はありがとうございます。\n顧客: よろしくお願いします。\n..."
+              />
+              <div className="mt-2 text-right text-[12px] font-semibold text-[#8a909b]">
+                {transcriptText.trim().length.toLocaleString()}文字
+              </div>
+            </div>
+          )}
+
+          {inputMode === "audio" && selectedFile ? (
             <div className="mt-5 rounded-[18px] border border-[#eceef4] bg-[#fafbfc] px-5 py-4">
               <div className="grid gap-4 md:grid-cols-[1.2fr_1fr_1fr]">
                 <MetaBlock label="ファイル名" value={selectedFile.name} />
@@ -260,21 +351,25 @@ export default function MeetingUploadPage() {
             <div className="text-[13px] font-semibold text-[#505866]">処理ステータス</div>
             <div className="mt-2 text-[14px] leading-6 text-[#7a808c]">
               {isSubmitting
-                ? "音声をアップロード中です。完了後、一覧で処理状況を確認できます。"
-                : selectedFile
-                  ? "アップロード前です。保存すると処理待ちとして一覧に表示されます。"
-                  : "音声ファイルを選択してください。"}
+                ? inputMode === "audio"
+                  ? "音声をアップロード中です。完了後、ツール内通知でお知らせします。"
+                  : "文字起こしテキストを保存し、AIで要約と分析を作成しています。"
+                : inputMode === "audio"
+                  ? selectedFile
+                    ? "アップロード前です。保存すると処理待ちとして一覧に表示されます。"
+                    : "音声ファイルを選択してください。"
+                  : "保存すると、貼り付けた文字起こしからAI要約と分析を作成します。"}
             </div>
           </div>
 
-          {detectedDurationSec !== null && detectedDurationSec > maxRecommendedDurationSec ? (
+          {inputMode === "audio" && detectedDurationSec !== null && detectedDurationSec > maxRecommendedDurationSec ? (
             <AlertBox>
               120分を超える音声です。文字起こし検証の観点では価値がありますが、
               まずは短めの音声でも1本通して精度確認するのがおすすめです。
             </AlertBox>
           ) : null}
 
-          {selectedFile && selectedFile.size > maxOpenAiTranscriptionFileSizeBytes ? (
+          {inputMode === "audio" && selectedFile && selectedFile.size > maxOpenAiTranscriptionFileSizeBytes ? (
             <AlertBox>
               この音声は 25MB を超えています。文字起こしテストでは自動で軽量 mp3 に分割して投入します。
             </AlertBox>
@@ -409,7 +504,13 @@ export default function MeetingUploadPage() {
                 disabled={isSubmitting || isLoading}
                 className="rounded-[14px] bg-[#171717] px-5 py-3 text-[14px] font-medium text-white transition hover:bg-[#2a2d33] disabled:cursor-not-allowed disabled:bg-[#9ca3af]"
               >
-                {isSubmitting ? `アップロード中... ${uploadProgress}%` : "音声をアップロード"}
+                {isSubmitting
+                  ? inputMode === "audio"
+                    ? `アップロード中... ${uploadProgress}%`
+                    : "保存中..."
+                  : inputMode === "audio"
+                    ? "音声をアップロード"
+                    : "文字起こしを保存"}
               </button>
             </div>
           </form>
@@ -558,6 +659,160 @@ function formatDuration(durationSec: number) {
   return `${minutes}:${String(seconds).padStart(2, "0")}`;
 }
 
+function normalizePastedTranscript(text: string) {
+  return text
+    .replace(/\r\n/g, "\n")
+    .replace(/\r/g, "\n")
+    .replace(/\\n/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+async function generatePastedTranscriptInsights({
+  meetingId,
+  transcriptText,
+  companyId,
+  userId,
+}: {
+  meetingId: string;
+  transcriptText: string;
+  companyId?: string | null;
+  userId: string;
+}) {
+  const segment = {
+    startSec: 0,
+    endSec: 0,
+    text: transcriptText,
+  };
+  let summaryCompleted = false;
+
+  try {
+    await saveMeetingConversationLogs(meetingId, {
+      status: "running",
+      model: "gpt-4o-mini",
+      logs: [],
+      error: null,
+      processingStatus: "uploaded",
+    });
+
+    const logsResponse = await fetch(`/api/meetings/${meetingId}/conversation-logs`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        companyId,
+        userId,
+        transcriptText,
+        segments: [segment],
+      }),
+    });
+    const logsPayload = (await readJsonResponse(logsResponse)) as {
+      error?: string;
+      detail?: string;
+      model?: string | null;
+      logs?: MeetingConversationLog[];
+    };
+
+    if (!logsResponse.ok) {
+      throw new Error(readApiError(logsPayload, "会話ログ生成に失敗しました。"));
+    }
+
+    await saveMeetingConversationLogs(meetingId, {
+      status: "completed",
+      model: logsPayload.model ?? "gpt-4o-mini",
+      logs: logsPayload.logs ?? [],
+      error: null,
+      processingStatus: "uploaded",
+    });
+  } catch (error) {
+    const message =
+      error instanceof Error ? error.message : "会話ログ生成に失敗しました。";
+    await saveMeetingConversationLogs(meetingId, {
+      status: "failed",
+      model: "gpt-4o-mini",
+      error: message,
+      processingStatus: "uploaded",
+    }).catch(() => undefined);
+  }
+
+  try {
+    await saveMeetingAiSummary(meetingId, {
+      status: "running",
+      model: "gpt-4o-mini",
+      error: null,
+      processingStatus: "uploaded",
+    });
+
+    const summaryResponse = await fetch(`/api/meetings/${meetingId}/summary`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        companyId,
+        userId,
+        transcriptText,
+      }),
+    });
+    const summaryPayload = (await readJsonResponse(summaryResponse)) as {
+      error?: string;
+      detail?: string;
+      model?: string | null;
+      summary?: MeetingRecord["aiSummary"];
+    };
+
+    if (!summaryResponse.ok) {
+      throw new Error(readApiError(summaryPayload, "AI要約の生成に失敗しました。"));
+    }
+
+    await saveMeetingAiSummary(meetingId, {
+      status: "completed",
+      model: summaryPayload.model ?? "gpt-4o-mini",
+      summary: summaryPayload.summary ?? null,
+      error: null,
+      processingStatus: "uploaded",
+    });
+    await saveSalesActivityEvent({
+      companyId,
+      userId,
+      type: "ai_analysis_completed",
+      title: "AI分析完了",
+      summary: "貼り付け文字起こしのAI要約を生成しました",
+      detail: summaryPayload.summary?.overview ?? "AI要約を生成しました。",
+      href: `/admin/meetings/${meetingId}`,
+      metadata: {
+        meetingId,
+        source: "pasted_transcript",
+      },
+    }).catch(() => undefined);
+    summaryCompleted = true;
+  } catch (error) {
+    const message =
+      error instanceof Error ? error.message : "AI要約の生成に失敗しました。";
+    await saveMeetingAiSummary(meetingId, {
+      status: "failed",
+      model: "gpt-4o-mini",
+      error: message,
+      processingStatus: "uploaded",
+    }).catch(() => undefined);
+  }
+
+  return { summaryCompleted };
+}
+
+async function readJsonResponse(response: Response) {
+  try {
+    return await response.json();
+  } catch {
+    return {};
+  }
+}
+
+function readApiError(payload: { error?: string; detail?: string }, fallback: string) {
+  return [payload.error, payload.detail].filter(Boolean).join(" / ") || fallback;
+}
+
 function readAudioDuration(file: File) {
   return new Promise<number>((resolve, reject) => {
     const objectUrl = URL.createObjectURL(file);
@@ -609,4 +864,12 @@ function isCurrentMonth(date: Date | null) {
 
   const now = new Date();
   return date.getFullYear() === now.getFullYear() && date.getMonth() === now.getMonth();
+}
+
+function readSharedAiQuota(transcriptionQuota: number | null, roleplayQuota: number | null) {
+  if (transcriptionQuota === null || roleplayQuota === null) {
+    return null;
+  }
+
+  return Math.min(transcriptionQuota, roleplayQuota);
 }

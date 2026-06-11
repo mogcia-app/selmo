@@ -4,6 +4,7 @@ import { FirebaseError } from "firebase/app";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 
+import { useAuth } from "@/features/auth/auth-provider";
 import { subscribeToUserProfiles, type AppUserProfile } from "@/lib/firebase/auth";
 import {
   subscribeToAllKnowledgeItems,
@@ -37,6 +38,7 @@ export type AdminMemberRow = {
 };
 
 export function useAdminInsights() {
+  const { profile } = useAuth();
   const [users, setUsers] = useState<AppUserProfile[]>([]);
   const [meetings, setMeetings] = useState<MeetingRecord[]>([]);
   const [products, setProducts] = useState<KnowledgeProduct[]>([]);
@@ -48,29 +50,30 @@ export function useAdminInsights() {
   const adminUserId = users.find((user) => user.role === "admin")?.uid;
 
   useEffect(() => {
+    if (!profile?.companyId) return;
     const handleError = (nextError: FirebaseError) => setError(nextError.message);
     const unsubscribers = [
       subscribeToUserProfiles(setUsers, handleError),
-      subscribeToMeetings({ role: "admin", userId: "admin" }, setMeetings, handleError),
-      subscribeToKnowledgeProducts(setProducts, handleError),
-      subscribeToKnowledgeCategories(setCategories, handleError),
-      subscribeToAllKnowledgeItems(setKnowledgeItems, handleError),
-      subscribeToRoleplayScenarios(setRoleplayScenarios, handleError),
+      subscribeToMeetings({ role: "admin", userId: "admin", companyId: profile.companyId }, setMeetings, handleError),
+      subscribeToKnowledgeProducts(profile.companyId, setProducts, handleError),
+      subscribeToKnowledgeCategories(profile.companyId, setCategories, handleError),
+      subscribeToAllKnowledgeItems(profile.companyId, setKnowledgeItems, handleError),
+      subscribeToRoleplayScenarios(profile.companyId, setRoleplayScenarios, handleError),
     ];
 
     return () => {
       unsubscribers.forEach((unsubscribe) => unsubscribe());
     };
-  }, []);
+  }, [profile?.companyId]);
 
   useEffect(() => {
-    if (!adminUserId) return;
+    if (!adminUserId || !profile?.companyId) return;
     return subscribeToRoleplayResults(
-      { userId: adminUserId, isAdmin: true },
+      { userId: adminUserId, companyId: profile.companyId, isAdmin: true },
       setRoleplayResults,
       (nextError: FirebaseError) => setError(nextError.message),
     );
-  }, [adminUserId]);
+  }, [adminUserId, profile?.companyId]);
 
   const salesUsers = useMemo(() => users.filter((user) => user.role === "sales"), [users]);
   const memberRows = useMemo(
@@ -238,4 +241,3 @@ export function EmptyState({ title, body }: { title: string; body: string }) {
 export function Placeholder({ children = "集計準備中" }: { children?: React.ReactNode }) {
   return <span className="text-[13px] font-bold text-[#8a909b]">{children}</span>;
 }
-
