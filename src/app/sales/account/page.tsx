@@ -7,6 +7,7 @@ import { useEffect, useMemo, useState } from "react";
 
 import { useAuth } from "@/features/auth/auth-provider";
 import { assertFirebaseClient } from "@/lib/firebase/client";
+import { uploadUserAvatar } from "@/lib/firebase/auth";
 import { subscribeToMeetings, type MeetingRecord } from "@/lib/firebase/meetings";
 import { subscribeToRoleplayResults, type RoleplayResult } from "@/lib/firebase/roleplay";
 
@@ -26,6 +27,10 @@ export default function SalesAccountPage() {
   const [activityCounts, setActivityCounts] = useState<ActivityCounts>({ knowledgeSearch: 0 });
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [avatarPreview, setAvatarPreview] = useState<string | null>(null);
+  const [avatarFile, setAvatarFile] = useState<File | null>(null);
+  const [isSavingAvatar, setIsSavingAvatar] = useState(false);
+  const [avatarMessage, setAvatarMessage] = useState<string | null>(null);
+  const [avatarError, setAvatarError] = useState<string | null>(null);
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
@@ -92,6 +97,45 @@ export default function SalesAccountPage() {
       isActive = false;
     };
   }, [profile?.companyId, profile?.uid]);
+
+  useEffect(() => {
+    if (!avatarFile) {
+      setAvatarPreview(profile?.avatarUrl ?? null);
+    }
+  }, [avatarFile, profile?.avatarUrl]);
+
+  async function handleAvatarSave() {
+    setAvatarMessage(null);
+    setAvatarError(null);
+
+    if (!profile?.uid || !avatarFile) {
+      setAvatarError("保存する画像を選択してください。");
+      return;
+    }
+
+    if (!avatarFile.type.startsWith("image/")) {
+      setAvatarError("画像ファイルを選択してください。");
+      return;
+    }
+
+    if (avatarFile.size > 5 * 1024 * 1024) {
+      setAvatarError("画像は5MB以下で選択してください。");
+      return;
+    }
+
+    setIsSavingAvatar(true);
+
+    try {
+      const result = await uploadUserAvatar({ userId: profile.uid, file: avatarFile });
+      setAvatarPreview(result.avatarUrl);
+      setAvatarFile(null);
+      setAvatarMessage("アイコンを保存しました。");
+    } catch {
+      setAvatarError("アイコンの保存に失敗しました。");
+    } finally {
+      setIsSavingAvatar(false);
+    }
+  }
 
   async function handlePasswordChange(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -232,11 +276,24 @@ export default function SalesAccountPage() {
                       onChange={(event) => {
                         const file = event.target.files?.[0] ?? null;
                         if (file) {
+                          setAvatarMessage(null);
+                          setAvatarError(null);
+                          setAvatarFile(file);
                           setAvatarPreview(URL.createObjectURL(file));
                         }
                       }}
                     />
                   </label>
+                  <button
+                    type="button"
+                    onClick={() => void handleAvatarSave()}
+                    disabled={!avatarFile || isSavingAvatar}
+                    className="mt-4 h-10 rounded-[13px] bg-[#ffc400] px-4 text-[13px] font-bold text-[#171717] transition hover:bg-[#f0b400] disabled:cursor-not-allowed disabled:opacity-55"
+                  >
+                    {isSavingAvatar ? "保存中" : "アイコンを保存"}
+                  </button>
+                  {avatarMessage ? <p className="mt-2 text-center text-[12px] font-bold text-[#4e7a24]">{avatarMessage}</p> : null}
+                  {avatarError ? <p className="mt-2 text-center text-[12px] font-bold text-[#cf4b39]">{avatarError}</p> : null}
                 </div>
 
                 <div className="space-y-4">

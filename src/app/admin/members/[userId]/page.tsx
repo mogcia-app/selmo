@@ -1,7 +1,10 @@
 "use client";
 
+import { FirebaseError } from "firebase/app";
+import Image from "next/image";
 import Link from "next/link";
 import { useParams } from "next/navigation";
+import { useEffect, useMemo, useState } from "react";
 
 import {
   EmptyState,
@@ -17,19 +20,41 @@ import {
   getOutcomeTone,
   useAdminInsights,
 } from "@/app/admin/_components/admin-insights";
+import { useAuth } from "@/features/auth/auth-provider";
+import { subscribeToSalesActivityEvents, type SalesActivityEvent } from "@/lib/firebase/activity";
 import type { MeetingRecord } from "@/lib/firebase/meetings";
 
 export default function AdminMemberDetailPage() {
   const params = useParams<{ userId: string }>();
+  const { profile: adminProfile } = useAuth();
   const { memberRows, salesUsers, meetings, roleplayResults, knowledgeItems, error } = useAdminInsights();
+  const [activityEvents, setActivityEvents] = useState<SalesActivityEvent[]>([]);
+  const [activityError, setActivityError] = useState<string | null>(null);
   const member = memberRows.find((row) => row.id === params.userId);
   const profile = salesUsers.find((user) => user.uid === params.userId);
   const userMeetings = meetings.filter((meeting) => meeting.userId === params.userId);
   const userResults = roleplayResults.filter((result) => result.userId === params.userId);
   const userKnowledgeItems = knowledgeItems.filter((item) => item.ownerId === params.userId);
+  const searchWordRows = useMemo(
+    () => buildSearchWordRows(activityEvents, params.userId),
+    [activityEvents, params.userId],
+  );
   const lostReason = buildLostReason(userMeetings);
   const latestRoleplayFeedback = userResults[0]?.improvementPhrases?.[0] ?? userResults[0]?.summary ?? member?.guidance ?? "商談ログを確認";
   const winRate = calcWinRate(userMeetings);
+
+  useEffect(() => {
+    if (!adminProfile?.companyId) {
+      setActivityEvents([]);
+      return;
+    }
+
+    return subscribeToSalesActivityEvents(
+      adminProfile.companyId,
+      setActivityEvents,
+      (nextError: FirebaseError) => setActivityError(nextError.message),
+    );
+  }, [adminProfile?.companyId]);
 
   return (
     <PageShell>
@@ -41,16 +66,29 @@ export default function AdminMemberDetailPage() {
           action={<Link href="/admin/members" className="rounded-[14px] border border-[#e2e6ee] bg-white px-4 py-3 text-[13px] font-bold text-[#343b48]">一覧へ戻る</Link>}
         />
 
-        {error ? <ErrorBox message={error} /> : null}
+        {error || activityError ? <ErrorBox message={error ?? activityError ?? ""} /> : null}
 
-        <section className="mt-6 grid gap-4 md:grid-cols-4">
+        {member ? (
+          <section className="mt-8 rounded-[24px] border border-[#eceef4] bg-white px-5 py-5 shadow-[0_10px_28px_rgba(17,24,39,0.05)]">
+            <div className="flex flex-wrap items-center gap-4">
+              <MemberAvatar name={member.name} avatarUrl={member.avatarUrl} />
+              <div>
+                <div className="text-[22px] font-black tracking-[-0.04em] text-[#171717]">{member.name}</div>
+                <div className="mt-1 text-[13px] font-bold text-[#596273]">{member.email || "メール未登録"} ・ {member.workExperienceLabel}</div>
+              </div>
+              <StatusBadge tone={member.tone} label={member.guidance} />
+            </div>
+          </section>
+        ) : null}
+
+        <section className="mt-8 grid gap-5 md:grid-cols-4">
           <KpiCard label="商談件数" value={`${userMeetings.length}件`} note="このメンバーの商談" />
           <KpiCard label="成約率" value={winRate === null ? "-" : `${winRate}%`} note={winRate === null ? "商談なし" : "商談結果より算出"} />
           <KpiCard label="ロープレ実施" value={`${userResults.length}回`} note="結果保存済み" />
           <KpiCard label="平均スコア" value={member?.averageScore === null || !member ? "-" : `${member.averageScore}点`} note={member?.averageScore === null ? "結果なし" : "ロープレ結果より算出"} />
         </section>
 
-        <section className="mt-5 grid gap-5 xl:grid-cols-[minmax(0,1.25fr)_minmax(360px,0.75fr)]">
+        <section className="mt-8 grid gap-6 xl:grid-cols-[minmax(0,1.25fr)_minmax(360px,0.75fr)]">
           <div className="space-y-5">
             <Panel title="商談/通話履歴">
               {userMeetings.length > 0 ? (
@@ -115,6 +153,32 @@ export default function AdminMemberDetailPage() {
               </div>
             </Panel>
 
+            <Panel title="よく検索するワード TOP10">
+              {searchWordRows.length > 0 ? (
+                <div className="space-y-2">
+                  {searchWordRows.map((row, index) => (
+                    <div key={row.word} className="rounded-[16px] border border-[#eef1f5] bg-[#fcfcfd] px-4 py-3">
+                      <div className="flex items-center justify-between gap-3">
+                        <div className="flex min-w-0 items-center gap-3">
+                          <span className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[#ffd84d] text-[12px] font-black text-[#171717]">
+                            {index + 1}
+                          </span>
+                          <span className="truncate text-[14px] font-black text-[#343b48]">{row.word}</span>
+                        </div>
+                        <span className="text-[13px] font-black text-[#8a6500]">{row.count}回</span>
+                      </div>
+                      <div className="mt-2 flex items-center justify-between gap-3 text-[12px] font-bold text-[#8a909b]">
+                        <span>未ヒット {row.noResultCount}回</span>
+                        <span>最終検索 {formatDate(row.lastSearchedAt)}</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <EmptyState title="検索ワードはまだありません" body="この営業マンがナレッジ検索を行うと、よく検索するワードが表示されます。" />
+              )}
+            </Panel>
+
             <Panel title="上司メモ">
               <div className="rounded-[16px] border border-[#eef1f5] bg-[#fcfcfd] px-4 py-4 text-[13px] leading-6 text-[#596273]">
                 指導メモは、商談詳細ページの上司コメントまたはロープレ課題割り当てと合わせて管理してください。
@@ -133,6 +197,39 @@ export default function AdminMemberDetailPage() {
   );
 }
 
+function buildSearchWordRows(events: SalesActivityEvent[], userId: string) {
+  const rows = new Map<string, { count: number; noResultCount: number; lastSearchedAt: Date | null }>();
+
+  events
+    .filter((event) => event.userId === userId && event.type === "knowledge_searched")
+    .forEach((event) => {
+      const word = readString(event.metadata.query);
+      if (!word) return;
+      const current = rows.get(word) ?? { count: 0, noResultCount: 0, lastSearchedAt: null };
+      current.count += 1;
+      if (readNumber(event.metadata.resultCount) === 0) {
+        current.noResultCount += 1;
+      }
+      if (!current.lastSearchedAt || (event.createdAt && event.createdAt > current.lastSearchedAt)) {
+        current.lastSearchedAt = event.createdAt;
+      }
+      rows.set(word, current);
+    });
+
+  return Array.from(rows.entries())
+    .map(([word, row]) => ({ word, ...row }))
+    .sort((left, right) => right.count - left.count)
+    .slice(0, 10);
+}
+
+function readString(value: unknown) {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function readNumber(value: unknown) {
+  return typeof value === "number" && Number.isFinite(value) ? value : 0;
+}
+
 function InsightRow({ label, value }: { label: string; value: string }) {
   return (
     <div className="rounded-[16px] border border-[#eef1f5] bg-[#fcfcfd] px-4 py-3">
@@ -147,6 +244,18 @@ function buildLostReason(meetings: MeetingRecord[]) {
   if (lostMeetings.length === 0) return "失注商談なし";
   const latest = lostMeetings[0];
   return latest.aiSummary?.bullets[0] ?? latest.aiSummary?.overview ?? "失注商談の詳細を確認";
+}
+
+function MemberAvatar({ name, avatarUrl }: { name: string; avatarUrl: string | null }) {
+  if (avatarUrl) {
+    return <Image src={avatarUrl} alt="" width={64} height={64} className="h-16 w-16 shrink-0 rounded-full object-cover" />;
+  }
+
+  return (
+    <span className="inline-flex h-16 w-16 shrink-0 items-center justify-center rounded-full bg-[#fff3cf] text-[22px] font-black text-[#8a6500]">
+      {name.slice(0, 1)}
+    </span>
+  );
 }
 
 function ErrorBox({ message }: { message: string }) {

@@ -131,13 +131,13 @@ export default function AdminActivityPage() {
           </div>
         ) : null}
 
-        <section className="mt-6 grid gap-4 md:grid-cols-3">
+        <section className="mt-8 grid gap-5 md:grid-cols-3">
           <Metric label="今日の活動" value={`${todayEventCount}件`} note="営業メンバーの操作ログ" />
           <Metric label="ナレッジ検索" value={`${searchEventCount}件`} note="検索キーワードを記録" />
           <Metric label="分析結果" value={`${analysisEventCount}件`} note="sales側で作成済み" />
         </section>
 
-        <section className="mt-5 grid gap-5 xl:grid-cols-[minmax(0,1.25fr)_minmax(380px,0.75fr)]">
+        <section className="mt-8 grid gap-6 xl:grid-cols-[minmax(0,1.25fr)_minmax(380px,0.75fr)]">
           <Panel title="活動タイムライン">
             <div className="mb-4 grid gap-3 md:grid-cols-3">
               <Select value={memberId} onChange={setMemberId} options={[["", "営業マンすべて"], ...memberRows.map((member) => [member.id, member.name] as [string, string])]} />

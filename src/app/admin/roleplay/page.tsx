@@ -87,7 +87,7 @@ export default function AdminRoleplayPage() {
         />
         {error ? <ErrorBox message={error} /> : null}
 
-        <section className="mt-6 grid gap-4 md:grid-cols-4">
+        <section className="mt-8 grid gap-5 md:grid-cols-4">
           <KpiCard label="シナリオ" value={`${roleplayScenarios.length}件`} note="登録済み" />
           <KpiCard label="実施回数" value={`${roleplayResults.length}回`} note="結果保存済み" />
           <KpiCard label="平均スコア" value={averageScore === null ? "-" : `${averageScore}点`} note={averageScore === null ? "結果なし" : "全体平均"} />
@@ -95,7 +95,7 @@ export default function AdminRoleplayPage() {
           <KpiCard label="割り当て中" value={`${activeAssignments.length}件`} note="未完了の課題" />
         </section>
 
-        <section className="mt-5 grid gap-5 xl:grid-cols-[minmax(0,1.3fr)_minmax(360px,0.7fr)]">
+        <section className="mt-8 grid gap-6 xl:grid-cols-[minmax(0,1.3fr)_minmax(360px,0.7fr)]">
           <Panel title="シナリオ一覧">
             {roleplayScenarios.length > 0 ? (
               <div className="space-y-3">

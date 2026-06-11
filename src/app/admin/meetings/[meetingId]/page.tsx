@@ -36,14 +36,14 @@ export default function AdminMeetingDetailPage() {
 
         {meeting ? (
           <>
-            <section className="mt-6 grid gap-4 md:grid-cols-4">
+            <section className="mt-8 grid gap-5 md:grid-cols-4">
               <InfoCard label="営業マン" value={member?.name ?? "未設定"} />
               <InfoCard label="商材" value={meeting.productType || "未設定"} />
               <InfoCard label="結果" value={getMeetingOutcomeLabel(meeting.status)} />
               <InfoCard label="実施日時" value={formatDateTime(meeting.recordedAt)} />
             </section>
 
-            <section className="mt-5 grid gap-5 xl:grid-cols-[minmax(0,1.25fr)_minmax(360px,0.75fr)]">
+            <section className="mt-8 grid gap-6 xl:grid-cols-[minmax(0,1.25fr)_minmax(360px,0.75fr)]">
               <div className="space-y-5">
                 <Panel title="文字起こし本文">
                   {transcript ? (

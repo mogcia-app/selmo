@@ -75,8 +75,9 @@ export default function AdminMeetingsPage() {
         <PageHeader eyebrow="MEETING REVIEW" title="商談レビュー" description="全営業マンの商談・通話を確認し、要確認の商談を見つけます。" />
         {error ? <ErrorBox message={error} /> : null}
 
-        <Panel title="フィルター">
-          <div className="grid gap-3 md:grid-cols-6">
+        <div className="mt-8">
+          <Panel title="フィルター">
+            <div className="grid gap-3 md:grid-cols-6">
             <Select value={memberId} onChange={setMemberId} options={[["", "営業マンすべて"], ...memberRows.map((member) => [member.id, member.name] as [string, string])]} />
             <Select value={product} onChange={setProduct} options={[["", "商材すべて"], ...products.map((item) => [item, item] as [string, string])]} />
             <Select value={outcome} onChange={setOutcome} options={[["", "結果すべて"], ["won", "成約"], ["lost", "失注"], ["considering", "検討中"]]} />
@@ -88,20 +89,22 @@ export default function AdminMeetingsPage() {
               placeholder="顧客・営業マンで検索"
               className="h-11 rounded-[14px] border border-[#e4e8ef] bg-white px-3 text-[13px] font-bold text-[#343b48] outline-none focus:border-[#e0bd4b]"
             />
-          </div>
-          <div className="mt-4 flex flex-wrap items-center gap-2">
-            <span className="text-[12px] font-bold text-[#8a909b]">表示中: {filteredMeetings.length}件</span>
-            {activeFilterLabels.map((label) => (
-              <span key={label} className="rounded-full bg-[#fff5d8] px-3 py-1 text-[12px] font-black text-[#8a6500]">
-                {label}
-              </span>
-            ))}
-          </div>
-        </Panel>
+            </div>
+            <div className="mt-4 flex flex-wrap items-center gap-2">
+              <span className="text-[12px] font-bold text-[#8a909b]">表示中: {filteredMeetings.length}件</span>
+              {activeFilterLabels.map((label) => (
+                <span key={label} className="rounded-full bg-[#fff5d8] px-3 py-1 text-[12px] font-black text-[#8a6500]">
+                  {label}
+                </span>
+              ))}
+            </div>
+          </Panel>
+        </div>
 
-        <Panel title="商談一覧">
-          {filteredMeetings.length > 0 ? (
-            <div className="overflow-x-auto">
+        <div className="mt-8">
+          <Panel title="商談一覧">
+            {filteredMeetings.length > 0 ? (
+              <div className="overflow-x-auto">
               <table className="w-full min-w-[980px] text-left">
                 <thead>
                   <tr className="border-b border-[#eef1f5] text-[12px] text-[#7a808c]">
@@ -149,11 +152,12 @@ export default function AdminMeetingsPage() {
                   })}
                 </tbody>
               </table>
-            </div>
-          ) : (
-            <EmptyState title="商談はまだありません" body="音声アップロードや商談登録後、一覧に表示されます。" />
-          )}
-        </Panel>
+              </div>
+            ) : (
+              <EmptyState title="商談はまだありません" body="音声アップロードや商談登録後、一覧に表示されます。" />
+            )}
+          </Panel>
+        </div>
       </div>
     </PageShell>
   );

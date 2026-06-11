@@ -200,6 +200,8 @@ function readCachedProfile() {
       uid: parsed.uid,
       email: typeof parsed.email === "string" ? parsed.email : null,
       name: typeof parsed.name === "string" ? parsed.name : null,
+      avatarUrl: typeof parsed.avatarUrl === "string" ? parsed.avatarUrl : null,
+      avatarStoragePath: typeof parsed.avatarStoragePath === "string" ? parsed.avatarStoragePath : null,
       companyId: typeof parsed.companyId === "string" ? parsed.companyId : null,
       companyName: typeof parsed.companyName === "string" ? parsed.companyName : null,
       companyPlan,
@@ -207,6 +209,9 @@ function readCachedProfile() {
       monthlyRoleplayQuota: readMonthlyQuota(parsed.monthlyRoleplayQuota, companyPlan),
       role: parsed.role,
       status: parsed.status,
+      workExperienceYears: readWorkExperienceValue(parsed.workExperienceYears),
+      workExperienceMonths: readWorkExperienceValue(parsed.workExperienceMonths),
+      workExperienceLocked: parsed.workExperienceLocked === true,
     };
   } catch {
     return null;
@@ -235,6 +240,14 @@ function readMonthlyQuota(value: unknown, plan: CompanyPlan) {
   }
 
   return STANDARD_AI_QUOTA;
+}
+
+function readWorkExperienceValue(value: unknown) {
+  if (typeof value === "number" && Number.isFinite(value) && value >= 0) {
+    return Math.floor(value);
+  }
+
+  return null;
 }
 
 function writeCachedProfile(profile: AppUserProfile | null) {

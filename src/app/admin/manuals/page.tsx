@@ -40,8 +40,8 @@ export default function AdminManualsPage() {
     <PageShell>
       <div className="mx-auto max-w-[1480px]">
         <PageHeader
-          eyebrow="SALES MANUAL"
-          title="営業成功基準"
+          eyebrow="MANUAL"
+          title="マニュアル"
           description="会社の勝ちパターン、必須ヒアリング、反論対応、クロージング基準を登録します。sales側の分析結果はこの基準に沿って表示されます。"
           action={
             <button
@@ -55,7 +55,7 @@ export default function AdminManualsPage() {
         />
         {error ? <ErrorBox message={error} /> : null}
 
-        <section className="mt-6 rounded-[24px] border border-[#f0c655] bg-[#fffaf0] px-5 py-5 shadow-[0_10px_28px_rgba(245,189,7,0.08)] md:px-6">
+        <section className="mt-8 rounded-[24px] border border-[#f0c655] bg-[#fffaf0] px-5 py-5 shadow-[0_10px_28px_rgba(245,189,7,0.08)] md:px-6">
           <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
             <div className="min-w-0">
               <div className="inline-flex rounded-full bg-[#ffd84d] px-3 py-1 text-[12px] font-black text-[#171717]">
@@ -78,15 +78,16 @@ export default function AdminManualsPage() {
           </div>
         </section>
 
-        <section className="mt-6 grid gap-4 md:grid-cols-3">
-          <KpiCard label="登録マニュアル" value={`${manuals.length}件`} note="salesManuals" />
+        <section className="mt-8 grid gap-5 md:grid-cols-3">
+          <KpiCard label="登録マニュアル" value={`${manuals.length}件`} note="営業基準の登録数" />
           <KpiCard label="有効基準" value={`${activeManuals.length}件`} note="sales分析に反映" />
           <KpiCard label="分析結果" value={activeManuals.length > 0 ? "基準あり" : "汎用"} note="商談/ロープレ" />
         </section>
 
-        <Panel title="マニュアル一覧">
-          {manuals.length > 0 ? (
-            <div className="grid gap-4 lg:grid-cols-2">
+        <div className="mt-8">
+          <Panel title="マニュアル一覧">
+            {manuals.length > 0 ? (
+              <div className="grid gap-5 lg:grid-cols-2">
               {manuals.map((manual) => (
                 <article key={manual.id} className="rounded-[18px] border border-[#eef1f5] bg-[#fcfcfd] px-5 py-5">
                   <div className="flex items-start justify-between gap-4">
@@ -111,11 +112,12 @@ export default function AdminManualsPage() {
                   </button>
                 </article>
               ))}
-            </div>
-          ) : (
-            <EmptyState title="営業成功基準はまだありません" body="マニュアルを登録すると、sales側の商談分析結果が会社基準に沿った表示へ切り替わります。" />
-          )}
-        </Panel>
+              </div>
+            ) : (
+              <EmptyState title="営業成功基準はまだありません" body="マニュアルを登録すると、sales側の商談分析結果が会社基準に沿った表示へ切り替わります。" />
+            )}
+          </Panel>
+        </div>
 
         {createOpen && profile?.uid && profile.companyId ? (
           <ManualDialog
@@ -156,8 +158,34 @@ function ManualDialog({
   const [objectionHandling, setObjectionHandling] = useState((manual?.objectionHandling ?? []).join("\n"));
   const [closingRules, setClosingRules] = useState((manual?.closingRules ?? []).join("\n"));
   const [status, setStatus] = useState<"active" | "draft">(manual?.status ?? "active");
+  const [bulkText, setBulkText] = useState("");
+  const [isStructuring, setIsStructuring] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  async function handleStructurePaste() {
+    if (!bulkText.trim()) {
+      setError("一括貼り付け欄にマニュアル本文を入力してください。");
+      return;
+    }
+
+    setIsStructuring(true);
+    setError(null);
+    try {
+      const structured = await structureAdminPaste("manual", bulkText);
+      setTitle((current) => structured.title || current);
+      setContent((current) => structured.content || current);
+      setCriteria(joinLines(structured.criteria) || criteria);
+      setRequiredQuestions(joinLines(structured.requiredQuestions) || requiredQuestions);
+      setScoringRules(joinLines(structured.scoringRules) || scoringRules);
+      setObjectionHandling(joinLines(structured.objectionHandling) || objectionHandling);
+      setClosingRules(joinLines(structured.closingRules) || closingRules);
+    } catch (nextError) {
+      setError(nextError instanceof Error ? nextError.message : "AI整理に失敗しました。");
+    } finally {
+      setIsStructuring(false);
+    }
+  }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -201,11 +229,36 @@ function ManualDialog({
         <div className="flex items-start justify-between gap-4">
           <div>
             <h2 className="text-[24px] font-black text-[#171717]">{manual ? "マニュアル編集" : "マニュアル追加"}</h2>
-            <p className="mt-1 text-[13px] leading-6 text-[#7a808c]">1行ごとに評価項目を入力すると、sales側の分析結果に反映されます。</p>
+            <p className="mt-1 text-[13px] leading-6 text-[#7a808c]">長文を一括貼り付けして、AIで項目ごとに整理できます。</p>
           </div>
           <button type="button" onClick={onClose} className="text-[24px] leading-none text-[#9aa1ac]" aria-label="閉じる">×</button>
         </div>
         {error ? <ErrorBox message={error} /> : null}
+
+        <div className="mt-5 rounded-[18px] border border-[#f0e3c1] bg-[#fffaf0] p-4">
+          <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+            <div>
+              <div className="text-[14px] font-black text-[#171717]">一括貼り付け</div>
+              <p className="mt-1 text-[12px] leading-5 text-[#6f6250]">
+                マニュアル全文をそのまま貼り付けると、評価基準・必須ヒアリング・反論対応などに自動で分けます。
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => void handleStructurePaste()}
+              disabled={isStructuring}
+              className="h-10 shrink-0 rounded-[13px] bg-[#171717] px-4 text-[13px] font-black text-white disabled:opacity-60"
+            >
+              {isStructuring ? "整理中..." : "AIで項目に分ける"}
+            </button>
+          </div>
+          <textarea
+            value={bulkText}
+            onChange={(event) => setBulkText(event.target.value)}
+            className="mt-3 min-h-[150px] w-full resize-y rounded-[14px] border border-[#f0d992] bg-white px-4 py-3 text-[14px] leading-7 outline-none focus:border-[#d7a900]"
+            placeholder="ここに営業マニュアル全文をそのまま貼り付け"
+          />
+        </div>
 
         <div className="mt-5 grid gap-4 md:grid-cols-2">
           <Field label="タイトル">
@@ -269,6 +322,34 @@ function MiniInfo({ label, value }: { label: string; value: string }) {
 
 function splitLines(value: string) {
   return value.split(/\r?\n/).map((item) => item.trim()).filter(Boolean);
+}
+
+function joinLines(value: string[] | undefined) {
+  return value?.filter(Boolean).join("\n") ?? "";
+}
+
+async function structureAdminPaste(kind: "manual", text: string) {
+  const response = await fetch("/api/admin/structure-paste", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ kind, text }),
+  });
+  const payload = (await response.json()) as {
+    structured?: {
+      title?: string;
+      content?: string;
+      criteria?: string[];
+      requiredQuestions?: string[];
+      scoringRules?: string[];
+      objectionHandling?: string[];
+      closingRules?: string[];
+    };
+    error?: string;
+  };
+  if (!response.ok || !payload.structured) {
+    throw new Error(payload.error ?? "AI整理に失敗しました。");
+  }
+  return payload.structured;
 }
 
 function ErrorBox({ message }: { message: string }) {

@@ -36,5 +36,14 @@ service firebase.storage {
         && request.resource.contentType == "image/png";
       allow delete: if isAdmin() || (isSignedIn() && request.auth.uid == userId);
     }
+
+    match /profile-avatars/{userId}/{allPaths=**} {
+      allow read: if isSignedIn();
+      allow write: if isSignedIn()
+        && request.auth.uid == userId
+        && request.resource.size < 5 * 1024 * 1024
+        && request.resource.contentType.matches("image/.*");
+      allow delete: if isAdmin() || (isSignedIn() && request.auth.uid == userId);
+    }
   }
 }

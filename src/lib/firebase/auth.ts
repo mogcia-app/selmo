@@ -17,10 +17,12 @@ import {
   query,
   serverTimestamp,
   setDoc,
+  updateDoc,
   where,
   type FirestoreError,
   type Unsubscribe,
 } from "firebase/firestore";
+import { getDownloadURL, ref, uploadBytes } from "firebase/storage";
 
 import { assertFirebaseClient } from "@/lib/firebase/client";
 import type { UserRole } from "@/types/domain";
@@ -34,6 +36,8 @@ export type AppUserProfile = {
   uid: string;
   email: string | null;
   name: string | null;
+  avatarUrl: string | null;
+  avatarStoragePath: string | null;
   companyId: string | null;
   companyName: string | null;
   companyPlan: CompanyPlan;
@@ -41,6 +45,9 @@ export type AppUserProfile = {
   monthlyRoleplayQuota: number | null;
   role: UserRole;
   status: "active" | "inactive";
+  workExperienceYears: number | null;
+  workExperienceMonths: number | null;
+  workExperienceLocked: boolean;
 };
 
 type RegisterUserInput = {
@@ -150,10 +157,15 @@ export async function fetchUserProfile(uid: string): Promise<AppUserProfile | nu
   const data = snapshot.data() as {
     email?: string;
     name?: string;
+    avatarUrl?: string;
+    avatarStoragePath?: string;
     companyId?: string;
     companyName?: string;
     role?: UserRole;
     status?: "active" | "inactive";
+    workExperienceYears?: unknown;
+    workExperienceMonths?: unknown;
+    workExperienceLocked?: unknown;
   };
 
   if (!data.role) {
@@ -166,6 +178,8 @@ export async function fetchUserProfile(uid: string): Promise<AppUserProfile | nu
     uid,
     email: data.email ?? null,
     name: data.name ?? null,
+    avatarUrl: data.avatarUrl ?? null,
+    avatarStoragePath: data.avatarStoragePath ?? null,
     companyId: data.companyId ?? null,
     companyName: company?.companyName ?? data.companyName ?? null,
     companyPlan: company?.plan ?? "standard",
@@ -173,6 +187,9 @@ export async function fetchUserProfile(uid: string): Promise<AppUserProfile | nu
     monthlyRoleplayQuota: company?.monthlyRoleplayQuota ?? STANDARD_AI_QUOTA,
     role: data.role,
     status: data.status ?? "active",
+    workExperienceYears: readWorkExperienceValue(data.workExperienceYears),
+    workExperienceMonths: readWorkExperienceValue(data.workExperienceMonths),
+    workExperienceLocked: data.workExperienceLocked === true,
   };
 }
 
@@ -197,6 +214,8 @@ export function subscribeToUserProfiles(
             const data = userSnapshot.data() as {
               email?: string;
               name?: string;
+              avatarUrl?: string;
+              avatarStoragePath?: string;
               companyId?: string;
               companyName?: string;
               companyPlan?: CompanyPlan;
@@ -204,6 +223,9 @@ export function subscribeToUserProfiles(
               monthlyRoleplayQuota?: unknown;
               role?: UserRole;
               status?: "active" | "inactive";
+              workExperienceYears?: unknown;
+              workExperienceMonths?: unknown;
+              workExperienceLocked?: unknown;
             };
 
             if (!data.role) return null;
@@ -212,6 +234,8 @@ export function subscribeToUserProfiles(
               uid: userSnapshot.id,
               email: data.email ?? null,
               name: data.name ?? null,
+              avatarUrl: data.avatarUrl ?? null,
+              avatarStoragePath: data.avatarStoragePath ?? null,
               companyId: data.companyId ?? null,
               companyName: data.companyName ?? null,
               companyPlan: readCompanyPlan(data.companyPlan),
@@ -219,6 +243,9 @@ export function subscribeToUserProfiles(
               monthlyRoleplayQuota: readMonthlyQuota(data.monthlyRoleplayQuota, readCompanyPlan(data.companyPlan)),
               role: data.role,
               status: data.status ?? "active",
+              workExperienceYears: readWorkExperienceValue(data.workExperienceYears),
+              workExperienceMonths: readWorkExperienceValue(data.workExperienceMonths),
+              workExperienceLocked: data.workExperienceLocked === true,
             };
           })
           .filter((profile): profile is AppUserProfile => Boolean(profile)),
@@ -226,6 +253,31 @@ export function subscribeToUserProfiles(
     },
     onError,
   );
+}
+
+export async function uploadUserAvatar(input: { userId: string; file: File }) {
+  const { firestore, firebaseStorage } = assertFirebaseClient();
+  const storagePath = `profile-avatars/${input.userId}/${Date.now()}-${sanitizeFileName(input.file.name)}`;
+  const storageRef = ref(firebaseStorage, storagePath);
+
+  await uploadBytes(storageRef, input.file, {
+    contentType: input.file.type,
+    customMetadata: {
+      userId: input.userId,
+    },
+  });
+
+  const avatarUrl = await getDownloadURL(storageRef);
+  await updateDoc(doc(firestore, "users", input.userId), {
+    avatarUrl,
+    avatarStoragePath: storagePath,
+    updatedAt: serverTimestamp(),
+  });
+
+  return {
+    avatarUrl,
+    avatarStoragePath: storagePath,
+  };
 }
 
 async function fetchCompanyProfile(companyId: string) {
@@ -275,4 +327,20 @@ function readMonthlyQuota(value: unknown, plan: CompanyPlan) {
   }
 
   return STANDARD_AI_QUOTA;
+}
+
+function readWorkExperienceValue(value: unknown) {
+  if (typeof value === "number" && Number.isFinite(value) && value >= 0) {
+    return Math.floor(value);
+  }
+
+  return null;
+}
+
+function sanitizeFileName(fileName: string) {
+  return fileName
+    .normalize("NFKD")
+    .replace(/[^\w.-]+/g, "_")
+    .replace(/_+/g, "_")
+    .slice(0, 120);
 }

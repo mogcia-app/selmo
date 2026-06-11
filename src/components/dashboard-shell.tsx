@@ -39,7 +39,7 @@ const adminSections: Array<{ label: string; items: NavItem[] }> = [
       { href: "/admin/knowledge", label: "ナレッジ管理", num: "05" },
       { href: "/admin/roleplay", label: "ロープレ管理", num: "06" },
       { href: "/admin/products", label: "商材管理", num: "07" },
-      { href: "/admin/manuals", label: "営業基準マニュアル", num: "08" },
+      { href: "/admin/manuals", label: "マニュアル", num: "08" },
     ],
   },
   {
