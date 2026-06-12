@@ -3,9 +3,10 @@
 import { FirebaseError } from "firebase/app";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import { useAuth } from "@/features/auth/auth-provider";
+import { getRoleHomePath, resolveRoleSafePath } from "@/features/auth/role-routing";
 
 const errorMessageMap: Record<string, string> = {
   "auth/invalid-credential": "メールアドレスまたはパスワードが正しくありません。",
@@ -20,7 +21,7 @@ export function LoginForm({
 }) {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const { firebaseError, isFirebaseReady, isLoading, missingEnvKeys, signIn } = useAuth();
+  const { firebaseError, isAuthenticated, isFirebaseReady, isLoading, missingEnvKeys, profile, signIn } = useAuth();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
@@ -30,6 +31,12 @@ export function LoginForm({
   const formClassName = isAdmin ? "mt-6 w-full space-y-4 text-left sm:mt-7" : "mt-7 w-full space-y-4.5 text-left sm:mt-8";
 
   const nextPath = searchParams.get("next");
+
+  useEffect(() => {
+    if (!isLoading && isAuthenticated && profile) {
+      router.replace(getRoleHomePath(profile.role));
+    }
+  }, [isAuthenticated, isLoading, profile, router]);
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -44,12 +51,12 @@ export function LoginForm({
 
     try {
       const nextProfile = await signIn(email, password);
-      const fallbackPath = isAdmin
-        ? "/admin/dashboard"
-        : nextProfile?.role === "admin"
-          ? "/admin/dashboard"
-          : "/sales/dashboard";
-      router.replace(nextPath || fallbackPath);
+      if (!nextProfile) {
+        router.replace(isAdmin ? "/admin/dashboard" : "/sales/dashboard");
+        return;
+      }
+
+      router.replace(resolveRoleSafePath(nextPath, nextProfile.role));
     } catch (error) {
       if (error instanceof FirebaseError) {
         setErrorMessage(errorMessageMap[error.code] ?? "ログインに失敗しました。設定とアカウントを確認してください。");

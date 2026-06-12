@@ -6,6 +6,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { useEffect } from "react";
 
 import { useAuth } from "@/features/auth/auth-provider";
+import { getRoleHomePath } from "@/features/auth/role-routing";
 import type { UserRole } from "@/types/domain";
 
 type RouteGuardProps = {
@@ -29,7 +30,7 @@ export function RouteGuard({ allowedRoles, children }: RouteGuardProps) {
     }
 
     if (allowedRoles && profile && !allowedRoles.includes(profile.role)) {
-      router.replace(profile.role === "admin" ? "/admin/dashboard" : "/sales/dashboard");
+      router.replace(getRoleHomePath(profile.role));
     }
   }, [allowedRoles, isAuthenticated, isLoading, pathname, profile, router]);
 
@@ -54,7 +55,7 @@ export function RouteGuard({ allowedRoles, children }: RouteGuardProps) {
     return (
       <GuardMessage
         title="この画面にはアクセスできません"
-        body={`現在の権限は ${profile.role} です。閲覧可能なダッシュボードへ移動します。`}
+        body="このアカウントでは、この画面を閲覧できません。閲覧可能なダッシュボードへ移動します。"
       />
     );
   }

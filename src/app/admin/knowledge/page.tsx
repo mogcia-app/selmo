@@ -69,7 +69,7 @@ export default function AdminKnowledgePage() {
         </section>
 
         <section className="mt-8 grid gap-6 xl:grid-cols-[minmax(0,1.25fr)_minmax(460px,0.75fr)]">
-          <Panel title="公式ナレッジ一覧" actionLabel="salesで見る" href="/sales/knowledge">
+          <Panel title="公式ナレッジ一覧">
             <div className="mb-4 grid gap-3 md:grid-cols-2">
               <select value={productId} onChange={(event) => setProductId(event.target.value)} className="h-11 rounded-[14px] border border-[#e4e8ef] bg-white px-3 text-[13px] font-bold outline-none">
                 <option value="">商品すべて</option>
@@ -83,7 +83,7 @@ export default function AdminKnowledgePage() {
             {filteredItems.length > 0 ? (
               <div className="space-y-3">
                 {filteredItems.map((item) => (
-                  <Link key={item.id} href={`/sales/knowledge/categories/${item.categoryId ?? "how-to"}/knowledge/${item.id}`} className="grid gap-3 rounded-[16px] border border-[#eef1f5] bg-[#fcfcfd] px-4 py-4 md:grid-cols-[minmax(0,1fr)_120px_120px]">
+                  <Link key={item.id} href={`/admin/knowledge/${item.id}`} className="grid gap-3 rounded-[16px] border border-[#eef1f5] bg-[#fcfcfd] px-4 py-4 md:grid-cols-[minmax(0,1fr)_120px_120px]">
                     <div className="min-w-0">
                       <div className="truncate text-[14px] font-black text-[#171717]">{item.title}</div>
                       <div className="mt-1 truncate text-[12px] text-[#7a808c]">{item.description || item.body || "説明未設定"}</div>
