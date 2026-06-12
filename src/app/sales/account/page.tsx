@@ -310,16 +310,19 @@ export default function SalesAccountPage() {
                   label="現在のパスワード"
                   value={currentPassword}
                   onChange={setCurrentPassword}
+                  autoComplete="current-password"
                 />
                 <PasswordField
                   label="新しいパスワード"
                   value={newPassword}
                   onChange={setNewPassword}
+                  autoComplete="new-password"
                 />
                 <PasswordField
                   label="新しいパスワード（確認）"
                   value={confirmPassword}
                   onChange={setConfirmPassword}
+                  autoComplete="new-password"
                 />
 
                 {passwordError ? (
@@ -486,10 +489,12 @@ function PasswordField({
   label,
   value,
   onChange,
+  autoComplete,
 }: {
   label: string;
   value: string;
   onChange: (value: string) => void;
+  autoComplete: string;
 }) {
   return (
     <label className="block">
@@ -498,6 +503,7 @@ function PasswordField({
         type="password"
         value={value}
         onChange={(event) => onChange(event.target.value)}
+        autoComplete={autoComplete}
         className="mt-2 h-12 w-full rounded-[12px] border border-[#e4e7ed] bg-white px-4 text-[14px] text-[#171717] outline-none transition focus:border-[#f0c655] focus:shadow-[0_0_0_3px_rgba(255,196,0,0.14)]"
       />
     </label>
