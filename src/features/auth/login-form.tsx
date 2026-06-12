@@ -3,10 +3,10 @@
 import { FirebaseError } from "firebase/app";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 
 import { useAuth } from "@/features/auth/auth-provider";
-import { getRoleHomePath, resolveRoleSafePath } from "@/features/auth/role-routing";
+import { resolveRoleSafePath } from "@/features/auth/role-routing";
 
 const errorMessageMap: Record<string, string> = {
   "auth/invalid-credential": "メールアドレスまたはパスワードが正しくありません。",
@@ -21,22 +21,16 @@ export function LoginForm({
 }) {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const { firebaseError, isAuthenticated, isFirebaseReady, isLoading, missingEnvKeys, profile, signIn } = useAuth();
+  const { firebaseError, isFirebaseReady, missingEnvKeys, signIn } = useAuth();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
-  const [rememberMe, setRememberMe] = useState(true);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const isAdmin = variant === "admin";
   const formClassName = isAdmin ? "mt-6 w-full space-y-4 text-left sm:mt-7" : "mt-7 w-full space-y-4.5 text-left sm:mt-8";
 
   const nextPath = searchParams.get("next");
-
-  useEffect(() => {
-    if (!isLoading && isAuthenticated && profile) {
-      router.replace(getRoleHomePath(profile.role));
-    }
-  }, [isAuthenticated, isLoading, profile, router]);
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -49,6 +43,7 @@ export function LoginForm({
       return;
     }
 
+    setIsSubmitting(true);
     try {
       const nextProfile = await signIn(email, password);
       if (!nextProfile) {
@@ -64,6 +59,8 @@ export function LoginForm({
       }
 
       setErrorMessage("ログインに失敗しました。時間を置いて再度お試しください。");
+    } finally {
+      setIsSubmitting(false);
     }
   }
 
@@ -126,20 +123,10 @@ export function LoginForm({
         </div>
       </label>
 
-      <div className={`flex flex-col gap-3 py-1.5 text-[var(--ink)] md:flex-row md:items-center md:justify-between ${isAdmin ? "text-[10px] sm:text-[11px]" : "text-[11px] sm:text-[12px]"}`}>
-        <label className="flex items-center gap-3.5">
-          <input
-            type="checkbox"
-            checked={rememberMe}
-            onChange={(event) => setRememberMe(event.target.checked)}
-            className={`rounded-[6px] border border-[#cfd4db] accent-[#ffc400] ${isAdmin ? "h-[19px] w-[19px]" : "h-[21px] w-[21px]"}`}
-        />
-          <span>ログインしたままにする</span>
-        </label>
-
+      <div className={`flex justify-end py-1.5 text-[var(--ink)] ${isAdmin ? "text-[10px] sm:text-[11px]" : "text-[11px] sm:text-[12px]"}`}>
         <button
           type="button"
-          className={`text-left text-[#1f73ff] transition hover:text-[#1459cc] md:text-right ${isAdmin ? "text-[10px] sm:text-[11px]" : "text-[11px] sm:text-[12px]"}`}
+          className="text-left text-[#1f73ff] transition hover:text-[#1459cc]"
         >
           パスワードをお忘れですか？
         </button>
@@ -153,10 +140,10 @@ export function LoginForm({
 
       <button
         type="submit"
-        disabled={isLoading || !isFirebaseReady}
+        disabled={isSubmitting || !isFirebaseReady}
         className={`w-full rounded-[14px] bg-[#ffc400] px-6 font-bold text-[var(--ink)] transition hover:bg-[#f0ba00] disabled:cursor-not-allowed disabled:bg-[#ecd990] disabled:text-[rgba(22,20,15,0.6)] ${isAdmin ? "py-2.5 text-[15px] sm:py-3 sm:text-[16px]" : "py-3 text-[16px] sm:py-3.5 sm:text-[17px]"}`}
       >
-        {isLoading
+        {isSubmitting
           ? "ログイン中..."
           : isAdmin
             ? "管理者としてログイン"

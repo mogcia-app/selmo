@@ -2,7 +2,7 @@
 
 import {
   createUserWithEmailAndPassword,
-  browserLocalPersistence,
+  inMemoryPersistence,
   onAuthStateChanged,
   setPersistence,
   signInWithEmailAndPassword,
@@ -62,7 +62,7 @@ type RegisterUserInput = {
 
 export async function enableAuthPersistence() {
   const { firebaseAuth } = assertFirebaseClient();
-  await setPersistence(firebaseAuth, browserLocalPersistence);
+  await setPersistence(firebaseAuth, inMemoryPersistence);
 }
 
 export async function signInWithEmail(email: string, password: string) {
