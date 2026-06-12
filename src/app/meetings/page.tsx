@@ -5,7 +5,7 @@ import { useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 
 import { useAuth } from "@/features/auth/auth-provider";
-import { subscribeToMeetings, type MeetingRecord } from "@/lib/firebase/meetings";
+import { getMeetingPurposeLabel, subscribeToMeetings, type MeetingRecord } from "@/lib/firebase/meetings";
 import { canUseSalesDomain } from "@/lib/sales-domains";
 
 const productIconMap: Record<string, React.ReactNode> = {
@@ -258,7 +258,7 @@ export default function MeetingsPage() {
                         </div>
                       </td>
                       <td className="px-5 py-4 align-top">
-                        {mapMeetingPurpose(meeting.status, meeting.customerType)}
+                        {getMeetingPurposeLabel(meeting.meetingPurpose)}
                       </td>
                       <td className="px-5 py-4 align-top">
                         <StatusBadge value={meeting.status} />
@@ -412,21 +412,6 @@ function formatTimeRange(date: Date, durationSec: number | null) {
   }).format(endDate);
 
   return `${start} - ${end}`;
-}
-
-function mapMeetingPurpose(
-  status: MeetingRecord["status"],
-  customerType: MeetingRecord["customerType"],
-) {
-  if (status === "won") {
-    return customerType === "existing" ? "フォローアップ" : "提案";
-  }
-
-  if (status === "lost") {
-    return customerType === "existing" ? "見積もり" : "ヒアリング";
-  }
-
-  return customerType === "existing" ? "情報共有" : "提案";
 }
 
 function SearchIcon() {

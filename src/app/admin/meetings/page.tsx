@@ -17,7 +17,8 @@ import {
   getOutcomeTone,
   useAdminInsights,
 } from "@/app/admin/_components/admin-insights";
-import type { MeetingRecord } from "@/lib/firebase/meetings";
+import { getMeetingPurposeLabel, type MeetingRecord } from "@/lib/firebase/meetings";
+import type { MeetingPurpose } from "@/types/domain";
 
 type DateRangeFilter = "all" | "today" | "7d" | "30d" | "thisMonth";
 type ReviewMode = "meeting" | "teleapo";
@@ -70,6 +71,16 @@ const dateRangeOptions: Array<[DateRangeFilter, string]> = [
   ["30d", "直近30日"],
   ["thisMonth", "今月"],
 ];
+const meetingPurposeOptions: Array<[MeetingPurpose, string]> = [
+  ["new_proposal", "新規提案"],
+  ["closing", "クロージング"],
+  ["existing_followup", "既存フォロー"],
+  ["relationship_building", "関係構築"],
+  ["check_in", "状況確認"],
+  ["upsell_cross_sell", "アップセル/クロスセル"],
+  ["onboarding", "オンボーディング"],
+  ["retention", "解約防止"],
+];
 
 export default function AdminMeetingsPage() {
   const searchParams = useSearchParams();
@@ -78,11 +89,13 @@ export default function AdminMeetingsPage() {
   const { meetings, memberRows, error } = useAdminInsights();
   const [memberId, setMemberId] = useState("");
   const [product, setProduct] = useState("");
+  const [purpose, setPurpose] = useState("");
   const [outcome, setOutcome] = useState("");
   const [dateRange, setDateRange] = useState<DateRangeFilter>("30d");
   const [keyword, setKeyword] = useState("");
   const [sort, setSort] = useState("date");
   const products = useMemo(() => Array.from(new Set(meetings.map((meeting) => meeting.productType).filter(Boolean))), [meetings]);
+  const purposeSummary = useMemo(() => buildPurposeSummary(meetings.filter((meeting) => meeting.salesDomain === mode)), [meetings, mode]);
   const filteredMeetings = useMemo(() => {
     const rows = meetings.filter((meeting) => {
       if (meeting.salesDomain !== mode) return false;
@@ -96,6 +109,7 @@ export default function AdminMeetingsPage() {
       ].join(" ");
       if (memberId && meeting.userId !== memberId) return false;
       if (product && meeting.productType !== product) return false;
+      if (purpose && meeting.meetingPurpose !== purpose) return false;
       if (outcome && meeting.status !== outcome) return false;
       if (!isWithinDateRange(meeting.recordedAt, dateRange)) return false;
       if (keyword.trim() && !searchText.toLowerCase().includes(keyword.trim().toLowerCase())) return false;
@@ -106,11 +120,12 @@ export default function AdminMeetingsPage() {
       return [...rows].sort((left, right) => String(getMeetingScore(right)).localeCompare(String(getMeetingScore(left))));
     }
     return rows;
-  }, [dateRange, keyword, meetings, memberId, memberRows, mode, outcome, product, sort]);
+  }, [dateRange, keyword, meetings, memberId, memberRows, mode, outcome, product, purpose, sort]);
 
   const activeFilterLabels = [
     memberId ? memberRows.find((member) => member.id === memberId)?.name ?? "営業マン指定" : null,
     product || null,
+    purpose ? getMeetingPurposeLabel(purpose) : null,
     outcome ? getOutcomeLabel(outcome, copy) : null,
     getDateRangeLabel(dateRange),
     keyword.trim() ? `検索: ${keyword.trim()}` : null,
@@ -124,9 +139,10 @@ export default function AdminMeetingsPage() {
 
         <div className="mt-8">
           <Panel title="フィルター">
-            <div className="grid gap-3 md:grid-cols-6">
+            <div className="grid gap-3 md:grid-cols-7">
             <Select value={memberId} onChange={setMemberId} options={[["", "営業マンすべて"], ...memberRows.map((member) => [member.id, member.name] as [string, string])]} />
             <Select value={product} onChange={setProduct} options={[["", "商材すべて"], ...products.map((item) => [item, item] as [string, string])]} />
+            <Select value={purpose} onChange={setPurpose} options={[["", mode === "teleapo" ? "架電目的すべて" : "商談目的すべて"], ...meetingPurposeOptions]} />
             <Select value={outcome} onChange={setOutcome} options={[["", "結果すべて"], ["won", copy.successLabel], ["lost", copy.lostLabel], ["considering", copy.pendingLabel]]} />
             <Select value={dateRange} onChange={(value) => setDateRange(value as DateRangeFilter)} options={dateRangeOptions} />
             <Select value={sort} onChange={setSort} options={[["date", "新しい順"], ["score", "スコア順"]]} />
@@ -145,6 +161,23 @@ export default function AdminMeetingsPage() {
                 </span>
               ))}
             </div>
+            <div className="mt-4 grid gap-2 md:grid-cols-4 xl:grid-cols-8">
+              {purposeSummary.map((item) => (
+                <button
+                  key={item.value}
+                  type="button"
+                  onClick={() => setPurpose((current) => current === item.value ? "" : item.value)}
+                  className={`rounded-[14px] border px-3 py-2 text-left transition ${
+                    purpose === item.value
+                      ? "border-[#e0bd4b] bg-[#fff5d8]"
+                      : "border-[#eef1f5] bg-white hover:border-[#ead27e]"
+                  }`}
+                >
+                  <div className="truncate text-[11px] font-black text-[#8a6500]">{item.label}</div>
+                  <div className="mt-1 text-[18px] font-black text-[#171717]">{item.count}件</div>
+                </button>
+              ))}
+            </div>
           </Panel>
         </div>
 
@@ -152,12 +185,13 @@ export default function AdminMeetingsPage() {
           <Panel title={copy.panelTitle}>
             {filteredMeetings.length > 0 ? (
               <div className="overflow-x-auto">
-              <table className="w-full min-w-[980px] text-left">
+              <table className="w-full min-w-[1080px] text-left">
                 <thead>
                   <tr className="border-b border-[#eef1f5] text-[12px] text-[#7a808c]">
                     <th className="px-4 py-3 font-bold">顧客</th>
                     <th className="px-4 py-3 font-bold">営業マン</th>
                     <th className="px-4 py-3 font-bold">商材</th>
+                    <th className="px-4 py-3 font-bold">目的</th>
                     <th className="px-4 py-3 font-bold">結果</th>
                     <th className="px-4 py-3 font-bold">スコア</th>
                     <th className="px-4 py-3 font-bold">AI状態</th>
@@ -188,6 +222,11 @@ export default function AdminMeetingsPage() {
                           </div>
                         </td>
                         <td className="px-4 py-4 text-[13px] text-[#596273]">{meeting.productType || "未設定"}</td>
+                        <td className="px-4 py-4">
+                          <span className="inline-flex rounded-full bg-[#fff5d8] px-3 py-1 text-[12px] font-black text-[#8a6500]">
+                            {getMeetingPurposeLabel(meeting.meetingPurpose)}
+                          </span>
+                        </td>
                         <td className="px-4 py-4"><StatusBadge tone={getOutcomeTone(meeting.status)} label={getOutcomeLabel(meeting.status, copy)} /></td>
                         <td className="px-4 py-4"><Placeholder>{getMeetingScore(meeting)}</Placeholder></td>
                         <td className="px-4 py-4">{needsReview ? <StatusBadge tone="risk" label="要確認" /> : <StatusBadge tone="normal" label={getAnalysisStatus(meeting)} />}</td>
@@ -246,6 +285,14 @@ function isWithinDateRange(date: Date | null, range: DateRangeFilter) {
 
 function getDateRangeLabel(range: DateRangeFilter) {
   return dateRangeOptions.find(([value]) => value === range)?.[1] ?? "期間すべて";
+}
+
+function buildPurposeSummary(meetings: MeetingRecord[]) {
+  return meetingPurposeOptions.map(([value, label]) => ({
+    value,
+    label,
+    count: meetings.filter((meeting) => meeting.meetingPurpose === value).length,
+  }));
 }
 
 function getAnalysisStatus(meeting: MeetingRecord) {

@@ -13,10 +13,12 @@ import {
   saveMeetingAiSummary,
   saveMeetingConversationLogs,
   subscribeToMeetings,
+  getMeetingPurposeLabel,
   type MeetingConversationLog,
   type MeetingRecord,
 } from "@/lib/firebase/meetings";
 import { canUseSalesDomain, type SalesDomain } from "@/lib/sales-domains";
+import type { MeetingPurpose } from "@/types/domain";
 
 const maxRecommendedDurationSec = 120 * 60;
 const maxOpenAiTranscriptionFileSizeBytes = 25 * 1024 * 1024;
@@ -30,6 +32,17 @@ const supportedAudioTypes = new Set([
   "audio/m4a",
   "audio/x-m4a",
 ]);
+const meetingPurposeOptions: MeetingPurpose[] = [
+  "new_proposal",
+  "closing",
+  "existing_followup",
+  "relationship_building",
+  "check_in",
+  "upsell_cross_sell",
+  "onboarding",
+  "retention",
+];
+
 export default function MeetingUploadPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -42,6 +55,7 @@ export default function MeetingUploadPage() {
   const [meetings, setMeetings] = useState<MeetingRecord[]>([]);
   const [productType, setProductType] = useState("");
   const [customerType, setCustomerType] = useState<"new" | "existing">("new");
+  const [meetingPurpose, setMeetingPurpose] = useState<MeetingPurpose>("new_proposal");
   const [status, setStatus] = useState<"won" | "considering" | "lost">("considering");
   const [location, setLocation] = useState("");
   const [memo, setMemo] = useState("");
@@ -151,6 +165,7 @@ export default function MeetingUploadPage() {
         customerName: normalizedCustomerName,
         productType,
         customerType,
+        meetingPurpose,
         recordedAt: normalizedRecordedAt,
         location: location.trim(),
         memo: memo.trim(),
@@ -170,6 +185,7 @@ export default function MeetingUploadPage() {
               companyId: profile.companyId,
               userId: profile.uid,
               productName: productType,
+              meetingPurpose,
             })
           : null;
 
@@ -489,6 +505,20 @@ export default function MeetingUploadPage() {
               />
             </Field>
 
+            <Field label="商談目的" required>
+              <select
+                className={inputClassName}
+                value={meetingPurpose}
+                onChange={(event) => setMeetingPurpose(event.target.value as MeetingPurpose)}
+              >
+                {meetingPurposeOptions.map((option) => (
+                  <option key={option} value={option}>
+                    {getMeetingPurposeLabel(option)}
+                  </option>
+                ))}
+              </select>
+            </Field>
+
             <Field label="商談ステータス" required>
               <Segmented
                 options={[
@@ -704,12 +734,14 @@ async function generatePastedTranscriptInsights({
   companyId,
   userId,
   productName,
+  meetingPurpose,
 }: {
   meetingId: string;
   transcriptText: string;
   companyId?: string | null;
   userId: string;
   productName?: string | null;
+  meetingPurpose?: MeetingPurpose | null;
 }) {
   const segment = {
     startSec: 0,
@@ -785,6 +817,7 @@ async function generatePastedTranscriptInsights({
         companyId,
         userId,
         productName,
+        meetingPurpose,
         transcriptText,
       }),
     });

@@ -8,6 +8,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useAuth } from "@/features/auth/auth-provider";
 import { saveSalesActivityEvent } from "@/lib/firebase/activity";
 import {
+  getMeetingPurposeLabel,
   saveMeetingAiSummary,
   saveMeetingConversationLogs,
   saveMeetingTranscriptionProbe,
@@ -22,6 +23,16 @@ const transcriptionRequestTimeoutMs = 10 * 60 * 1000;
 const transientBannerDurationMs = 5 * 1000;
 const monthlyLimitMessage =
   "月間利用上限に達しました。管理者にプラン変更または上限変更を依頼してください。";
+const meetingPurposeOptions: MeetingRecord["meetingPurpose"][] = [
+  "new_proposal",
+  "closing",
+  "existing_followup",
+  "relationship_building",
+  "check_in",
+  "upsell_cross_sell",
+  "onboarding",
+  "retention",
+];
 
 type DisplayLog = {
   id: string;
@@ -70,6 +81,7 @@ export function MeetingDetailScreen({
   const [currentPlaybackSec, setCurrentPlaybackSec] = useState<number | null>(null);
   const [selectedTranscriptBlockIndex, setSelectedTranscriptBlockIndex] = useState<number | null>(null);
   const [transcriptionVisualProgress, setTranscriptionVisualProgress] = useState(12);
+  const [draftMeetingPurpose, setDraftMeetingPurpose] = useState<MeetingRecord["meetingPurpose"]>("new_proposal");
   const [draftStatus, setDraftStatus] = useState<MeetingRecord["status"]>("considering");
   const [draftMemo, setDraftMemo] = useState("");
   const [isSavingMetadata, setIsSavingMetadata] = useState(false);
@@ -114,6 +126,7 @@ export function MeetingDetailScreen({
       return;
     }
 
+    setDraftMeetingPurpose(meeting.meetingPurpose);
     setDraftStatus(meeting.status);
     setDraftMemo(meeting.memo ?? "");
   }, [meeting, profile]);
@@ -181,6 +194,7 @@ export function MeetingDetailScreen({
           companyId: profile?.companyId ?? meeting?.companyId ?? null,
           userId: profile?.uid ?? meeting?.userId ?? null,
           productName: meeting?.productType ?? null,
+          meetingPurpose: meeting?.meetingPurpose ?? null,
           transcriptText,
         }),
         timeoutMs: null,
@@ -679,12 +693,13 @@ export function MeetingDetailScreen({
         customerName: meeting.customerName,
         productType: meeting.productType,
         customerType: meeting.customerType,
+        meetingPurpose: draftMeetingPurpose,
         recordedAt: meeting.recordedAt,
         location: meeting.location,
         memo: draftMemo.trim(),
         status: draftStatus,
       });
-      setMetadataMessage("商談ステータスとメモを保存しました。");
+      setMetadataMessage("商談情報を保存しました。");
     } catch (error) {
       if (error instanceof FirebaseError) {
         setErrorMessage(
@@ -954,7 +969,21 @@ export function MeetingDetailScreen({
             </div>
           </div>
 
-          <div className="mt-4 grid gap-4 rounded-[20px] border border-[#eceef4] bg-[#fffdf8] p-4 xl:grid-cols-[0.72fr_1.28fr_auto] xl:items-end">
+          <div className="mt-4 grid gap-4 rounded-[20px] border border-[#eceef4] bg-[#fffdf8] p-4 xl:grid-cols-[0.72fr_0.72fr_1.28fr_auto] xl:items-end">
+            <div>
+              <div className="text-[13px] font-semibold text-[#505866]">商談目的</div>
+              <select
+                value={draftMeetingPurpose}
+                onChange={(event) => setDraftMeetingPurpose(event.target.value as MeetingRecord["meetingPurpose"])}
+                className="mt-2 h-[44px] w-full rounded-[12px] border border-[#d8dde6] bg-white px-4 text-[14px] text-[#171717] outline-none"
+              >
+                {meetingPurposeOptions.map((option) => (
+                  <option key={option} value={option}>
+                    {getMeetingPurposeLabel(option)}
+                  </option>
+                ))}
+              </select>
+            </div>
             <div>
               <div className="text-[13px] font-semibold text-[#505866]">成約/失注ステータス</div>
               <select

@@ -32,7 +32,7 @@ import {
   saveSystemError,
   updateAudioProcessingJob,
 } from "@/lib/firebase/operations";
-import type { MeetingOutcome, ProcessingStatus } from "@/types/domain";
+import type { MeetingOutcome, MeetingPurpose, ProcessingStatus } from "@/types/domain";
 
 export type MeetingTranscriptionSegment = {
   startSec: number;
@@ -84,6 +84,7 @@ export type MeetingRecord = {
   customerName: string;
   productType: string;
   customerType: "new" | "existing";
+  meetingPurpose: MeetingPurpose;
   recordedAt: Date | null;
   location: string;
   memo: string;
@@ -132,6 +133,7 @@ export type CreateMeetingInput = {
   customerName: string;
   productType: string;
   customerType: "new" | "existing";
+  meetingPurpose?: MeetingPurpose;
   recordedAt: Date;
   location?: string;
   memo?: string;
@@ -147,6 +149,7 @@ export type UpdateMeetingMetadataInput = {
   customerName: string;
   productType: string;
   customerType: "new" | "existing";
+  meetingPurpose: MeetingPurpose;
   recordedAt: Date | null;
   location?: string;
   memo?: string;
@@ -168,6 +171,7 @@ export async function createMeeting(input: CreateMeetingInput) {
     customerName: input.customerName,
     productType: input.productType,
     customerType: input.customerType,
+    meetingPurpose: input.meetingPurpose ?? inferMeetingPurpose(input.customerType, input.status),
     recordedAt: Timestamp.fromDate(input.recordedAt),
     location: input.location ?? "",
     memo: input.memo ?? "",
@@ -220,6 +224,7 @@ export async function createMeeting(input: CreateMeetingInput) {
     detail: [
       `顧客名: ${input.customerName || "未設定"}`,
       `商材: ${input.productType || "未設定"}`,
+      `商談目的: ${getMeetingPurposeLabel(input.meetingPurpose ?? inferMeetingPurpose(input.customerType, input.status))}`,
       `入力方法: ${input.transcriptText?.trim() ? "文字起こし貼り付け" : "音声アップロード"}`,
       `ステータス: ${input.status}`,
     ].join("\n"),
@@ -228,6 +233,7 @@ export async function createMeeting(input: CreateMeetingInput) {
       meetingId: meetingRef.id,
       customerName: input.customerName,
       productType: input.productType,
+      meetingPurpose: input.meetingPurpose ?? inferMeetingPurpose(input.customerType, input.status),
       inputMode: input.transcriptText?.trim() ? "transcript" : "audio",
       salesDomain,
       status: input.status,
@@ -642,6 +648,7 @@ export async function updateMeetingMetadata(
     customerName: input.customerName,
     productType: input.productType,
     customerType: input.customerType,
+    meetingPurpose: input.meetingPurpose,
     recordedAt: input.recordedAt ? Timestamp.fromDate(input.recordedAt) : null,
     location: input.location ?? "",
     memo: input.memo ?? "",
@@ -694,6 +701,7 @@ function mapMeetingRecord(id: string, data: Record<string, unknown>): MeetingRec
     customerName: String(data.customerName ?? ""),
     productType: String(data.productType ?? ""),
     customerType: (data.customerType as "new" | "existing") ?? "new",
+    meetingPurpose: toMeetingPurpose(data.meetingPurpose, (data.customerType as "new" | "existing") ?? "new", (data.status as MeetingOutcome) ?? "considering"),
     recordedAt: toDateValue(data.recordedAt),
     location: String(data.location ?? ""),
     memo: String(data.memo ?? ""),
@@ -779,6 +787,40 @@ function toDateValue(value: unknown) {
   }
 
   return null;
+}
+
+export function getMeetingPurposeLabel(value: MeetingPurpose | string) {
+  const labels: Record<MeetingPurpose, string> = {
+    new_proposal: "新規提案",
+    closing: "クロージング",
+    existing_followup: "既存フォロー",
+    relationship_building: "関係構築",
+    check_in: "状況確認",
+    upsell_cross_sell: "アップセル/クロスセル",
+    onboarding: "オンボーディング",
+    retention: "解約防止",
+  };
+  return labels[value as MeetingPurpose] ?? "目的未設定";
+}
+
+export function inferMeetingPurpose(customerType: "new" | "existing", status: MeetingOutcome): MeetingPurpose {
+  if (status === "won") return customerType === "existing" ? "upsell_cross_sell" : "closing";
+  if (status === "lost") return customerType === "existing" ? "retention" : "new_proposal";
+  return customerType === "existing" ? "check_in" : "new_proposal";
+}
+
+function toMeetingPurpose(value: unknown, customerType: "new" | "existing", status: MeetingOutcome): MeetingPurpose {
+  const candidates: MeetingPurpose[] = [
+    "new_proposal",
+    "closing",
+    "existing_followup",
+    "relationship_building",
+    "check_in",
+    "upsell_cross_sell",
+    "onboarding",
+    "retention",
+  ];
+  return candidates.includes(value as MeetingPurpose) ? (value as MeetingPurpose) : inferMeetingPurpose(customerType, status);
 }
 
 function toNullableString(value: unknown) {

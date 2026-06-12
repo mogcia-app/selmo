@@ -15,6 +15,7 @@ type RequestBody = {
   companyId?: string | null;
   userId?: string | null;
   productName?: string | null;
+  meetingPurpose?: string | null;
   transcriptText?: string;
 };
 
@@ -65,7 +66,7 @@ export async function POST(
       companyId: body.companyId,
       productName: body.productName,
     });
-    const result = await summarizeTranscript(body.transcriptText, analysisContext);
+    const result = await summarizeTranscript(body.transcriptText, analysisContext, body.meetingPurpose);
     await saveAiUsageLog({
       companyId: body.companyId,
       userId: body.userId,
@@ -117,9 +118,11 @@ export async function POST(
 async function summarizeTranscript(
   transcriptText: string,
   analysisContext: Awaited<ReturnType<typeof loadAnalysisContext>>,
+  meetingPurpose?: string | null,
 ) {
   const model = "gpt-4o-mini";
   const contextPrompt = buildAnalysisContextPrompt(analysisContext);
+  const meetingPurposeLabel = getMeetingPurposeLabel(meetingPurpose);
   const response = await fetchWithTimeout("https://api.openai.com/v1/chat/completions", {
     method: "POST",
     headers: {
@@ -169,6 +172,7 @@ async function summarizeTranscript(
               "あなたは営業商談の文字起こしを分析するAIコーチです。",
               "全体要約は2〜4文で簡潔にまとめ、ポイントは3〜4個の短い箇条書き向け文で返してください。",
               "会社の営業成功基準や商材情報がある場合は、それを最優先して評価してください。",
+              "商談目的に応じて評価軸を変えてください。関係構築や状況確認の商談では、即時の成約確度だけでなく、信頼形成、課題把握、次回接点の明確さを重視してください。",
               "マニュアルがある場合は mode=manual、ない場合は mode=generic にしてください。",
               "score は0〜100で、基準に対する準拠度を表します。根拠が薄い場合はnullにしてください。",
               "改善フレーズは次回商談でそのまま使える自然な日本語にしてください。",
@@ -178,6 +182,7 @@ async function summarizeTranscript(
         {
           role: "user",
           content: [
+            `商談目的: ${meetingPurposeLabel}`,
             contextPrompt ? `以下の基準を使って分析してください。\n\n${contextPrompt}` : "会社固有の基準は未登録です。汎用的な営業観点で分析してください。",
             `以下の商談文字起こしを分析してください。\n\n${transcriptText}`,
           ].join("\n\n"),
@@ -245,6 +250,20 @@ async function summarizeTranscript(
       outputTokens: parsed.usage?.completion_tokens ?? null,
     },
   };
+}
+
+function getMeetingPurposeLabel(value?: string | null) {
+  const labels: Record<string, string> = {
+    new_proposal: "新規提案",
+    closing: "クロージング",
+    existing_followup: "既存フォロー",
+    relationship_building: "関係構築",
+    check_in: "状況確認",
+    upsell_cross_sell: "アップセル/クロスセル",
+    onboarding: "オンボーディング",
+    retention: "解約防止",
+  };
+  return value ? labels[value] ?? value : "目的未設定";
 }
 
 function readStringArray(value: unknown) {
