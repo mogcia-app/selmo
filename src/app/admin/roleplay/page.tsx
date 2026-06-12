@@ -373,6 +373,7 @@ function ScenarioCreateDialog({
     onError(null);
     try {
       const generated = await generateRoleplayScenario({
+        companyId,
         product: selectedProduct,
         category: scenarioCategory,
         targetSegment,
@@ -619,6 +620,7 @@ function splitLines(value: string) {
 }
 
 async function generateRoleplayScenario(input: {
+  companyId: string;
   product: KnowledgeProduct;
   category: "新規" | "既存";
   targetSegment: string;
@@ -627,6 +629,7 @@ async function generateRoleplayScenario(input: {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
+      companyId: input.companyId,
       product: input.product,
       category: input.category,
       targetSegment: input.targetSegment,

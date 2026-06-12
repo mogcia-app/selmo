@@ -102,7 +102,7 @@ export default function AdminManualsPage() {
                 >
                   <div className="flex items-start justify-between gap-4">
                     <div className="min-w-0">
-                      <h2 className="truncate text-[20px] font-black text-[#171717]">{manual.title}</h2>
+                      <h2 className="truncate text-[20px] font-black text-[#171717]">{getManualDisplayTitle(manual)}</h2>
                       <p className="mt-1 text-[12px] font-bold text-[#8a909b]">{formatManualMeta(manual)}</p>
                       <p className="mt-2 line-clamp-3 text-[13px] leading-6 text-[#596273]">{manual.content || "本文未登録"}</p>
                     </div>
@@ -180,7 +180,7 @@ function ManualDetailDialog({
       <div className="max-h-[92vh] w-full max-w-[860px] overflow-y-auto rounded-[24px] border border-[#eceef4] bg-white p-6 shadow-[0_24px_70px_rgba(17,24,39,0.18)]">
         <div className="flex items-start justify-between gap-4">
           <div className="min-w-0">
-            <h2 className="truncate text-[24px] font-black text-[#171717]">{manual.title}</h2>
+            <h2 className="truncate text-[24px] font-black text-[#171717]">{getManualDisplayTitle(manual)}</h2>
             <p className="mt-1 text-[13px] font-bold text-[#8a909b]">{formatManualMeta(manual)}</p>
           </div>
           <button type="button" onClick={onClose} className="text-[24px] leading-none text-[#9aa1ac]" aria-label="閉じる">×</button>
@@ -482,6 +482,18 @@ function formatManualMeta(manual: SalesManual) {
   return items.length > 0 ? items.join(" / ") : "分類未設定";
 }
 
+function getManualDisplayTitle(manual: SalesManual) {
+  const compactTitle = buildManualTitle({
+    productName: manual.productName,
+    manualCategory: manual.manualCategory,
+    targetSegment: manual.targetSegment,
+    fallbackTitle: manual.title,
+  });
+  const verboseTitle = [manual.productName.trim(), manual.manualCategory, manual.targetSegment.trim()].filter(Boolean).join(" ");
+
+  return manual.title.trim() === verboseTitle ? compactTitle : manual.title.trim() || compactTitle;
+}
+
 function formatLines(items: string[]) {
   return items.join("\n");
 }
@@ -492,8 +504,15 @@ function buildManualTitle(input: {
   targetSegment: string;
   fallbackTitle?: string;
 }) {
-  const parts = [input.productName.trim(), input.manualCategory, input.targetSegment.trim()].filter(Boolean);
-  return parts.length > 0 ? parts.join(" ") : input.fallbackTitle ?? "";
+  if (input.manualCategory === "新規") {
+    return "新規提案マニュアル";
+  }
+
+  if (input.manualCategory === "既存") {
+    return "既存顧客向けマニュアル";
+  }
+
+  return input.fallbackTitle?.trim() || "営業マニュアル";
 }
 
 function createEmptyCustomField(): SalesManualCustomField {

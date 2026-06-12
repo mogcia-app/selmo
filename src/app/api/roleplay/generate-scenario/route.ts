@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
 
+import { loadAnalysisContext } from "@/lib/server/analysis-context";
+
 export const runtime = "nodejs";
 
 type ScenarioCategory = "新規" | "既存";
@@ -31,11 +33,13 @@ type GeneratedScenario = {
 
 export async function POST(request: Request) {
   const body = (await request.json().catch(() => null)) as {
+    companyId?: unknown;
     product?: ProductPayload;
     category?: unknown;
     targetSegment?: unknown;
     meetingInsights?: unknown;
   } | null;
+  const companyId = typeof body?.companyId === "string" ? body.companyId : null;
   const product = body?.product ?? {};
   const category = body?.category === "新規" || body?.category === "既存" ? body.category : null;
   const targetSegment = typeof body?.targetSegment === "string" ? body.targetSegment.trim() : "";
@@ -45,8 +49,14 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "商材、カテゴリー、ターゲット層を入力してください。" }, { status: 400 });
   }
 
+  const analysisContext = await loadAnalysisContext({
+    companyId,
+    productName: product.name,
+  });
+  const scoringRuleInsights = buildScoringRuleInsights(analysisContext);
+
   if (!process.env.OPENAI_API_KEY) {
-    return NextResponse.json({ scenario: buildFallbackScenario(product, category, targetSegment, meetingInsights) });
+    return NextResponse.json({ scenario: buildFallbackScenario(product, category, targetSegment, [...scoringRuleInsights, ...meetingInsights]) });
   }
 
   try {
@@ -95,6 +105,7 @@ export async function POST(request: Request) {
             content: [
               "あなたは営業ロープレ教材を作る営業教育設計者です。",
               "商材情報、カテゴリー、ターゲット層、過去のアップロード分析に合わせて、実践的なAI顧客シナリオを日本語で作成してください。",
+              "マニュアルのスコアルールがある場合は、ロープレの採点基準に自然に反映してください。加点条件はできた行動、減点条件は避ける行動として表現してください。",
               "過去分析に改善点や不足基準がある場合、その改善練習になる反論・顧客プロフィール・採点基準を必ず含めてください。",
               "過去分析に「話し癖改善」「口癖」「フィラー語」の指摘がある場合、えー、あの、まあ等を減らす練習ゴールと採点基準を必ず含めてください。",
               "営業担当が練習しやすいよう、顧客プロフィール、反論、採点基準を具体化してください。",
@@ -116,6 +127,7 @@ export async function POST(request: Request) {
               `FAQ: ${(product.faq ?? []).join(" / ")}`,
               `成功トーク: ${(product.successTalk ?? []).join(" / ")}`,
               `NGトーク: ${(product.ngTalk ?? []).join(" / ")}`,
+              `マニュアルのスコアルール: ${scoringRuleInsights.join(" / ")}`,
               `過去アップロード分析からの改善材料: ${meetingInsights.join(" / ")}`,
             ].join("\n"),
           },
@@ -124,18 +136,18 @@ export async function POST(request: Request) {
     });
 
     if (!response.ok) {
-      return NextResponse.json({ scenario: buildFallbackScenario(product, category, targetSegment, meetingInsights) });
+      return NextResponse.json({ scenario: buildFallbackScenario(product, category, targetSegment, [...scoringRuleInsights, ...meetingInsights]) });
     }
 
     const payload = (await response.json()) as { choices?: Array<{ message?: { content?: string } }> };
     const content = payload.choices?.[0]?.message?.content;
     if (!content) {
-      return NextResponse.json({ scenario: buildFallbackScenario(product, category, targetSegment, meetingInsights) });
+      return NextResponse.json({ scenario: buildFallbackScenario(product, category, targetSegment, [...scoringRuleInsights, ...meetingInsights]) });
     }
 
     return NextResponse.json({ scenario: normalizeScenario(JSON.parse(content) as GeneratedScenario) });
   } catch {
-    return NextResponse.json({ scenario: buildFallbackScenario(product, category, targetSegment, meetingInsights) });
+    return NextResponse.json({ scenario: buildFallbackScenario(product, category, targetSegment, [...scoringRuleInsights, ...meetingInsights]) });
   }
 }
 
@@ -172,6 +184,10 @@ function normalizeScenario(value: GeneratedScenario): GeneratedScenario {
     evaluationCriteria: readStringArray(value.evaluationCriteria),
     difficulty: value.difficulty === "easy" || value.difficulty === "hard" ? value.difficulty : "normal",
   };
+}
+
+function buildScoringRuleInsights(context: Awaited<ReturnType<typeof loadAnalysisContext>>) {
+  return context.manual?.scoringRules.slice(0, 12).map((rule) => `スコアルール: ${rule}`) ?? [];
 }
 
 function readString(value: unknown) {
