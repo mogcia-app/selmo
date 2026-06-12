@@ -19,6 +19,9 @@ import {
 const monthlyLimitMessage =
   "月間利用上限に達しました。管理者にプラン変更または上限変更を依頼してください。";
 
+type VoicePreference = "female" | "male" | "default";
+type SpeechSpeed = "slow" | "normal" | "fast";
+
 export default function SalesRoleplayPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -36,11 +39,15 @@ export default function SalesRoleplayPage() {
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [voicePreference, setVoicePreference] = useState<VoicePreference>("female");
+  const [speechSpeed, setSpeechSpeed] = useState<SpeechSpeed>("normal");
+  const [availableVoices, setAvailableVoices] = useState<SpeechSynthesisVoice[]>([]);
   const recorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<BlobPart[]>([]);
   const recordingStartedAtRef = useRef<number | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const scenarioId = searchParams.get("scenarioId") ?? "";
+  const roleplayType = readRoleplayType(searchParams.get("category"));
   const activeAssignmentScenarioIds = useMemo(
     () => new Set(assignments.filter((assignment) => assignment.status === "assigned").map((assignment) => assignment.scenarioId)),
     [assignments],
@@ -97,6 +104,18 @@ export default function SalesRoleplayPage() {
         window.speechSynthesis.cancel();
       }
     };
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined" || !("speechSynthesis" in window)) return;
+
+    const loadVoices = () => {
+      setAvailableVoices(window.speechSynthesis.getVoices());
+    };
+
+    loadVoices();
+    window.speechSynthesis.addEventListener("voiceschanged", loadVoices);
+    return () => window.speechSynthesis.removeEventListener("voiceschanged", loadVoices);
   }, []);
 
   const handleStartRecording = async () => {
@@ -234,7 +253,11 @@ export default function SalesRoleplayPage() {
           createdAt: new Date().toISOString(),
         },
       ]);
-      speakText(data.message ?? "もう少し詳しく教えてください。", setIsSpeaking);
+      speakText(data.message ?? "もう少し詳しく教えてください。", setIsSpeaking, {
+        voicePreference,
+        speechSpeed,
+        voices: availableVoices,
+      });
     } catch (nextError) {
       setError(nextError instanceof Error ? nextError.message : "AI顧客の応答に失敗しました。");
     } finally {
@@ -253,6 +276,7 @@ export default function SalesRoleplayPage() {
         companyId,
         scenarioId: scenario.id,
         scenarioTitle: scenario.title,
+        roleplayType,
         productName: scenario.productName,
         userId,
         score: evaluation.score,
@@ -262,7 +286,7 @@ export default function SalesRoleplayPage() {
         improvementPhrases: evaluation.improvementPhrases,
         messages,
       });
-      router.push("/sales/roleplay/results");
+      router.push(`/sales/roleplay/results?category=${roleplayType}`);
     } catch (nextError) {
       setError(nextError instanceof Error ? nextError.message : "結果の保存に失敗しました。");
     } finally {
@@ -271,9 +295,9 @@ export default function SalesRoleplayPage() {
   };
 
   return (
-    <main className="overflow-x-hidden bg-transparent px-5 pb-3 pt-4 md:px-8 md:pb-4 md:pt-5">
-      <div className="mx-auto max-w-[1380px]">
-        <RoleplayHeader activeStep="practice" />
+    <main className="overflow-x-hidden bg-transparent px-4 pb-4 pt-4 md:px-8 md:pb-5 md:pt-5">
+      <div className="mx-auto max-w-[1500px]">
+        <RoleplayHeader activeStep="practice" roleplayType={roleplayType} />
 
         {error ? (
           <div className="mt-4 rounded-[16px] border border-[#f4d4d4] bg-[#fff8f8] px-4 py-3 text-[13px] font-medium text-[#b4232a]">
@@ -282,23 +306,14 @@ export default function SalesRoleplayPage() {
         ) : null}
 
         {scenario ? (
-          <section className="mt-3 grid gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
-            <article className="flex min-h-[540px] flex-col rounded-[24px] border border-[#e2e6ee] bg-white shadow-[0_8px_24px_rgba(17,24,39,0.04)] xl:h-[calc(100vh-150px)] xl:min-h-[560px]">
+          <section className="mt-3 grid gap-4 2xl:grid-cols-[minmax(0,1fr)_320px]">
+            <article className="flex min-h-[calc(100vh-150px)] flex-col rounded-[24px] border border-[#e2e6ee] bg-white shadow-[0_8px_24px_rgba(17,24,39,0.04)]">
               <div className="border-b border-[#eef1f5] px-5 py-4">
                 <p className="text-[12px] font-bold text-[#8a6500]">{scenario.productName || "商材未設定"}</p>
                 <h1 className="mt-1 text-[24px] font-black tracking-[-0.03em] text-[#171717]">{scenario.title}</h1>
-              </div>
-
-              <div className="border-b border-[#eef1f5] bg-[#fcfcfd] px-5 py-4">
-                <div className="rounded-[22px] border border-[#e6eaf0] bg-white px-5 py-4">
-                  <div>
-                    <p className="text-[12px] font-black uppercase tracking-[0.16em] text-[#b48600]">Voice Roleplay</p>
-                    <h2 className="mt-1 text-[22px] font-black text-[#171717]">マイクでAI顧客に返答</h2>
-                    <p className="mt-2 text-[13px] leading-6 text-[#707783]">
-                      下の操作バーからいつでも録音できます。録音停止後に文字起こしし、AI顧客が音声で返答します。
-                    </p>
-                  </div>
-                </div>
+                <p className="mt-2 text-[13px] leading-6 text-[#707783]">
+                  下の操作バーからいつでも録音できます。録音停止後に文字起こしし、AI顧客が音声で返答します。
+                </p>
                 {recordedPreview ? (
                   <div className="mt-4 rounded-[18px] border border-[#e6eaf0] bg-white px-4 py-3">
                     <div className="text-[12px] font-black text-[#8a909b]">直前の文字起こし</div>
@@ -307,7 +322,7 @@ export default function SalesRoleplayPage() {
                 ) : null}
               </div>
 
-              <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-5 py-5">
+              <div className="flex-1 space-y-4 px-4 py-5 sm:px-5">
                 {messages.length > 0 ? (
                   messages.map((message, index) => (
                     <MessageBubble key={`${message.createdAt}-${index}`} message={message} />
@@ -332,19 +347,19 @@ export default function SalesRoleplayPage() {
                 ) : null}
               </div>
 
-              <div className="sticky bottom-0 z-10 border-t border-[#eef1f5] bg-white/95 px-5 py-4 backdrop-blur">
-                <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-                  <div className="grid gap-2 sm:grid-cols-3 lg:min-w-[420px]">
+              <div className="sticky bottom-0 z-10 border-t border-[#eef1f5] bg-white/95 px-4 py-3 backdrop-blur sm:px-5 sm:py-4">
+                <div className="flex min-w-0 flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
+                  <div className="grid min-w-0 grid-cols-3 gap-2 xl:flex-1">
                     <CompactStatus label="録音" value={isRecording ? formatElapsed(recordingElapsedSec) : "--:--"} active={isRecording} />
                     <CompactStatus label="状態" value={buildVoiceStatus({ isRecording, isTranscribing, isThinking, isSpeaking })} />
                     <CompactStatus label="発話" value={`${messages.filter((message) => message.role === "sales").length}回`} />
                   </div>
-                  <div className="flex flex-col items-stretch gap-2 sm:flex-row sm:items-center">
+                  <div className="grid min-w-0 grid-cols-1 gap-2 sm:grid-cols-2 xl:w-[320px] xl:shrink-0">
                     <button
                       type="button"
                       onClick={isRecording ? handleStopRecording : () => void handleStartRecording()}
                       disabled={isThinking || isTranscribing}
-                      className={`inline-flex h-14 min-w-[190px] items-center justify-center gap-2 rounded-[18px] px-6 text-[14px] font-black transition disabled:cursor-not-allowed disabled:opacity-50 ${
+                      className={`inline-flex h-12 min-w-0 items-center justify-center gap-2 rounded-[16px] px-4 text-[13px] font-black transition disabled:cursor-not-allowed disabled:opacity-50 sm:h-14 ${
                         isRecording ? "bg-[#d92d20] text-white shadow-[0_10px_24px_rgba(217,45,32,0.22)]" : "bg-[#171717] text-white shadow-[0_10px_24px_rgba(17,24,39,0.16)]"
                       }`}
                     >
@@ -355,10 +370,16 @@ export default function SalesRoleplayPage() {
                       type="button"
                       onClick={() => {
                         const lastCustomer = [...messages].reverse().find((message) => message.role === "customer");
-                        if (lastCustomer) speakText(lastCustomer.content, setIsSpeaking);
+                        if (lastCustomer) {
+                          speakText(lastCustomer.content, setIsSpeaking, {
+                            voicePreference,
+                            speechSpeed,
+                            voices: availableVoices,
+                          });
+                        }
                       }}
                       disabled={isSpeaking || isRecording}
-                      className="inline-flex h-14 min-w-[140px] items-center justify-center rounded-[18px] border border-[#e4e8ef] bg-white px-5 text-[13px] font-black text-[#343b48] disabled:cursor-not-allowed disabled:opacity-50"
+                      className="inline-flex h-12 min-w-0 items-center justify-center rounded-[16px] border border-[#e4e8ef] bg-white px-4 text-[13px] font-black text-[#343b48] disabled:cursor-not-allowed disabled:opacity-50 sm:h-14"
                     >
                       もう一度聞く
                     </button>
@@ -367,7 +388,7 @@ export default function SalesRoleplayPage() {
               </div>
             </article>
 
-            <aside className="space-y-4">
+            <aside className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_180px_180px] 2xl:block 2xl:space-y-4">
               <section className="rounded-[24px] border border-[#e2e6ee] bg-white px-5 py-6 shadow-[0_8px_24px_rgba(17,24,39,0.04)]">
                 <h2 className="text-[18px] font-black text-[#171717]">AI顧客情報</h2>
                 <div className="mt-4 space-y-3">
@@ -377,15 +398,47 @@ export default function SalesRoleplayPage() {
                   <InfoBlock label="想定反論" value={scenario.objections.join(" / ") || "未設定"} />
                 </div>
               </section>
+              <section className="rounded-[24px] border border-[#e2e6ee] bg-white px-5 py-6 shadow-[0_8px_24px_rgba(17,24,39,0.04)]">
+                <h2 className="text-[18px] font-black text-[#171717]">AI音声設定</h2>
+                <div className="mt-4 space-y-3">
+                  <label className="block">
+                    <span className="mb-2 block text-[12px] font-bold text-[#8a909b]">声</span>
+                    <select
+                      value={voicePreference}
+                      onChange={(event) => setVoicePreference(event.target.value as VoicePreference)}
+                      className="h-11 w-full rounded-[14px] border border-[#e4e8ef] bg-white px-3 text-[13px] font-bold text-[#343b48] outline-none"
+                    >
+                      <option value="female">女性</option>
+                      <option value="male">男性</option>
+                      <option value="default">標準</option>
+                    </select>
+                  </label>
+                  <label className="block">
+                    <span className="mb-2 block text-[12px] font-bold text-[#8a909b]">話す速さ</span>
+                    <select
+                      value={speechSpeed}
+                      onChange={(event) => setSpeechSpeed(event.target.value as SpeechSpeed)}
+                      className="h-11 w-full rounded-[14px] border border-[#e4e8ef] bg-white px-3 text-[13px] font-bold text-[#343b48] outline-none"
+                    >
+                      <option value="slow">ゆっくり</option>
+                      <option value="normal">普通</option>
+                      <option value="fast">速め</option>
+                    </select>
+                  </label>
+                  <p className="text-[12px] leading-5 text-[#7a808c]">
+                    端末やブラウザに入っている日本語音声から近い声を選びます。
+                  </p>
+                </div>
+              </section>
               <button
                 type="button"
                 onClick={() => void handleFinish()}
                 disabled={messages.filter((message) => message.role === "sales").length < 2 || isSaving}
-                className="inline-flex h-12 w-full items-center justify-center rounded-[14px] border border-[#f0c655] bg-[#ffd84d] text-[14px] font-black text-[#171717] disabled:cursor-not-allowed disabled:opacity-50"
+                className="inline-flex h-12 w-full items-center justify-center rounded-[14px] border border-[#f0c655] bg-[#ffd84d] text-[14px] font-black text-[#171717] disabled:cursor-not-allowed disabled:opacity-50 lg:self-start"
               >
                 {isSaving ? "保存中" : "終了して採点"}
               </button>
-              <Link href="/sales/roleplay/scenarios" className="inline-flex h-12 w-full items-center justify-center rounded-[14px] border border-[#e2e6ee] bg-white text-[14px] font-bold text-[#3d4350]">
+              <Link href={`/sales/roleplay/scenarios?category=${roleplayType}`} className="inline-flex h-12 w-full items-center justify-center rounded-[14px] border border-[#e2e6ee] bg-white text-[14px] font-bold text-[#3d4350] lg:self-start">
                 シナリオを変更
               </Link>
             </aside>
@@ -397,7 +450,7 @@ export default function SalesRoleplayPage() {
             <p className="mx-auto mt-3 max-w-[560px] text-[15px] leading-7 text-[#596273]">
               商材別の練習テーマを選択すると、AI顧客とのロープレを開始できます。
             </p>
-            <Link href="/sales/roleplay/scenarios" className="mt-7 inline-flex h-12 items-center justify-center rounded-[14px] bg-[#ffd12f] px-7 text-[14px] font-black text-[#171717] shadow-[0_10px_22px_rgba(245,189,7,0.22)]">
+            <Link href={`/sales/roleplay/scenarios?category=${roleplayType}`} className="mt-7 inline-flex h-12 items-center justify-center rounded-[14px] bg-[#ffd12f] px-7 text-[14px] font-black text-[#171717] shadow-[0_10px_22px_rgba(245,189,7,0.22)]">
               シナリオを選択
             </Link>
           </section>
@@ -453,17 +506,50 @@ function buildVoiceStatus(input: { isRecording: boolean; isTranscribing: boolean
   return "待機中";
 }
 
-function speakText(text: string, setIsSpeaking: (value: boolean) => void) {
+function speakText(
+  text: string,
+  setIsSpeaking: (value: boolean) => void,
+  options: {
+    voicePreference: VoicePreference;
+    speechSpeed: SpeechSpeed;
+    voices: SpeechSynthesisVoice[];
+  },
+) {
   if (typeof window === "undefined" || !("speechSynthesis" in window) || !text.trim()) return;
   window.speechSynthesis.cancel();
   const utterance = new SpeechSynthesisUtterance(text);
   utterance.lang = "ja-JP";
-  utterance.rate = 1;
+  utterance.rate = getSpeechRate(options.speechSpeed);
   utterance.pitch = 1;
+  const selectedVoice = selectJapaneseVoice(options.voices, options.voicePreference);
+  if (selectedVoice) {
+    utterance.voice = selectedVoice;
+  }
   utterance.onstart = () => setIsSpeaking(true);
   utterance.onend = () => setIsSpeaking(false);
   utterance.onerror = () => setIsSpeaking(false);
   window.speechSynthesis.speak(utterance);
+}
+
+function getSpeechRate(speed: SpeechSpeed) {
+  if (speed === "slow") return 0.85;
+  if (speed === "fast") return 1.15;
+  return 1;
+}
+
+function selectJapaneseVoice(voices: SpeechSynthesisVoice[], preference: VoicePreference) {
+  const japaneseVoices = voices.filter((voice) => voice.lang.toLowerCase().startsWith("ja"));
+  if (japaneseVoices.length === 0) return null;
+  if (preference === "default") return japaneseVoices[0] ?? null;
+
+  const femaleHints = ["kyoko", "nanami", "haruka", "ichigo", "sayaka", "female", "女性"];
+  const maleHints = ["otoya", "ichiro", "keita", "male", "男性"];
+  const hints = preference === "female" ? femaleHints : maleHints;
+  const matchedVoice = japaneseVoices.find((voice) =>
+    hints.some((hint) => `${voice.name} ${voice.voiceURI}`.toLowerCase().includes(hint.toLowerCase())),
+  );
+
+  return matchedVoice ?? japaneseVoices[0] ?? null;
 }
 
 function getSupportedAudioMimeType() {
@@ -476,6 +562,12 @@ function getAudioExtension(mimeType: string) {
   if (mimeType.includes("mpeg")) return "mp3";
   if (mimeType.includes("wav")) return "wav";
   return "webm";
+}
+
+type RoleplayType = "meeting" | "teleapo";
+
+function readRoleplayType(value: string | null): RoleplayType {
+  return value === "teleapo" ? "teleapo" : "meeting";
 }
 
 function formatElapsed(seconds: number) {
@@ -498,28 +590,49 @@ function evaluateRoleplay(scenario: RoleplayScenario, messages: RoleplayMessage[
   const hasNextAction = includesAny(salesText, ["次回", "日程", "資料", "見積", "送付", "打ち合わせ"]);
   const hasIssueDepth = includesAny(salesText, ["課題", "困", "悩", "背景", "原因", "現状"]);
   const hasValueConnection = includesAny(salesText, ["効果", "改善", "成果", "価値", "事例", "解決"]);
-  const fillerCount = (salesText.match(/えー|あの|まあ|そのー|なんか|ちょっと/g) ?? []).length;
-  const baseScore = 42;
+  const hasEvidence = includesAny(salesText, ["事例", "実績", "データ", "根拠", "比較", "数字", "具体"]);
+  const hasCustomerCheck = includesAny(salesText, ["いかが", "どうですか", "合っていますか", "認識", "確認", "教えて"]);
+  const vagueCount = (salesText.match(/たぶん|だと思います|思っております|いい感じ|大丈夫|おそらく|多分|みたいな|というところ/g) ?? []).length;
+  const fillerCount = (salesText.match(/えー|あの|まあ|まー|そのー|なんか|ちょっと/g) ?? []).length;
+  const metaTalkCount = (salesText.match(/もう一回|できない|難しいわ|やめたい|録音|ロープレ/g) ?? []).length;
+  const maxSalesTurnLength = Math.max(0, ...salesMessages.map((message) => message.content.length));
+  const missingCoreCount = [hasBudget, hasDecision, hasTiming, hasNextAction].filter((value) => !value).length;
   const rawScore =
-    baseScore +
-    Math.min(questionCount, 4) * 3 +
-    Math.min(salesMessages.length, 4) * 2 +
-    Math.min(criteriaHits, 4) * 5 +
-    (hasIssueDepth ? 8 : 0) +
-    (hasValueConnection ? 8 : 0) +
-    (hasBudget ? 5 : 0) +
-    (hasDecision ? 5 : 0) +
-    (hasTiming ? 5 : 0) +
-    (hasNextAction ? 7 : 0) -
-    Math.min(fillerCount, 6) * 2;
+    8 +
+    Math.min(questionCount, 5) * 2 +
+    Math.min(criteriaHits, 4) * 3 +
+    (hasIssueDepth ? 10 : -12) +
+    (hasValueConnection ? 8 : -10) +
+    (hasEvidence ? 6 : -8) +
+    (hasCustomerCheck ? 5 : -6) +
+    (hasBudget ? 8 : -10) +
+    (hasDecision ? 8 : -10) +
+    (hasTiming ? 8 : -10) +
+    (hasNextAction ? 10 : -12) -
+    Math.min(fillerCount, 10) * 2 -
+    Math.min(vagueCount, 8) * 3 -
+    Math.min(metaTalkCount, 3) * 8 -
+    (maxSalesTurnLength >= 700 ? 14 : maxSalesTurnLength >= 450 ? 9 : 0);
   const scoreCap = salesMessages.length < 2
-    ? 58
-    : hasBudget && hasDecision && hasTiming && hasNextAction
-      ? 92
+    ? 35
+    : metaTalkCount > 0
+      ? 32
+      : missingCoreCount >= 4
+        ? 34
+        : missingCoreCount >= 3
+          ? 42
+          : missingCoreCount >= 2
+            ? 50
+            : !hasIssueDepth || !hasValueConnection
+              ? 46
+              : !hasEvidence || !hasCustomerCheck
+                ? 54
+    : hasBudget && hasDecision && hasTiming && hasNextAction && hasIssueDepth && hasValueConnection && hasEvidence && hasCustomerCheck
+      ? 76
       : hasNextAction && hasIssueDepth
-        ? 84
-        : 76;
-  const score = Math.min(scoreCap, Math.max(35, Math.round(rawScore)));
+        ? 58
+        : 48;
+  const score = Math.min(scoreCap, Math.max(5, Math.round(rawScore)));
 
   const improvements = [
     ...(!hasIssueDepth ? ["顧客の課題・背景・現状をもう一段深掘りしましょう。"] : []),
@@ -527,7 +640,12 @@ function evaluateRoleplay(scenario: RoleplayScenario, messages: RoleplayMessage[
     ...(!hasDecision ? ["決裁者や社内の意思決定フローを確認しましょう。"] : []),
     ...(!hasTiming ? ["導入時期や検討スケジュールを確認しましょう。"] : []),
     ...(!hasNextAction ? ["商談の最後に次回日程・資料送付・見積提出などの次アクションを確定しましょう。"] : []),
+    ...(!hasEvidence ? ["効果説明には、事例・数字・比較などの根拠を添えましょう。"] : []),
+    ...(!hasCustomerCheck ? ["説明の途中で、顧客の認識や理解度を確認しましょう。"] : []),
+    ...(vagueCount >= 2 ? ["曖昧な表現を減らし、根拠や条件を明確に言い切りましょう。"] : []),
     ...(fillerCount >= 3 ? ["えー、あの、まあ等のフィラー語を減らし、短く言い切る練習をしましょう。"] : []),
+    ...(metaTalkCount > 0 ? ["ロープレ中の独り言や操作に関する発話は、顧客には聞かせない前提で言い直しましょう。"] : []),
+    ...(maxSalesTurnLength >= 450 ? ["提案説明が長くなっています。30秒ほどで区切り、顧客の理解や懸念を確認しましょう。"] : []),
   ];
 
   return {
@@ -564,14 +682,14 @@ function buildImprovementPhrases(scenario: RoleplayScenario, salesText: string) 
   return phrases.slice(0, 3);
 }
 
-function RoleplayHeader({ activeStep }: { activeStep: "scenario" | "practice" | "results" }) {
+function RoleplayHeader({ activeStep, roleplayType }: { activeStep: "scenario" | "practice" | "results"; roleplayType: RoleplayType }) {
   return (
     <header className="flex flex-wrap items-center justify-between gap-4 rounded-[18px] border border-[#e2e6ee] bg-white px-5 py-4 shadow-[0_8px_24px_rgba(17,24,39,0.04)]">
-      <h1 className="text-[24px] font-black tracking-[-0.03em] text-[#171717]">AIロープレ</h1>
+      <span className="sr-only">ロープレナビゲーション</span>
       <div className="hidden items-center gap-2 lg:flex">
-        <Step number="1" label="シナリオ選択" active={activeStep === "scenario"} href="/sales/roleplay/scenarios" />
-        <Step number="2" label="ロープレ中" active={activeStep === "practice"} href="/sales/roleplay" />
-        <Step number="3" label="分析結果" active={activeStep === "results"} href="/sales/roleplay/results" />
+        <Step number="1" label="シナリオ選択" active={activeStep === "scenario"} href={`/sales/roleplay/scenarios?category=${roleplayType}`} />
+        <Step number="2" label="ロープレ中" active={activeStep === "practice"} href={`/sales/roleplay?category=${roleplayType}`} />
+        <Step number="3" label="分析結果" active={activeStep === "results"} href={`/sales/roleplay/results?category=${roleplayType}`} />
       </div>
     </header>
   );

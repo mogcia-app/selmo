@@ -509,10 +509,6 @@ function AiChargeButton() {
           +
         </span>
       </div>
-      <div className="mt-3 flex items-center justify-between gap-3 border-t border-[#f2dfa0] pt-3 text-[12px] font-bold text-[#6f5500]">
-        <span>1回 6,500円</span>
-        <span>10回 65,000円</span>
-      </div>
     </Link>
   );
 }

@@ -4,6 +4,13 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 
 import { useAuth } from "@/features/auth/auth-provider";
+import {
+  createCalendarEvent,
+  subscribeToCalendarEvents,
+  type CalendarEvent,
+  type CalendarEventCustomerType,
+} from "@/lib/firebase/calendar-events";
+import { subscribeToKnowledgeProducts, type KnowledgeProduct } from "@/lib/firebase/knowledge";
 import { subscribeToMeetings, type MeetingRecord } from "@/lib/firebase/meetings";
 import { canUseSalesDomain, type SalesDomain } from "@/lib/sales-domains";
 import type { MeetingPurpose } from "@/types/domain";
@@ -14,7 +21,11 @@ type DomainFilter = "all" | SalesDomain;
 export function MeetingCalendarScreen({ variant }: { variant: CalendarVariant }) {
   const { profile } = useAuth();
   const [meetings, setMeetings] = useState<MeetingRecord[]>([]);
+  const [calendarEvents, setCalendarEvents] = useState<CalendarEvent[]>([]);
+  const [products, setProducts] = useState<KnowledgeProduct[]>([]);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [eventFormOpen, setEventFormOpen] = useState(false);
+  const [isSavingEvent, setIsSavingEvent] = useState(false);
   const [viewDate, setViewDate] = useState(() => startOfMonth(new Date()));
   const [selectedDate, setSelectedDate] = useState(() => startOfDay(new Date()));
   const canUseMeeting = variant === "admin" || !profile || canUseSalesDomain(profile, "meeting");
@@ -28,15 +39,26 @@ export function MeetingCalendarScreen({ variant }: { variant: CalendarVariant })
 
   useEffect(() => {
     if (!profile?.uid || !profile.companyId || !profile.role) return;
-    return subscribeToMeetings(
-      { role: profile.role, userId: profile.uid, companyId: profile.companyId },
-      (nextMeetings) => {
-        setMeetings(nextMeetings);
-        setErrorMessage(null);
-      },
-      () => setErrorMessage("カレンダー情報の読み込みに失敗しました。"),
-    );
-  }, [profile?.companyId, profile?.role, profile?.uid]);
+    const handleError = () => setErrorMessage("カレンダー情報の読み込みに失敗しました。");
+    const unsubscribers = [
+      subscribeToMeetings(
+        { role: profile.role, userId: profile.uid, companyId: profile.companyId },
+        (nextMeetings) => {
+          setMeetings(nextMeetings);
+          setErrorMessage(null);
+        },
+        handleError,
+      ),
+      subscribeToCalendarEvents(
+        { companyId: profile.companyId, userId: profile.uid, isAdmin: variant === "admin" },
+        setCalendarEvents,
+        handleError,
+      ),
+      subscribeToKnowledgeProducts(profile.companyId, setProducts, handleError),
+    ];
+
+    return () => unsubscribers.forEach((unsubscribe) => unsubscribe());
+  }, [profile?.companyId, profile?.role, profile?.uid, variant]);
 
   const availableMeetings = useMemo(
     () =>
@@ -52,12 +74,33 @@ export function MeetingCalendarScreen({ variant }: { variant: CalendarVariant })
     () => availableMeetings.filter((meeting) => isSameMonth(meeting.recordedAt, viewDate)),
     [availableMeetings, viewDate],
   );
+  const availableEvents = useMemo(
+    () =>
+      calendarEvents.filter((event) => {
+        if (domainFilter !== "all" && event.salesDomain !== domainFilter) return false;
+        if (event.salesDomain === "meeting" && !canUseMeeting) return false;
+        if (event.salesDomain === "teleapo" && !canUseTeleapo) return false;
+        return Boolean(event.scheduledAt);
+      }),
+    [calendarEvents, canUseMeeting, canUseTeleapo, domainFilter],
+  );
+  const monthEvents = useMemo(
+    () => availableEvents.filter((event) => isSameMonth(event.scheduledAt, viewDate)),
+    [availableEvents, viewDate],
+  );
   const selectedMeetings = useMemo(
     () =>
       availableMeetings
         .filter((meeting) => isSameDay(meeting.recordedAt, selectedDate))
         .sort((left, right) => (left.recordedAt?.getTime() ?? 0) - (right.recordedAt?.getTime() ?? 0)),
     [availableMeetings, selectedDate],
+  );
+  const selectedEvents = useMemo(
+    () =>
+      availableEvents
+        .filter((event) => isSameDay(event.scheduledAt, selectedDate))
+        .sort((left, right) => (left.scheduledAt?.getTime() ?? 0) - (right.scheduledAt?.getTime() ?? 0)),
+    [availableEvents, selectedDate],
   );
   const upcomingMeetings = useMemo(
     () =>
@@ -67,9 +110,53 @@ export function MeetingCalendarScreen({ variant }: { variant: CalendarVariant })
         .slice(0, 5),
     [availableMeetings],
   );
+  const upcomingEvents = useMemo(
+    () =>
+      availableEvents
+        .filter((event) => (event.scheduledAt?.getTime() ?? 0) >= startOfDay(new Date()).getTime())
+        .sort((left, right) => (left.scheduledAt?.getTime() ?? 0) - (right.scheduledAt?.getTime() ?? 0))
+        .slice(0, 5),
+    [availableEvents],
+  );
   const meetingsByDate = useMemo(() => groupMeetingsByDate(monthMeetings), [monthMeetings]);
+  const eventsByDate = useMemo(() => groupEventsByDate(monthEvents), [monthEvents]);
   const calendarDays = useMemo(() => buildCalendarDays(viewDate), [viewDate]);
   const domainLabel = domainFilter === "teleapo" ? "架電" : domainFilter === "meeting" ? "商談" : "すべて";
+  const plannedCount = monthMeetings.length + monthEvents.length;
+
+  async function handleCreateEvent(input: CalendarEventFormState) {
+    if (!profile?.uid || !profile.companyId) return;
+    if (!input.customerName.trim() || !input.productName.trim() || !input.scheduledAt) {
+      setErrorMessage("顧客名、商材、予定日時を入力してください。");
+      return;
+    }
+
+    setIsSavingEvent(true);
+    setErrorMessage(null);
+    try {
+      await createCalendarEvent({
+        companyId: profile.companyId,
+        userId: profile.uid,
+        salesDomain: input.salesDomain,
+        customerName: input.customerName,
+        productId: input.productId || null,
+        productName: input.productName,
+        customerType: input.customerType,
+        targetSegment: input.targetSegment,
+        meetingPurpose: input.meetingPurpose,
+        scheduledAt: new Date(input.scheduledAt),
+        location: input.location,
+        agenda: input.agenda,
+        customerIssues: input.customerIssues,
+        preparationMemo: input.preparationMemo,
+      });
+      setEventFormOpen(false);
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "予定の保存に失敗しました。");
+    } finally {
+      setIsSavingEvent(false);
+    }
+  }
 
   return (
     <main className="overflow-x-hidden bg-transparent px-5 pb-3 pt-4 md:px-8 md:pb-4 md:pt-5">
@@ -84,6 +171,15 @@ export function MeetingCalendarScreen({ variant }: { variant: CalendarVariant })
               </p>
             </div>
             <div className="flex flex-wrap gap-2">
+              {variant === "sales" ? (
+                <button
+                  type="button"
+                  onClick={() => setEventFormOpen((current) => !current)}
+                  className="h-10 rounded-[12px] border border-[#171717] bg-[#171717] px-4 text-[13px] font-black text-white"
+                >
+                  予定を追加
+                </button>
+              ) : null}
               {canUseMeeting && canUseTeleapo ? <FilterButton active={domainFilter === "all"} onClick={() => setDomainFilter("all")}>すべて</FilterButton> : null}
               {canUseMeeting ? <FilterButton active={domainFilter === "meeting"} onClick={() => setDomainFilter("meeting")}>商談</FilterButton> : null}
               {canUseTeleapo ? <FilterButton active={domainFilter === "teleapo"} onClick={() => setDomainFilter("teleapo")}>架電</FilterButton> : null}
@@ -97,12 +193,23 @@ export function MeetingCalendarScreen({ variant }: { variant: CalendarVariant })
           </div>
         ) : null}
 
+        {eventFormOpen && variant === "sales" ? (
+          <CalendarEventForm
+            products={products}
+            defaultDomain={domainFilter === "teleapo" ? "teleapo" : "meeting"}
+            selectedDate={selectedDate}
+            isSaving={isSavingEvent}
+            onCancel={() => setEventFormOpen(false)}
+            onSubmit={(input) => void handleCreateEvent(input)}
+          />
+        ) : null}
+
         <section className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_380px]">
           <article className="rounded-[24px] border border-[#e2e6ee] bg-white p-4 shadow-[0_8px_24px_rgba(17,24,39,0.04)] md:p-5">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
                 <h2 className="text-[22px] font-black text-[#171717]">{formatMonth(viewDate)}</h2>
-                <p className="mt-1 text-[13px] text-[#7a808c]">{domainLabel}の予定 {monthMeetings.length}件</p>
+                <p className="mt-1 text-[13px] text-[#7a808c]">{domainLabel}の予定 {plannedCount}件</p>
               </div>
               <div className="flex items-center gap-2">
                 <button type="button" onClick={() => setViewDate(addMonths(viewDate, -1))} className="h-10 rounded-[12px] border border-[#e4e8ef] bg-white px-3 text-[13px] font-black text-[#343b48]">前月</button>
@@ -129,6 +236,8 @@ export function MeetingCalendarScreen({ variant }: { variant: CalendarVariant })
             <div className="mt-2 grid grid-cols-7 gap-2">
               {calendarDays.map((day) => {
                 const dayMeetings = meetingsByDate.get(toDateKey(day.date)) ?? [];
+                const dayEvents = eventsByDate.get(toDateKey(day.date)) ?? [];
+                const dayItemCount = dayMeetings.length + dayEvents.length;
                 const isSelected = isSameDay(day.date, selectedDate);
                 const isToday = isSameDay(day.date, new Date());
                 return (
@@ -146,17 +255,22 @@ export function MeetingCalendarScreen({ variant }: { variant: CalendarVariant })
                   >
                     <div className="flex items-center justify-between gap-2">
                       <span className={`text-[13px] font-black ${isToday ? "text-[#8a6500]" : "text-[#343b48]"}`}>{day.date.getDate()}</span>
-                      {dayMeetings.length > 0 ? (
-                        <span className="rounded-full bg-white px-2 py-0.5 text-[11px] font-black text-[#8a6500]">{dayMeetings.length}</span>
+                      {dayItemCount > 0 ? (
+                        <span className="rounded-full bg-white px-2 py-0.5 text-[11px] font-black text-[#8a6500]">{dayItemCount}</span>
                       ) : null}
                     </div>
                     <div className="mt-2 space-y-1">
+                      {dayEvents.slice(0, 2).map((event) => (
+                        <div key={event.id} className="truncate rounded-[10px] bg-[#fff4d6] px-2 py-1 text-[11px] font-bold text-[#6f5500]">
+                          {formatTime(event.scheduledAt)} {event.customerName || getDomainLabel(event.salesDomain)}
+                        </div>
+                      ))}
                       {dayMeetings.slice(0, 2).map((meeting) => (
                         <div key={meeting.id} className="truncate rounded-[10px] bg-white px-2 py-1 text-[11px] font-bold text-[#4c5565]">
                           {formatTime(meeting.recordedAt)} {meeting.customerName || getDomainLabel(meeting.salesDomain)}
                         </div>
                       ))}
-                      {dayMeetings.length > 2 ? <div className="px-1 text-[11px] font-bold text-[#8f96a3]">+{dayMeetings.length - 2}件</div> : null}
+                      {dayItemCount > 4 ? <div className="px-1 text-[11px] font-bold text-[#8f96a3]">+{dayItemCount - 4}件</div> : null}
                     </div>
                   </button>
                 );
@@ -169,8 +283,11 @@ export function MeetingCalendarScreen({ variant }: { variant: CalendarVariant })
               <p className="text-[12px] font-bold uppercase tracking-[0.18em] text-[#b48600]">Selected Day</p>
               <h2 className="mt-1 text-[20px] font-black text-[#171717]">{formatFullDate(selectedDate)}</h2>
               <div className="mt-4 space-y-3">
-                {selectedMeetings.length > 0 ? (
-                  selectedMeetings.map((meeting) => <MeetingCalendarCard key={meeting.id} meeting={meeting} variant={variant} />)
+                {selectedEvents.length + selectedMeetings.length > 0 ? (
+                  <>
+                    {selectedEvents.map((event) => <CalendarEventCard key={event.id} event={event} />)}
+                    {selectedMeetings.map((meeting) => <MeetingCalendarCard key={meeting.id} meeting={meeting} variant={variant} />)}
+                  </>
                 ) : (
                   <div className="rounded-[18px] border border-dashed border-[#dfe4ec] bg-[#fcfcfd] px-4 py-8 text-center text-[13px] font-bold text-[#8f96a3]">
                     この日の予定はありません
@@ -183,8 +300,11 @@ export function MeetingCalendarScreen({ variant }: { variant: CalendarVariant })
               <p className="text-[12px] font-bold uppercase tracking-[0.18em] text-[#b48600]">Upcoming</p>
               <h2 className="mt-1 text-[20px] font-black text-[#171717]">直近の予定</h2>
               <div className="mt-4 space-y-3">
-                {upcomingMeetings.length > 0 ? (
-                  upcomingMeetings.map((meeting) => <MeetingCalendarCard key={meeting.id} meeting={meeting} variant={variant} compact />)
+                {upcomingEvents.length + upcomingMeetings.length > 0 ? (
+                  <>
+                    {upcomingEvents.map((event) => <CalendarEventCard key={event.id} event={event} compact />)}
+                    {upcomingMeetings.map((meeting) => <MeetingCalendarCard key={meeting.id} meeting={meeting} variant={variant} compact />)}
+                  </>
                 ) : (
                   <div className="rounded-[18px] border border-dashed border-[#dfe4ec] bg-[#fcfcfd] px-4 py-8 text-center text-[13px] font-bold text-[#8f96a3]">
                     直近の予定はありません
@@ -218,6 +338,181 @@ function MeetingCalendarCard({ meeting, variant, compact = false }: { meeting: M
         </span>
       </div>
     </Link>
+  );
+}
+
+type CalendarEventFormState = {
+  salesDomain: SalesDomain;
+  customerName: string;
+  productId: string;
+  productName: string;
+  customerType: CalendarEventCustomerType;
+  targetSegment: string;
+  meetingPurpose: MeetingPurpose;
+  scheduledAt: string;
+  location: string;
+  agenda: string;
+  customerIssues: string;
+  preparationMemo: string;
+};
+
+function CalendarEventForm({
+  products,
+  defaultDomain,
+  selectedDate,
+  isSaving,
+  onCancel,
+  onSubmit,
+}: {
+  products: KnowledgeProduct[];
+  defaultDomain: SalesDomain;
+  selectedDate: Date;
+  isSaving: boolean;
+  onCancel: () => void;
+  onSubmit: (input: CalendarEventFormState) => void;
+}) {
+  const [form, setForm] = useState<CalendarEventFormState>(() => ({
+    salesDomain: defaultDomain,
+    customerName: "",
+    productId: "",
+    productName: "",
+    customerType: "new",
+    targetSegment: "",
+    meetingPurpose: defaultDomain === "teleapo" ? "new_proposal" : "new_proposal",
+    scheduledAt: toDateTimeLocalValue(selectedDate),
+    location: "",
+    agenda: "",
+    customerIssues: "",
+    preparationMemo: "",
+  }));
+
+  function update<K extends keyof CalendarEventFormState>(key: K, value: CalendarEventFormState[K]) {
+    setForm((current) => ({ ...current, [key]: value }));
+  }
+
+  return (
+    <form
+      onSubmit={(event) => {
+        event.preventDefault();
+        onSubmit(form);
+      }}
+      className="rounded-[24px] border border-[#e2e6ee] bg-white px-5 py-5 shadow-[0_8px_24px_rgba(17,24,39,0.04)] md:px-6"
+    >
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <p className="text-[12px] font-bold uppercase tracking-[0.18em] text-[#b48600]">Plan</p>
+          <h2 className="mt-1 text-[22px] font-black text-[#171717]">詳しい予定を追加</h2>
+        </div>
+        <button type="button" onClick={onCancel} className="text-[22px] leading-none text-[#9aa1ac]" aria-label="閉じる">×</button>
+      </div>
+
+      <div className="mt-4 grid gap-4 md:grid-cols-2">
+        <Field label="種別">
+          <select value={form.salesDomain} onChange={(event) => update("salesDomain", event.target.value as SalesDomain)} className="h-12 w-full rounded-[14px] border border-[#e4e8ef] bg-white px-4 text-[14px] outline-none">
+            <option value="meeting">商談</option>
+            <option value="teleapo">テレアポ</option>
+          </select>
+        </Field>
+        <Field label="予定日時">
+          <input type="datetime-local" value={form.scheduledAt} onChange={(event) => update("scheduledAt", event.target.value)} className="h-12 w-full rounded-[14px] border border-[#e4e8ef] bg-white px-4 text-[14px] outline-none" />
+        </Field>
+        <Field label="顧客名">
+          <input value={form.customerName} onChange={(event) => update("customerName", event.target.value)} className="h-12 w-full rounded-[14px] border border-[#e4e8ef] bg-white px-4 text-[14px] outline-none" placeholder="例：株式会社〇〇" />
+        </Field>
+        <Field label="商材">
+          <select
+            value={form.productId}
+            onChange={(event) => {
+              const product = products.find((item) => item.id === event.target.value);
+              update("productId", event.target.value);
+              update("productName", product?.name ?? "");
+            }}
+            className="h-12 w-full rounded-[14px] border border-[#e4e8ef] bg-white px-4 text-[14px] outline-none"
+          >
+            <option value="">商材を選択</option>
+            {products.map((product) => (
+              <option key={product.id} value={product.id}>{product.name}</option>
+            ))}
+          </select>
+        </Field>
+        <Field label="顧客種別">
+          <select value={form.customerType} onChange={(event) => update("customerType", event.target.value as CalendarEventCustomerType)} className="h-12 w-full rounded-[14px] border border-[#e4e8ef] bg-white px-4 text-[14px] outline-none">
+            <option value="new">新規</option>
+            <option value="existing">既存</option>
+          </select>
+        </Field>
+        <Field label="商談目的">
+          <select value={form.meetingPurpose} onChange={(event) => update("meetingPurpose", event.target.value as MeetingPurpose)} className="h-12 w-full rounded-[14px] border border-[#e4e8ef] bg-white px-4 text-[14px] outline-none">
+            {meetingPurposeOptions.map((option) => (
+              <option key={option.value} value={option.value}>{option.label}</option>
+            ))}
+          </select>
+        </Field>
+        <Field label="ターゲット層">
+          <input value={form.targetSegment} onChange={(event) => update("targetSegment", event.target.value)} className="h-12 w-full rounded-[14px] border border-[#e4e8ef] bg-white px-4 text-[14px] outline-none" placeholder="例：SNS担当者が不在の企業" />
+        </Field>
+        <Field label="場所 / URL">
+          <input value={form.location} onChange={(event) => update("location", event.target.value)} className="h-12 w-full rounded-[14px] border border-[#e4e8ef] bg-white px-4 text-[14px] outline-none" placeholder="例：Zoom / 訪問 / 電話" />
+        </Field>
+        <Field label="話すこと" className="md:col-span-2">
+          <textarea value={form.agenda} onChange={(event) => update("agenda", event.target.value)} className="min-h-[88px] w-full resize-y rounded-[14px] border border-[#e4e8ef] bg-white px-4 py-3 text-[14px] leading-7 outline-none" placeholder="当日話したい議題や流れ" />
+        </Field>
+        <Field label="想定課題・不安" className="md:col-span-1">
+          <textarea value={form.customerIssues} onChange={(event) => update("customerIssues", event.target.value)} className="min-h-[96px] w-full resize-y rounded-[14px] border border-[#e4e8ef] bg-white px-4 py-3 text-[14px] leading-7 outline-none" placeholder="顧客が不安に思っていそうなこと" />
+        </Field>
+        <Field label="事前準備メモ" className="md:col-span-1">
+          <textarea value={form.preparationMemo} onChange={(event) => update("preparationMemo", event.target.value)} className="min-h-[96px] w-full resize-y rounded-[14px] border border-[#e4e8ef] bg-white px-4 py-3 text-[14px] leading-7 outline-none" placeholder="確認事項、送付資料、上司に確認したいことなど" />
+        </Field>
+      </div>
+      <div className="mt-5 flex justify-end gap-2">
+        <button type="button" onClick={onCancel} className="h-11 rounded-[14px] border border-[#e4e8ef] bg-white px-5 text-[13px] font-black text-[#343b48]">キャンセル</button>
+        <button type="submit" disabled={isSaving} className="h-11 rounded-[14px] bg-[#ffd12f] px-5 text-[13px] font-black text-[#171717] disabled:opacity-60">
+          {isSaving ? "保存中" : "予定を保存"}
+        </button>
+      </div>
+    </form>
+  );
+}
+
+function CalendarEventCard({ event, compact = false }: { event: CalendarEvent; compact?: boolean }) {
+  const roleplayHref = buildPreRoleplayHref(event);
+  const uploadHref = buildUploadHref(event);
+
+  return (
+    <div className="rounded-[18px] border border-[#f1dfaa] bg-[#fffdf7] px-4 py-3">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="rounded-full bg-white px-2.5 py-1 text-[11px] font-black text-[#8a6500]">予定</span>
+            <span className="rounded-full bg-white px-2.5 py-1 text-[11px] font-black text-[#8a6500]">{getDomainLabel(event.salesDomain)}</span>
+            <span className="text-[12px] font-bold text-[#7a808c]">{formatTime(event.scheduledAt)}</span>
+          </div>
+          <h3 className="mt-2 truncate text-[14px] font-black text-[#171717]">{event.customerName || "顧客名未設定"}</h3>
+          <p className="mt-1 truncate text-[12px] font-bold text-[#7a808c]">{event.productName || "商材未設定"} / {event.customerType === "new" ? "新規" : "既存"}</p>
+          {!compact && event.agenda ? <p className="mt-2 line-clamp-2 text-[12px] leading-5 text-[#596273]">{event.agenda}</p> : null}
+        </div>
+        <span className="shrink-0 rounded-full border border-[#e4e8ef] bg-white px-2.5 py-1 text-[11px] font-black text-[#596273]">
+          {getPurposeLabel(event.meetingPurpose)}
+        </span>
+      </div>
+      <div className="mt-3 grid gap-2 sm:grid-cols-2">
+        <Link href={roleplayHref} className="inline-flex h-10 items-center justify-center rounded-[14px] bg-[#171717] text-[13px] font-black text-white">
+          事前ロープレ
+        </Link>
+        <Link href={uploadHref} className="inline-flex h-10 items-center justify-center rounded-[14px] border border-[#e4e8ef] bg-white text-[13px] font-black text-[#343b48]">
+          アップロード
+        </Link>
+      </div>
+    </div>
+  );
+}
+
+function Field({ label, className = "", children }: { label: string; className?: string; children: React.ReactNode }) {
+  return (
+    <label className={className}>
+      <span className="mb-2 block text-[13px] font-bold text-[#343b48]">{label}</span>
+      {children}
+    </label>
   );
 }
 
@@ -258,6 +553,65 @@ function groupMeetingsByDate(meetings: MeetingRecord[]) {
   });
   return map;
 }
+
+function groupEventsByDate(events: CalendarEvent[]) {
+  const map = new Map<string, CalendarEvent[]>();
+  events.forEach((event) => {
+    if (!event.scheduledAt) return;
+    const key = toDateKey(event.scheduledAt);
+    map.set(key, [...(map.get(key) ?? []), event]);
+  });
+  map.forEach((items, key) => {
+    map.set(key, items.sort((left, right) => (left.scheduledAt?.getTime() ?? 0) - (right.scheduledAt?.getTime() ?? 0)));
+  });
+  return map;
+}
+
+function buildPreRoleplayHref(event: CalendarEvent) {
+  const params = new URLSearchParams({
+    category: event.salesDomain,
+    prefillProductName: event.productName,
+    prefillCustomerType: event.customerType,
+    prefillTargetSegment: event.targetSegment,
+    prefillCustomerName: event.customerName,
+    prefillPurpose: getPurposeLabel(event.meetingPurpose),
+    openCreate: "1",
+  });
+
+  if (event.customerIssues) params.set("prefillIssues", event.customerIssues);
+  if (event.preparationMemo) params.set("prefillMemo", event.preparationMemo);
+  return `/sales/roleplay/scenarios?${params.toString()}`;
+}
+
+function buildUploadHref(event: CalendarEvent) {
+  const params = new URLSearchParams({
+    category: event.salesDomain,
+    eventId: event.id,
+  });
+  return `/meetings/upload?${params.toString()}`;
+}
+
+function toDateTimeLocalValue(date: Date) {
+  const nextDate = new Date(date);
+  nextDate.setHours(10, 0, 0, 0);
+  const year = nextDate.getFullYear();
+  const month = String(nextDate.getMonth() + 1).padStart(2, "0");
+  const day = String(nextDate.getDate()).padStart(2, "0");
+  const hour = String(nextDate.getHours()).padStart(2, "0");
+  const minute = String(nextDate.getMinutes()).padStart(2, "0");
+  return `${year}-${month}-${day}T${hour}:${minute}`;
+}
+
+const meetingPurposeOptions: Array<{ value: MeetingPurpose; label: string }> = [
+  { value: "new_proposal", label: "新規提案" },
+  { value: "closing", label: "クロージング" },
+  { value: "existing_followup", label: "既存フォロー" },
+  { value: "relationship_building", label: "関係構築" },
+  { value: "check_in", label: "近況確認" },
+  { value: "upsell_cross_sell", label: "追加提案" },
+  { value: "onboarding", label: "導入支援" },
+  { value: "retention", label: "継続支援" },
+];
 
 function addMonths(date: Date, amount: number) {
   return new Date(date.getFullYear(), date.getMonth() + amount, 1);

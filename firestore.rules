@@ -174,7 +174,8 @@ service cloud.firestore {
           && request.resource.data.status == resource.data.status
           && request.resource.data.email == resource.data.email
         );
-      allow delete: if false;
+      allow delete: if canAdminCompanyData(resource.data.companyId)
+        || (isSelf(resource.data.userId) && sameCompany(resource.data.companyId) && canUseMeetingDocument(resource.data));
 
       match /knowledgeSearchHistory/{historyId} {
         allow read: if isOwnerRole() || isSelf(userId);
@@ -199,7 +200,8 @@ service cloud.firestore {
         && sameCompany(request.resource.data.companyId)
         && canUseMeetingDocument(request.resource.data);
       allow update: if canAdminCompanyData(resource.data.companyId) || (isSelf(resource.data.userId) && sameCompany(resource.data.companyId) && canUseMeetingDocument(resource.data));
-      allow delete: if false;
+      allow delete: if canAdminCompanyData(resource.data.companyId)
+        || (isSelf(resource.data.userId) && sameCompany(resource.data.companyId) && canUseMeetingDocument(resource.data));
 
       match /{subcollection}/{documentId} {
         allow read: if canReadCompanyData(get(/databases/$(database)/documents/meetings/$(meetingId)).data.companyId);
@@ -209,6 +211,19 @@ service cloud.firestore {
 
     match /meetingOutcomeHistory/{historyId} {
       allow read, write: if isOwnerRole() || isAdminRole();
+    }
+
+    match /calendarEvents/{eventId} {
+      allow read: if canReadCompanyData(resource.data.companyId)
+        && (canUseMeetingDocument(resource.data) || canUseRoleplayDomain());
+      allow create: if isSignedIn()
+        && sameCompany(request.resource.data.companyId)
+        && request.resource.data.userId == request.auth.uid
+        && canUseMeetingDocument(request.resource.data);
+      allow update: if canAdminCompanyData(resource.data.companyId)
+        || (isSelf(resource.data.userId) && sameCompany(resource.data.companyId) && canUseMeetingDocument(resource.data));
+      allow delete: if canAdminCompanyData(resource.data.companyId)
+        || (isSelf(resource.data.userId) && sameCompany(resource.data.companyId) && canUseMeetingDocument(resource.data));
     }
 
     match /monthlyStats/{month} {
@@ -318,7 +333,14 @@ service cloud.firestore {
         && request.resource.data.userId == request.auth.uid
         && sameCompany(request.resource.data.companyId)
         && canUseRoleplayDomain();
-      allow update, delete: if false;
+      allow update: if false;
+      allow delete: if canAdminCompanyData(resource.data.companyId)
+        || (
+          isSignedIn()
+          && resource.data.userId == request.auth.uid
+          && sameCompany(resource.data.companyId)
+          && canUseRoleplayDomain()
+        );
     }
 
     match /roleplayResultComments/{commentId} {

@@ -5,7 +5,7 @@ import { useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 
 import { useAuth } from "@/features/auth/auth-provider";
-import { getMeetingPurposeLabel, subscribeToMeetings, type MeetingRecord } from "@/lib/firebase/meetings";
+import { deleteMeetingRecord, getMeetingPurposeLabel, subscribeToMeetings, type MeetingRecord } from "@/lib/firebase/meetings";
 import { canUseSalesDomain } from "@/lib/sales-domains";
 
 const productIconMap: Record<string, React.ReactNode> = {
@@ -49,6 +49,7 @@ export default function MeetingsPage() {
   const [productFilter, setProductFilter] = useState("all");
   const [dateFilter, setDateFilter] = useState("all");
   const [selectedInfoMeeting, setSelectedInfoMeeting] = useState<MeetingRecord | null>(null);
+  const [deletingMeetingId, setDeletingMeetingId] = useState<string | null>(null);
 
   useEffect(() => {
     if (isAuthLoading) {
@@ -117,6 +118,26 @@ export default function MeetingsPage() {
       return matchesSearch && matchesStatus && matchesProduct && matchesDate;
     });
   }, [category, dateFilter, meetings, productFilter, search, statusFilter]);
+
+  async function handleDeleteMeeting(meeting: MeetingRecord) {
+    const label = meeting.customerName || (category === "teleapo" ? "この架電ログ" : "この打ち合わせ");
+    if (!window.confirm(`${label}を削除します。よろしいですか？`)) {
+      return;
+    }
+
+    setDeletingMeetingId(meeting.id);
+    setErrorMessage(null);
+    try {
+      await deleteMeetingRecord(meeting);
+      if (selectedInfoMeeting?.id === meeting.id) {
+        setSelectedInfoMeeting(null);
+      }
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "削除に失敗しました。");
+    } finally {
+      setDeletingMeetingId(null);
+    }
+  }
 
   return (
     <main className="overflow-x-hidden bg-transparent px-5 pb-3 pt-4 md:px-8 md:pb-4 md:pt-5">
@@ -281,13 +302,23 @@ export default function MeetingsPage() {
                         </button>
                       </td>
                       <td className="px-5 py-4 align-top">
-                        <Link
-                          href={`/meetings/${meeting.id}`}
-                          className="inline-flex items-center gap-2 rounded-[12px] border border-[#e4e7ed] bg-white px-3 py-2 text-[13px] font-medium text-[#575f6d]"
-                        >
-                          詳細を見る
-                          <span>›</span>
-                        </Link>
+                        <div className="flex flex-wrap gap-2">
+                          <Link
+                            href={`/meetings/${meeting.id}`}
+                            className="inline-flex items-center gap-2 rounded-[12px] border border-[#e4e7ed] bg-white px-3 py-2 text-[13px] font-medium text-[#575f6d]"
+                          >
+                            詳細
+                            <span>›</span>
+                          </Link>
+                          <button
+                            type="button"
+                            onClick={() => void handleDeleteMeeting(meeting)}
+                            disabled={deletingMeetingId === meeting.id}
+                            className="inline-flex items-center rounded-[12px] border border-[#f3d0cd] bg-white px-3 py-2 text-[13px] font-bold text-[#b4232a] transition hover:bg-[#fff6f5] disabled:cursor-not-allowed disabled:opacity-50"
+                          >
+                            {deletingMeetingId === meeting.id ? "削除中" : "削除"}
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   ))}

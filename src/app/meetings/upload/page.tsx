@@ -3,9 +3,13 @@
 import { FirebaseError } from "firebase/app";
 import Image from "next/image";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { useAuth } from "@/features/auth/auth-provider";
+import {
+  subscribeToCalendarEvents,
+  type CalendarEvent,
+} from "@/lib/firebase/calendar-events";
 import { subscribeToKnowledgeProducts, type KnowledgeProduct } from "@/lib/firebase/knowledge";
 import {
   createMeeting,
@@ -48,6 +52,8 @@ export default function MeetingUploadPage() {
   const [recordedAt, setRecordedAt] = useState(() => toDatetimeLocalValue(new Date()));
   const [transcriptEndedAtTime, setTranscriptEndedAtTime] = useState(() => toTimeInputValue(addMinutes(new Date(), 60)));
   const [customerName, setCustomerName] = useState("");
+  const [calendarEvents, setCalendarEvents] = useState<CalendarEvent[]>([]);
+  const [selectedCalendarEventId, setSelectedCalendarEventId] = useState(searchParams.get("eventId") ?? "");
   const [products, setProducts] = useState<KnowledgeProduct[]>([]);
   const [meetings, setMeetings] = useState<MeetingRecord[]>([]);
   const [productType, setProductType] = useState("");
@@ -89,16 +95,31 @@ export default function MeetingUploadPage() {
       return;
     }
 
-    const unsubscribe = subscribeToMeetings(
-      { role: profile.role, userId: profile.uid, companyId: profile.companyId },
-      setMeetings,
-      () => setMeetings([]),
-    );
+    const unsubscribers = [
+      subscribeToMeetings(
+        { role: profile.role, userId: profile.uid, companyId: profile.companyId },
+        setMeetings,
+        () => setMeetings([]),
+      ),
+      subscribeToCalendarEvents(
+        { companyId: profile.companyId, userId: profile.uid, isAdmin: profile.role === "admin" },
+        setCalendarEvents,
+        () => setCalendarEvents([]),
+      ),
+    ];
 
-    return unsubscribe;
+    return () => unsubscribers.forEach((unsubscribe) => unsubscribe());
   }, [profile?.companyId, profile?.role, profile?.uid]);
 
   const productOptions = useMemo(() => products.map((product) => product.name), [products]);
+  const availableCalendarEvents = useMemo(
+    () => calendarEvents.filter((event) => event.salesDomain === salesDomain),
+    [calendarEvents, salesDomain],
+  );
+  const selectedCalendarEvent = useMemo(
+    () => availableCalendarEvents.find((event) => event.id === selectedCalendarEventId) ?? null,
+    [availableCalendarEvents, selectedCalendarEventId],
+  );
   const monthlyUploadCount = useMemo(
     () => meetings.filter((meeting) => isCurrentMonth(meeting.recordedAt)).length,
     [meetings],
@@ -111,6 +132,28 @@ export default function MeetingUploadPage() {
     () => meetings.filter((meeting) => meeting.audioFilePath && !meeting.audioDeletedAt).length,
     [meetings],
   );
+
+  const applyCalendarEventToForm = useCallback(
+    (calendarEvent: CalendarEvent) => {
+      setCustomerName(calendarEvent.customerName);
+      setProductType(calendarEvent.productName || productType);
+      setCustomerType(calendarEvent.customerType);
+      setMeetingPurpose(calendarEvent.meetingPurpose);
+      setLocation(calendarEvent.location);
+      setMemo(buildCalendarEventMemo(calendarEvent));
+
+      if (calendarEvent.scheduledAt) {
+        setRecordedAt(toDatetimeLocalValue(calendarEvent.scheduledAt));
+        setTranscriptEndedAtTime(toTimeInputValue(addMinutes(calendarEvent.scheduledAt, 60)));
+      }
+    },
+    [productType],
+  );
+
+  useEffect(() => {
+    if (!selectedCalendarEvent) return;
+    applyCalendarEventToForm(selectedCalendarEvent);
+  }, [applyCalendarEventToForm, selectedCalendarEvent]);
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -447,6 +490,26 @@ export default function MeetingUploadPage() {
             {errorMessage ? <ErrorBox>{errorMessage}</ErrorBox> : null}
             {successMessage ? <SuccessBox>{successMessage}</SuccessBox> : null}
 
+            <Field label="予定から反映">
+              <select
+                className={inputClassName}
+                value={selectedCalendarEventId}
+                onChange={(event) => setSelectedCalendarEventId(event.target.value)}
+              >
+                <option value="">予定を選択しない</option>
+                {availableCalendarEvents.map((event) => (
+                  <option key={event.id} value={event.id}>
+                    {formatCalendarEventOption(event)}
+                  </option>
+                ))}
+              </select>
+              {selectedCalendarEvent ? (
+                <div className="mt-2 rounded-[14px] border border-[#f1dfaa] bg-[#fffdf7] px-4 py-3 text-[12px] leading-5 text-[#6f5500]">
+                  予定情報を打ち合わせ情報に反映しました。必要に応じて編集できます。
+                </div>
+              ) : null}
+            </Field>
+
             <Field label="顧客名 / 会社名">
               <input
                 type="text"
@@ -761,6 +824,35 @@ function buildUntitledMeetingName(recordedAt: Date) {
   const minutes = String(recordedAt.getMinutes()).padStart(2, "0");
 
   return `未設定_${year}${month}${day}_${hours}${minutes}`;
+}
+
+function formatCalendarEventOption(event: CalendarEvent) {
+  const timeLabel = event.scheduledAt ? formatShortDateTime(event.scheduledAt) : "日時未設定";
+  const customerLabel = event.customerName || "顧客名未設定";
+  const productLabel = event.productName || "商材未設定";
+  return `${timeLabel} ${customerLabel} / ${productLabel}`;
+}
+
+function formatShortDateTime(date: Date) {
+  return new Intl.DateTimeFormat("ja-JP", {
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(date);
+}
+
+function buildCalendarEventMemo(event: CalendarEvent) {
+  const sections = [
+    ["ターゲット層", event.targetSegment],
+    ["話すこと", event.agenda],
+    ["想定課題・不安", event.customerIssues],
+    ["事前準備メモ", event.preparationMemo],
+  ]
+    .filter(([, value]) => value.trim())
+    .map(([label, value]) => `${label}: ${value.trim()}`);
+
+  return sections.join("\n\n");
 }
 
 function toDatetimeLocalValue(date: Date) {

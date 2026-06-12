@@ -4,6 +4,7 @@ import {
   Timestamp,
   addDoc,
   collection,
+  deleteDoc,
   doc,
   getDocs,
   onSnapshot,
@@ -23,6 +24,7 @@ import { saveSalesActivityEvent } from "@/lib/firebase/activity";
 export type RoleplayDifficulty = "easy" | "normal" | "hard";
 export type RoleplayScenarioVisibility = "draft" | "all";
 export type RoleplayScenarioCategory = "新規" | "既存" | "";
+export type RoleplayType = "meeting" | "teleapo";
 
 export type RoleplayScenario = {
   id: string;
@@ -56,6 +58,7 @@ export type RoleplayResult = {
   companyId: string | null;
   scenarioId: string;
   scenarioTitle: string;
+  roleplayType: RoleplayType;
   productName: string;
   userId: string;
   score: number;
@@ -367,6 +370,7 @@ export async function saveRoleplayResult(input: Omit<RoleplayResult, "id" | "cre
     companyId: input.companyId ?? null,
     scenarioId: input.scenarioId,
     scenarioTitle: input.scenarioTitle,
+    roleplayType: input.roleplayType,
     productName: input.productName,
     userId: input.userId,
     score: input.score,
@@ -417,6 +421,11 @@ export async function saveRoleplayResult(input: Omit<RoleplayResult, "id" | "cre
       score: input.score,
     },
   }).catch(() => undefined);
+}
+
+export async function deleteRoleplayResult(id: string) {
+  const { firestore } = assertFirebaseClient();
+  await deleteDoc(doc(firestore, "roleplayResults", id));
 }
 
 export async function createRoleplayAssignment(input: CreateRoleplayAssignmentInput) {
@@ -538,6 +547,7 @@ function mapRoleplayResult(snapshot: QueryDocumentSnapshot<DocumentData>): Rolep
     companyId: readNullableString(data.companyId),
     scenarioId: readString(data.scenarioId),
     scenarioTitle: readString(data.scenarioTitle, "ロープレ"),
+    roleplayType: readRoleplayType(data.roleplayType),
     productName: readString(data.productName),
     userId: readString(data.userId),
     score: readNumber(data.score),
@@ -548,6 +558,10 @@ function mapRoleplayResult(snapshot: QueryDocumentSnapshot<DocumentData>): Rolep
     messages: readMessages(data.messages),
     createdAt: readDate(data.createdAt),
   };
+}
+
+function readRoleplayType(value: unknown): RoleplayType {
+  return value === "teleapo" ? "teleapo" : "meeting";
 }
 
 function mapRoleplayResultComment(snapshot: QueryDocumentSnapshot<DocumentData>): RoleplayResultComment {

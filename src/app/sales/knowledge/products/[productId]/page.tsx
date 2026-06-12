@@ -32,6 +32,7 @@ export default function SalesKnowledgeProductPage() {
   const [activeTab, setActiveTab] = useState<string>("all");
   const [tabDialogOpen, setTabDialogOpen] = useState(false);
   const [productDialogOpen, setProductDialogOpen] = useState(false);
+  const [productInfoOpen, setProductInfoOpen] = useState(false);
   const [newTabTitle, setNewTabTitle] = useState("");
   const [isAddingTab, setIsAddingTab] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -122,7 +123,7 @@ export default function SalesKnowledgeProductPage() {
             <div className="mt-6 flex flex-wrap gap-2 border-t border-[#eef1f5] pt-5">
               <TabButton active={activeTab === "all"} onClick={() => setActiveTab("all")}>
                 すべて
-                <span className="ml-2 text-[11px] text-[#8a909b]">{items.length + productSections.length}</span>
+                <span className="ml-2 text-[11px] text-[#8a909b]">{items.length + (productSections.length > 0 ? 1 : 0)}</span>
               </TabButton>
               {tabs.map((tab) => (
                 <TabButton key={tab.title} active={activeTab === tab.title} onClick={() => setActiveTab(tab.title)}>
@@ -141,7 +142,7 @@ export default function SalesKnowledgeProductPage() {
             </div>
 
             <div className="mt-6 flex flex-wrap gap-3 text-[13px] text-[#596273]">
-              <Pill>{`商材情報 ${productSections.length}件`}</Pill>
+              <Pill>{`商材情報 ${productSections.length > 0 ? 1 : 0}件`}</Pill>
               <Pill>{`ナレッジ ${items.filter((item) => item.kind === "knowledge").length}件`}</Pill>
               <Pill>{`メモ ${items.filter((item) => item.kind === "memo").length}件`}</Pill>
               <Pill>{`Q&A ${items.filter((item) => item.kind === "qa").length}件`}</Pill>
@@ -152,33 +153,15 @@ export default function SalesKnowledgeProductPage() {
           <section className="mt-6">
             {visibleProductSections.length > 0 || visibleItems.length > 0 ? (
               <div className="space-y-3">
-                {visibleProductSections.map((section) => (
-                  <article
-                    key={`product-section-${section.title}`}
-                    className="grid gap-4 rounded-[14px] border border-[#e5e9f0] bg-white px-4 py-4 shadow-[0_6px_16px_rgba(17,24,39,0.025)] md:grid-cols-[56px_minmax(0,1fr)_112px]"
-                  >
-                    <span className="inline-flex h-14 w-14 items-center justify-center rounded-[12px] bg-[#fff3cf] text-[#8a6500] [&_svg]:h-6 [&_svg]:w-6">
-                      <ProductIcon />
-                    </span>
-                    <div className="min-w-0">
-                      <h3 className="truncate text-[16px] font-bold text-[#171717]">{section.title}</h3>
-                      <p className="mt-1 line-clamp-3 whitespace-pre-wrap text-[13px] leading-6 text-[#596273]">
-                        {section.body}
-                      </p>
-                      <div className="mt-3 flex flex-wrap gap-2">
-                        <span className="rounded-full bg-[#edf2ff] px-2.5 py-0.5 text-[11px] font-bold text-[#5767c8]">
-                          admin登録
-                        </span>
-                        <span className="rounded-full bg-[#fff3cf] px-2.5 py-0.5 text-[11px] font-bold text-[#a97d00]">
-                          商材情報
-                        </span>
-                      </div>
-                    </div>
-                    <div className="flex items-start justify-end">
-                      <span className="text-[12px] text-[#596273]">標準</span>
-                    </div>
-                  </article>
-                ))}
+                {visibleProductSections.length > 0 && product ? (
+                  <ProductInfoCard
+                    product={product}
+                    sections={productSections}
+                    previewSections={visibleProductSections}
+                    activeTab={activeTab}
+                    onOpen={() => setProductInfoOpen(true)}
+                  />
+                ) : null}
                 {visibleItems.map((item) => (
                   <Link
                     key={item.id}
@@ -313,6 +296,14 @@ export default function SalesKnowledgeProductPage() {
           userId={userId}
           onClose={() => setProductDialogOpen(false)}
           onError={setError}
+        />
+      ) : null}
+
+      {productInfoOpen && product ? (
+        <ProductInfoDialog
+          product={product}
+          sections={productSections}
+          onClose={() => setProductInfoOpen(false)}
         />
       ) : null}
     </main>
@@ -480,6 +471,116 @@ function ProductLogo({ product }: { product: KnowledgeProduct | null }) {
     <span className="inline-flex h-12 w-12 items-center justify-center rounded-[15px] bg-[#fff0b8] text-[#8a6500]">
       <ProductIcon />
     </span>
+  );
+}
+
+function ProductInfoCard({
+  product,
+  sections,
+  previewSections,
+  activeTab,
+  onOpen,
+}: {
+  product: KnowledgeProduct;
+  sections: ProductSection[];
+  previewSections: ProductSection[];
+  activeTab: string;
+  onOpen: () => void;
+}) {
+  const preview =
+    activeTab === "all"
+      ? sections.slice(0, 4).map((section) => `${section.title}: ${section.body}`).join("\n")
+      : previewSections[0]?.body ?? "";
+
+  return (
+    <button
+      type="button"
+      onClick={onOpen}
+      className="grid w-full gap-4 rounded-[14px] border border-[#e5e9f0] bg-white px-4 py-4 text-left shadow-[0_6px_16px_rgba(17,24,39,0.025)] transition hover:border-[#f0c655] hover:bg-[#fffdf7] md:grid-cols-[56px_minmax(0,1fr)_112px]"
+    >
+      <span className="inline-flex h-14 w-14 items-center justify-center rounded-[12px] bg-[#fff3cf] text-[#8a6500] [&_svg]:h-6 [&_svg]:w-6">
+        <ProductIcon />
+      </span>
+      <div className="min-w-0">
+        <h3 className="truncate text-[16px] font-bold text-[#171717]">
+          {activeTab === "all" ? `${product.name}の商材情報` : `${activeTab} / 商材情報`}
+        </h3>
+        <p className="mt-1 line-clamp-3 whitespace-pre-wrap text-[13px] leading-6 text-[#596273]">
+          {preview || "商材情報を確認できます。"}
+        </p>
+        <div className="mt-3 flex flex-wrap gap-2">
+          <span className="rounded-full bg-[#edf2ff] px-2.5 py-0.5 text-[11px] font-bold text-[#5767c8]">
+            admin登録
+          </span>
+          <span className="rounded-full bg-[#fff3cf] px-2.5 py-0.5 text-[11px] font-bold text-[#a97d00]">
+            商材情報
+          </span>
+          <span className="rounded-full bg-[#f1f2f5] px-2.5 py-0.5 text-[11px] font-bold text-[#596273]">
+            {sections.length}項目
+          </span>
+        </div>
+      </div>
+      <div className="flex items-start justify-end">
+        <span className="rounded-full border border-[#e4e8ef] bg-white px-3 py-1 text-[12px] font-bold text-[#596273]">
+          詳細
+        </span>
+      </div>
+    </button>
+  );
+}
+
+function ProductInfoDialog({
+  product,
+  sections,
+  onClose,
+}: {
+  product: KnowledgeProduct;
+  sections: ProductSection[];
+  onClose: () => void;
+}) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#171717]/24 px-4 py-6">
+      <section className="max-h-[92vh] w-full max-w-[760px] overflow-y-auto rounded-[24px] border border-[#eceef4] bg-white p-6 shadow-[0_24px_70px_rgba(17,24,39,0.18)]">
+        <div className="flex items-start justify-between gap-4">
+          <div className="min-w-0">
+            <ProductLogo product={product} />
+            <h2 className="mt-4 truncate text-[24px] font-bold tracking-[-0.03em] text-[#171717]">
+              {product.name}の商材情報
+            </h2>
+            <p className="mt-2 text-[13px] leading-6 text-[#7a808c]">
+              adminで登録された商材情報をまとめて確認できます。
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="text-[24px] leading-none text-[#9aa1ac] transition hover:text-[#171717]"
+            aria-label="閉じる"
+          >
+            ×
+          </button>
+        </div>
+
+        <div className="mt-6 space-y-4">
+          {sections.map((section) => (
+            <section key={`product-info-${section.title}`} className="rounded-[16px] border border-[#eef1f5] bg-[#fcfcfd] px-4 py-4">
+              <h3 className="text-[13px] font-bold text-[#8a6500]">{section.title}</h3>
+              <p className="mt-2 whitespace-pre-wrap text-[14px] leading-7 text-[#343b48]">{section.body}</p>
+            </section>
+          ))}
+        </div>
+
+        <div className="mt-6 flex justify-end">
+          <button
+            type="button"
+            onClick={onClose}
+            className="inline-flex h-11 items-center justify-center rounded-[14px] border border-[#e4e8ef] bg-white px-5 text-[14px] font-bold text-[#596273]"
+          >
+            閉じる
+          </button>
+        </div>
+      </section>
+    </div>
   );
 }
 

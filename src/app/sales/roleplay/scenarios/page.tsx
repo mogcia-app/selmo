@@ -2,6 +2,7 @@
 
 import { FirebaseError } from "firebase/app";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { FormEvent, useEffect, useMemo, useState } from "react";
 
 import { useAuth } from "@/features/auth/auth-provider";
@@ -18,6 +19,8 @@ import {
 } from "@/lib/firebase/roleplay";
 
 export default function SalesRoleplayScenariosPage() {
+  const searchParams = useSearchParams();
+  const roleplayType = readRoleplayType(searchParams.get("category"));
   const { profile } = useAuth();
   const userId = profile?.uid;
   const [scenarios, setScenarios] = useState<RoleplayScenario[]>([]);
@@ -46,6 +49,12 @@ export default function SalesRoleplayScenariosPage() {
     () => visibleScenarios.find((scenario) => scenario.id === activeScenarioId) ?? visibleScenarios[0] ?? null,
     [activeScenarioId, visibleScenarios],
   );
+
+  useEffect(() => {
+    if (searchParams.get("openCreate") === "1") {
+      setDialogOpen(true);
+    }
+  }, [searchParams]);
 
   useEffect(() => {
     if (!profile?.companyId) return;
@@ -82,7 +91,7 @@ export default function SalesRoleplayScenariosPage() {
   return (
     <main className="overflow-x-hidden bg-transparent px-5 pb-3 pt-4 md:px-8 md:pb-4 md:pt-5">
       <div className="mx-auto max-w-[1380px]">
-        <RoleplayHeader activeStep="scenario" />
+        <RoleplayHeader activeStep="scenario" roleplayType={roleplayType} />
 
         {error ? (
           <div className="mt-4 rounded-[16px] border border-[#f4d4d4] bg-[#fff8f8] px-4 py-3 text-[13px] font-medium text-[#b4232a]">
@@ -123,7 +132,7 @@ export default function SalesRoleplayScenariosPage() {
                 </div>
                 <div className="mt-3 grid gap-3 md:grid-cols-2">
                   {activeAssignments.slice(0, 4).map((assignment) => (
-                    <AssignmentCard key={assignment.id} assignment={assignment} />
+                    <AssignmentCard key={assignment.id} assignment={assignment} roleplayType={roleplayType} />
                   ))}
                 </div>
               </section>
@@ -135,7 +144,7 @@ export default function SalesRoleplayScenariosPage() {
                 <h3 className="mt-1 text-[18px] font-black text-[#171717]">商談分析からの推奨ロープレ</h3>
                 <div className="mt-3 grid gap-3 md:grid-cols-2">
                   {recommendedScenarios.map(({ scenario, reason }) => (
-                    <RecommendationCard key={scenario.id} scenario={scenario} reason={reason} />
+                    <RecommendationCard key={scenario.id} scenario={scenario} reason={reason} roleplayType={roleplayType} />
                   ))}
                 </div>
               </section>
@@ -202,7 +211,7 @@ export default function SalesRoleplayScenariosPage() {
                   シナリオを編集
                 </button>
                 <Link
-                  href={`/sales/roleplay?scenarioId=${encodeURIComponent(activeScenario.id)}`}
+                  href={`/sales/roleplay?category=${roleplayType}&scenarioId=${encodeURIComponent(activeScenario.id)}`}
                   className="inline-flex h-12 w-full items-center justify-center rounded-[14px] bg-[#ffd12f] text-[14px] font-black text-[#171717]"
                 >
                   このシナリオで開始
@@ -266,20 +275,34 @@ function ScenarioCreateDialog({
   onCreated: () => void;
   onError: (message: string | null) => void;
 }) {
-  const [title, setTitle] = useState(scenario?.title ?? "");
-  const [description, setDescription] = useState(scenario?.description ?? "");
+  const searchParams = useSearchParams();
+  const prefillProductName = searchParams.get("prefillProductName") ?? "";
+  const prefillCustomerType = searchParams.get("prefillCustomerType") === "existing" ? "既存" : searchParams.get("prefillCustomerType") === "new" ? "新規" : "";
+  const prefillTargetSegment = searchParams.get("prefillTargetSegment") ?? "";
+  const prefillCustomerName = searchParams.get("prefillCustomerName") ?? "";
+  const prefillPurpose = searchParams.get("prefillPurpose") ?? "";
+  const prefillIssues = searchParams.get("prefillIssues") ?? "";
+  const prefillMemo = searchParams.get("prefillMemo") ?? "";
+  const [title, setTitle] = useState(scenario?.title ?? (prefillProductName ? `${prefillProductName} 事前ロープレ` : ""));
+  const [description, setDescription] = useState(scenario?.description ?? (prefillPurpose ? `${prefillPurpose}に向けた事前ロープレ` : ""));
   const [productId, setProductId] = useState(scenario?.productId ?? "");
-  const [scenarioCategory, setScenarioCategory] = useState<"新規" | "既存" | "">(scenario?.scenarioCategory ?? "");
-  const [targetSegment, setTargetSegment] = useState(scenario?.targetSegment ?? "");
+  const [scenarioCategory, setScenarioCategory] = useState<"新規" | "既存" | "">(scenario?.scenarioCategory ?? prefillCustomerType);
+  const [targetSegment, setTargetSegment] = useState(scenario?.targetSegment ?? prefillTargetSegment);
   const [customerRole, setCustomerRole] = useState(scenario?.customerRole ?? "");
-  const [customerProfile, setCustomerProfile] = useState(scenario?.customerProfile ?? "");
-  const [goal, setGoal] = useState(scenario?.goal ?? "");
-  const [objections, setObjections] = useState((scenario?.objections ?? []).join("\n"));
+  const [customerProfile, setCustomerProfile] = useState(scenario?.customerProfile ?? buildPrefillCustomerProfile({ prefillCustomerName, prefillPurpose, prefillIssues, prefillMemo }));
+  const [goal, setGoal] = useState(scenario?.goal ?? (prefillPurpose ? `${prefillPurpose}の予定に向けて、顧客課題を確認し次回アクションまで進める。` : ""));
+  const [objections, setObjections] = useState((scenario?.objections ?? (prefillIssues ? splitLines(prefillIssues) : [])).join("\n"));
   const [criteria, setCriteria] = useState((scenario?.evaluationCriteria ?? []).join("\n"));
-  const [difficulty, setDifficulty] = useState<RoleplayDifficulty>(scenario?.difficulty ?? "normal");
+  const [difficulty, setDifficulty] = useState<RoleplayDifficulty>(scenario?.difficulty ?? "hard");
   const [isSaving, setIsSaving] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
   const selectedProduct = products.find((product) => product.id === productId);
+
+  useEffect(() => {
+    if (scenario || productId || !prefillProductName) return;
+    const product = products.find((item) => item.name === prefillProductName);
+    if (product) setProductId(product.id);
+  }, [prefillProductName, productId, products, scenario]);
 
   const handleGenerate = async () => {
     if (!selectedProduct || !scenarioCategory) {
@@ -450,14 +473,14 @@ function Field({ label, required = false, className = "", children }: { label: s
   );
 }
 
-function RoleplayHeader({ activeStep }: { activeStep: "scenario" | "practice" | "results" }) {
+function RoleplayHeader({ activeStep, roleplayType }: { activeStep: "scenario" | "practice" | "results"; roleplayType: RoleplayType }) {
   return (
     <header className="flex flex-wrap items-center justify-between gap-4 rounded-[18px] border border-[#e2e6ee] bg-white px-5 py-4 shadow-[0_8px_24px_rgba(17,24,39,0.04)]">
-      <h1 className="text-[24px] font-black tracking-[-0.03em] text-[#171717]">AIロープレ</h1>
+      <span className="sr-only">ロープレナビゲーション</span>
       <div className="hidden items-center gap-2 lg:flex">
-        <Step number="1" label="シナリオ選択" active={activeStep === "scenario"} href="/sales/roleplay/scenarios" />
-        <Step number="2" label="ロープレ中" active={activeStep === "practice"} href="/sales/roleplay" />
-        <Step number="3" label="分析結果" active={activeStep === "results"} href="/sales/roleplay/results" />
+        <Step number="1" label="シナリオ選択" active={activeStep === "scenario"} href={`/sales/roleplay/scenarios?category=${roleplayType}`} />
+        <Step number="2" label="ロープレ中" active={activeStep === "practice"} href={`/sales/roleplay?category=${roleplayType}`} />
+        <Step number="3" label="分析結果" active={activeStep === "results"} href={`/sales/roleplay/results?category=${roleplayType}`} />
       </div>
     </header>
   );
@@ -488,10 +511,10 @@ function InfoBlock({ label, value }: { label: string; value: string }) {
   );
 }
 
-function AssignmentCard({ assignment }: { assignment: RoleplayAssignment }) {
+function AssignmentCard({ assignment, roleplayType }: { assignment: RoleplayAssignment; roleplayType: RoleplayType }) {
   return (
     <Link
-      href={`/sales/roleplay?scenarioId=${encodeURIComponent(assignment.scenarioId)}`}
+      href={`/sales/roleplay?category=${roleplayType}&scenarioId=${encodeURIComponent(assignment.scenarioId)}`}
       className="block rounded-[16px] border border-[#f4df94] bg-white px-4 py-3 transition hover:border-[#f0c655]"
     >
       <div className="text-[14px] font-black text-[#171717]">{assignment.scenarioTitle}</div>
@@ -503,10 +526,10 @@ function AssignmentCard({ assignment }: { assignment: RoleplayAssignment }) {
   );
 }
 
-function RecommendationCard({ scenario, reason }: { scenario: RoleplayScenario; reason: string }) {
+function RecommendationCard({ scenario, reason, roleplayType }: { scenario: RoleplayScenario; reason: string; roleplayType: RoleplayType }) {
   return (
     <Link
-      href={`/sales/roleplay?scenarioId=${encodeURIComponent(scenario.id)}`}
+      href={`/sales/roleplay?category=${roleplayType}&scenarioId=${encodeURIComponent(scenario.id)}`}
       className="block rounded-[16px] border border-[#e6eaf0] bg-white px-4 py-3 transition hover:border-[#f0c655]"
     >
       <div className="flex items-start justify-between gap-3">
@@ -593,6 +616,20 @@ function splitLines(value: string) {
     .slice(0, 8);
 }
 
+function buildPrefillCustomerProfile(input: {
+  prefillCustomerName: string;
+  prefillPurpose: string;
+  prefillIssues: string;
+  prefillMemo: string;
+}) {
+  return [
+    input.prefillCustomerName ? `顧客名: ${input.prefillCustomerName}` : "",
+    input.prefillPurpose ? `予定目的: ${input.prefillPurpose}` : "",
+    input.prefillIssues ? `想定課題・不安: ${input.prefillIssues}` : "",
+    input.prefillMemo ? `事前準備メモ: ${input.prefillMemo}` : "",
+  ].filter(Boolean).join("\n");
+}
+
 async function generateRoleplayScenario(input: {
   companyId: string;
   product: KnowledgeProduct;
@@ -669,11 +706,16 @@ function buildMeetingInsights(input: {
     .slice(0, 5)
     .flatMap(({ meeting }) => {
       const compliance = meeting.aiSummary?.manualCompliance;
+      const lowEvaluationInsights = buildLowEvaluationInsights(meeting);
       const fillerInsights = buildFillerInsights(meeting);
       return [
         meeting.status === "lost" ? `${meeting.customerName || "過去商談"}は失注/要改善。` : "",
         meeting.aiSummary?.overview ? `要約: ${meeting.aiSummary.overview}` : "",
         ...(meeting.aiSummary?.bullets ?? []).slice(0, 3).map((item) => `分析メモ: ${item}`),
+        ...(meeting.aiSummary?.diagnosis?.status?.label ? [`商談の現在地: ${meeting.aiSummary.diagnosis.status.label}`] : []),
+        ...(meeting.aiSummary?.diagnosis?.temperature?.label ? [`温度感: ${meeting.aiSummary.diagnosis.temperature.label}`] : []),
+        ...(meeting.aiSummary?.diagnosis?.consideration?.label ? [`検討度: ${meeting.aiSummary.diagnosis.consideration.label} ${meeting.aiSummary.diagnosis.consideration.score}点`] : []),
+        ...lowEvaluationInsights,
         ...(compliance?.missingCriteria ?? []).slice(0, 4).map((item) => `不足基準: ${item}`),
         ...(compliance?.improvementPhrases ?? []).slice(0, 3).map((item) => `改善フレーズ: ${item}`),
         ...(compliance?.productNotes ?? []).slice(0, 3).map((item) => `商材観点: ${item}`),
@@ -681,6 +723,17 @@ function buildMeetingInsights(input: {
       ].filter(Boolean);
     })
     .slice(0, 16);
+}
+
+function buildLowEvaluationInsights(meeting: MeetingRecord) {
+  return (meeting.aiSummary?.diagnosis?.salesEvaluation ?? [])
+    .filter((item) => item.score <= 65)
+    .sort((left, right) => left.score - right.score)
+    .slice(0, 4)
+    .map((item) => {
+      const evidence = item.evidence.slice(0, 2).join(" / ");
+      return `弱点項目: ${item.label} ${item.score}点。${item.description}${evidence ? ` 根拠: ${evidence}` : ""}`;
+    });
 }
 
 const fillerPatterns = [
@@ -714,6 +767,12 @@ function buildFillerInsights(meeting: MeetingRecord) {
     .sort((left, right) => right.count - left.count)
     .slice(0, 4)
     .map((item) => `話し癖改善: 「${item.label}」が${item.count}回程度出ています。ロープレでは間を置いて言い換える練習を入れる。`);
+}
+
+type RoleplayType = "meeting" | "teleapo";
+
+function readRoleplayType(value: string | null): RoleplayType {
+  return value === "teleapo" ? "teleapo" : "meeting";
 }
 
 function ScenarioIcon() {

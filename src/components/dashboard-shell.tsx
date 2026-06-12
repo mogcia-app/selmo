@@ -62,31 +62,30 @@ const salesSections: Array<{ label: string; items: NavItem[] }> = [
     items: [
       { href: "/sales/dashboard", label: "ダッシュボード", num: "01" },
       { href: "/sales/calendar", label: "カレンダー", num: "02" },
-      { href: "/sales/roleplay/results", label: "ロープレ分析", num: "03" },
     ],
   },
   {
     label: "02 — 商談",
     items: [
-      { href: "/meetings/upload?category=meeting", label: "アップロード", num: "04" },
-      { href: "/sales/analysis?category=meeting", label: "商談分析", num: "05" },
-      { href: "/meetings?category=meeting", label: "打ち合わせ一覧", num: "06" },
-      { href: "/sales/roleplay/scenarios?category=meeting", label: "ロープレ", num: "07" },
+      { href: "/meetings/upload?category=meeting", label: "アップロード", num: "03" },
+      { href: "/sales/analysis?category=meeting", label: "商談分析", num: "04" },
+      { href: "/meetings?category=meeting", label: "打ち合わせ一覧", num: "05" },
+      { href: "/sales/roleplay/scenarios?category=meeting", label: "ロープレ", num: "06" },
     ],
   },
   {
     label: "03 — テレアポ",
     items: [
-      { href: "/meetings/upload?category=teleapo", label: "アップロード", num: "08" },
-      { href: "/sales/analysis?category=teleapo", label: "テレアポ分析", num: "09" },
-      { href: "/meetings?category=teleapo", label: "架電一覧", num: "10" },
-      { href: "/sales/roleplay/scenarios?category=teleapo", label: "ロープレ", num: "11" },
+      { href: "/meetings/upload?category=teleapo", label: "アップロード", num: "07" },
+      { href: "/sales/analysis?category=teleapo", label: "テレアポ分析", num: "08" },
+      { href: "/meetings?category=teleapo", label: "架電一覧", num: "09" },
+      { href: "/sales/roleplay/scenarios?category=teleapo", label: "ロープレ", num: "10" },
     ],
   },
   {
     label: "04 — Knowledge",
     items: [
-      { href: "/sales/knowledge", label: "ナレッジ", num: "12" },
+      { href: "/sales/knowledge", label: "ナレッジ", num: "11" },
     ],
   },
 ];

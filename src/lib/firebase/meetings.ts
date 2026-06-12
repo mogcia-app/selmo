@@ -4,6 +4,7 @@ import {
   FirestoreError,
   Timestamp,
   collection,
+  deleteDoc,
   doc,
   getDocs,
   getDoc,
@@ -691,6 +692,16 @@ export async function updateMeetingMetadata(
     status: input.status,
     updatedAt: serverTimestamp(),
   });
+}
+
+export async function deleteMeetingRecord(meeting: MeetingRecord) {
+  const { firestore, firebaseStorage } = assertFirebaseClient();
+
+  if (meeting.audioFilePath) {
+    await deleteObject(ref(firebaseStorage, meeting.audioFilePath)).catch(() => undefined);
+  }
+
+  await deleteDoc(doc(firestore, "meetings", meeting.id));
 }
 
 function buildMeetingAudioPath(userId: string, meetingId: string, fileName: string) {
