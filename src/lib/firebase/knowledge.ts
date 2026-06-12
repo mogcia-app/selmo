@@ -72,6 +72,7 @@ export type KnowledgeProduct = {
   faq: string[];
   successTalk: string[];
   ngTalk: string[];
+  customFields: KnowledgeProductCustomField[];
   sourceUrl: string;
   sourceSummary: string;
   analyzedAt: Date | null;
@@ -80,6 +81,12 @@ export type KnowledgeProduct = {
   knowledgeCount: number;
   tabs: string[];
   updatedAt: Date | null;
+};
+
+export type KnowledgeProductCustomField = {
+  id: string;
+  label: string;
+  value: string;
 };
 
 export type KnowledgeItem = {
@@ -155,6 +162,7 @@ export type KnowledgeProductAnalysisInput = {
   faq?: string[];
   successTalk?: string[];
   ngTalk?: string[];
+  customFields?: KnowledgeProductCustomField[];
   sourceUrl?: string;
   sourceSummary?: string;
 };
@@ -384,6 +392,7 @@ export async function createKnowledgeProduct(input: { name: string; logoUrl?: st
     faq: input.faq ?? [],
     successTalk: input.successTalk ?? [],
     ngTalk: input.ngTalk ?? [],
+    customFields: input.customFields ?? [],
     sourceUrl: input.sourceUrl ?? "",
     sourceSummary: input.sourceSummary ?? "",
     analyzedAt: input.sourceSummary ? serverTimestamp() : null,
@@ -416,6 +425,7 @@ export async function updateKnowledgeProduct(input: { id: string; name: string; 
       faq: input.faq ?? [],
       successTalk: input.successTalk ?? [],
       ngTalk: input.ngTalk ?? [],
+      customFields: input.customFields ?? [],
       sourceUrl: input.sourceUrl ?? "",
       sourceSummary: input.sourceSummary ?? "",
       analyzedAt: input.sourceSummary ? serverTimestamp() : null,
@@ -702,6 +712,7 @@ function mapKnowledgeProduct(snapshot: QueryDocumentSnapshot<DocumentData>): Kno
     faq: readStringArray(data.faq),
     successTalk: readStringArray(data.successTalk),
     ngTalk: readStringArray(data.ngTalk),
+    customFields: readProductCustomFields(data.customFields),
     sourceUrl: readString(data.sourceUrl),
     sourceSummary: readString(data.sourceSummary),
     analyzedAt: readDate(data.analyzedAt),
@@ -756,6 +767,24 @@ function readStringArray(value: unknown) {
   return Array.isArray(value)
     ? value.filter((item): item is string => typeof item === "string" && Boolean(item.trim()))
     : [];
+}
+
+function readProductCustomFields(value: unknown): KnowledgeProductCustomField[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((item, index) => {
+      if (!item || typeof item !== "object") return null;
+      const data = item as Record<string, unknown>;
+      const label = readString(data.label).trim();
+      const fieldValue = readString(data.value).trim();
+      if (!label || !fieldValue) return null;
+      return {
+        id: readString(data.id, `custom-${index}`),
+        label,
+        value: fieldValue,
+      };
+    })
+    .filter((item): item is KnowledgeProductCustomField => Boolean(item));
 }
 
 function readNullableString(value: unknown) {

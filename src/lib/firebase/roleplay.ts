@@ -29,6 +29,8 @@ export type RoleplayScenario = {
   description: string;
   productId: string | null;
   productName: string;
+  scenarioCategory: "新規" | "既存" | "";
+  targetSegment: string;
   customerRole: string;
   customerProfile: string;
   goal: string;
@@ -84,6 +86,8 @@ export type CreateRoleplayScenarioInput = {
   description: string;
   productId?: string | null;
   productName?: string;
+  scenarioCategory?: "新規" | "既存" | "";
+  targetSegment?: string;
   customerRole: string;
   customerProfile: string;
   goal: string;
@@ -208,6 +212,8 @@ export async function createRoleplayScenario(input: CreateRoleplayScenarioInput)
     description: input.description,
     productId: input.productId ?? null,
     productName: input.productName ?? "",
+    scenarioCategory: input.scenarioCategory ?? "",
+    targetSegment: input.targetSegment ?? "",
     customerRole: input.customerRole,
     customerProfile: input.customerProfile,
     goal: input.goal,
@@ -216,6 +222,28 @@ export async function createRoleplayScenario(input: CreateRoleplayScenarioInput)
     difficulty: input.difficulty,
     createdBy: input.createdBy,
     createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  });
+}
+
+export async function updateRoleplayScenario(id: string, input: CreateRoleplayScenarioInput) {
+  const { firestore } = assertFirebaseClient();
+
+  await updateDoc(doc(firestore, "roleplayScenarios", id), {
+    companyId: input.companyId ?? null,
+    title: input.title,
+    description: input.description,
+    productId: input.productId ?? null,
+    productName: input.productName ?? "",
+    scenarioCategory: input.scenarioCategory ?? "",
+    targetSegment: input.targetSegment ?? "",
+    customerRole: input.customerRole,
+    customerProfile: input.customerProfile,
+    goal: input.goal,
+    objections: input.objections,
+    evaluationCriteria: input.evaluationCriteria,
+    difficulty: input.difficulty,
+    createdBy: input.createdBy,
     updatedAt: serverTimestamp(),
   });
 }
@@ -307,6 +335,8 @@ function mapRoleplayScenario(snapshot: QueryDocumentSnapshot<DocumentData>): Rol
     description: readString(data.description),
     productId: readNullableString(data.productId),
     productName: readString(data.productName),
+    scenarioCategory: readScenarioCategory(data.scenarioCategory),
+    targetSegment: readString(data.targetSegment),
     customerRole: readString(data.customerRole, "担当者"),
     customerProfile: readString(data.customerProfile),
     goal: readString(data.goal),
@@ -317,6 +347,10 @@ function mapRoleplayScenario(snapshot: QueryDocumentSnapshot<DocumentData>): Rol
     createdAt: readDate(data.createdAt),
     updatedAt: readDate(data.updatedAt),
   };
+}
+
+function readScenarioCategory(value: unknown) {
+  return value === "新規" || value === "既存" ? value : "";
 }
 
 function mapRoleplayResult(snapshot: QueryDocumentSnapshot<DocumentData>): RoleplayResult {

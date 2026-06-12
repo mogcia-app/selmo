@@ -14,6 +14,7 @@ import {
   createKnowledgeProduct,
   updateKnowledgeProduct,
   uploadKnowledgeProductLogo,
+  type KnowledgeProductCustomField,
   type KnowledgeProduct,
 } from "@/lib/firebase/knowledge";
 import { useAuth } from "@/features/auth/auth-provider";
@@ -22,6 +23,7 @@ export default function AdminProductsPage() {
   const { profile } = useAuth();
   const { products, knowledgeItems, roleplayScenarios, error } = useAdminInsights();
   const [editingProduct, setEditingProduct] = useState<KnowledgeProduct | null>(null);
+  const [viewingProduct, setViewingProduct] = useState<KnowledgeProduct | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
 
   return (
@@ -49,7 +51,19 @@ export default function AdminProductsPage() {
                   const linkedKnowledge = knowledgeItems.filter((item) => item.productId === product.id);
                   const linkedScenarios = roleplayScenarios.filter((scenario) => scenario.productId === product.id);
                   return (
-                    <article key={product.id} className="rounded-[18px] border border-[#eef1f5] bg-[#fcfcfd] px-5 py-5">
+                    <article
+                      key={product.id}
+                      role="button"
+                      tabIndex={0}
+                      onClick={() => setViewingProduct(product)}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter" || event.key === " ") {
+                          event.preventDefault();
+                          setViewingProduct(product);
+                        }
+                      }}
+                      className="cursor-pointer rounded-[18px] border border-[#eef1f5] bg-[#fcfcfd] px-5 py-5 transition hover:border-[#e0bd4b] hover:bg-white"
+                    >
                     <div className="flex items-start justify-between gap-4">
                       <div className="flex min-w-0 items-center gap-3">
                         <ProductLogo product={product} />
@@ -58,18 +72,19 @@ export default function AdminProductsPage() {
                           <p className="mt-1 text-[12px] text-[#7a808c]">タブ {product.tabs.length}件</p>
                         </div>
                       </div>
-                      <button type="button" onClick={() => setEditingProduct(product)} className="rounded-[12px] border border-[#e4e8ef] bg-white px-3 py-2 text-[12px] font-bold text-[#343b48]">編集</button>
+                      <button
+                        type="button"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          setEditingProduct(product);
+                        }}
+                        className="rounded-[12px] border border-[#e4e8ef] bg-white px-3 py-2 text-[12px] font-bold text-[#343b48]"
+                      >
+                        編集
+                      </button>
                     </div>
 
-                    <div className="mt-4 grid gap-3 md:grid-cols-2">
-                      <Info label="商品概要" value={formatTextSummary(product.description)} />
-                      <Info label="料金" value={formatTextSummary(product.pricing)} />
-                      <Info label="顧客課題" value={formatListSummary(product.painPoints)} />
-                      <Info label="価値訴求" value={formatTextSummary(product.valueProposition)} />
-                      <Info label="競合" value={formatListSummary(product.competitors)} />
-                      <Info label="よくある反論" value={formatListSummary(product.commonObjections)} />
-                      <Info label="FAQ" value={formatListSummary(product.faq)} />
-                    </div>
+                    <Info label="商品概要" value={formatTextSummary(product.description)} className="mt-4" />
 
                     <div className="mt-4 flex flex-wrap gap-2 text-[12px] font-bold text-[#596273]">
                       <span className="rounded-full bg-white px-3 py-1">ナレッジ {linkedKnowledge.length}件</span>
@@ -91,8 +106,68 @@ export default function AdminProductsPage() {
         {editingProduct && profile?.uid && profile.companyId ? (
           <ProductDialog mode="edit" product={editingProduct} userId={profile.uid} companyId={profile.companyId} onClose={() => setEditingProduct(null)} />
         ) : null}
+        {viewingProduct ? (
+          <ProductDetailDialog
+            product={viewingProduct}
+            onClose={() => setViewingProduct(null)}
+            onEdit={() => {
+              setViewingProduct(null);
+              setEditingProduct(viewingProduct);
+            }}
+          />
+        ) : null}
       </div>
     </PageShell>
+  );
+}
+
+function ProductDetailDialog({
+  product,
+  onClose,
+  onEdit,
+}: {
+  product: KnowledgeProduct;
+  onClose: () => void;
+  onEdit: () => void;
+}) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#171717]/24 px-4 py-6">
+      <div className="max-h-[92vh] w-full max-w-[860px] overflow-y-auto rounded-[24px] border border-[#eceef4] bg-white p-6 shadow-[0_24px_70px_rgba(17,24,39,0.18)]">
+        <div className="flex items-start justify-between gap-4">
+          <div className="flex min-w-0 items-center gap-3">
+            <ProductLogo product={product} />
+            <div className="min-w-0">
+              <h2 className="truncate text-[22px] font-black text-[#171717]">{product.name}</h2>
+              <p className="mt-1 text-[13px] text-[#7a808c]">商材詳細</p>
+            </div>
+          </div>
+          <button type="button" onClick={onClose} className="text-[24px] leading-none text-[#9aa1ac]" aria-label="閉じる">×</button>
+        </div>
+
+        <div className="mt-5 grid gap-3 md:grid-cols-2">
+          <DetailItem label="商品概要" value={product.description} className="md:col-span-2" />
+          <DetailItem label="商品URL" value={product.sourceUrl} />
+          <DetailItem label="ターゲット顧客" value={product.targetCustomer} />
+          <DetailItem label="URL解析メモ" value={product.sourceSummary} className="md:col-span-2" />
+          <DetailItem label="顧客課題" value={formatLines(product.painPoints)} />
+          <DetailItem label="価値訴求" value={product.valueProposition} />
+          <DetailItem label="料金" value={product.pricing} />
+          <DetailItem label="競合" value={formatLines(product.competitors)} />
+          <DetailItem label="よくある反論" value={formatLines(product.commonObjections)} />
+          <DetailItem label="FAQ" value={formatLines(product.faq)} />
+          <DetailItem label="成功トーク" value={formatLines(product.successTalk)} />
+          <DetailItem label="NGトーク" value={formatLines(product.ngTalk)} />
+          {product.customFields.map((field) => (
+            <DetailItem key={field.id} label={field.label} value={field.value} />
+          ))}
+        </div>
+
+        <div className="mt-6 flex justify-end gap-3">
+          <button type="button" onClick={onClose} className="h-11 rounded-[14px] border border-[#e4e8ef] bg-white px-5 text-[14px] font-bold text-[#596273]">閉じる</button>
+          <button type="button" onClick={onEdit} className="h-11 rounded-[14px] border border-[#f0c655] bg-[#ffd84d] px-6 text-[14px] font-black text-[#171717]">編集</button>
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -120,6 +195,7 @@ function ProductDialog({
   const [faq, setFaq] = useState((product?.faq ?? []).join("\n"));
   const [successTalk, setSuccessTalk] = useState((product?.successTalk ?? []).join("\n"));
   const [ngTalk, setNgTalk] = useState((product?.ngTalk ?? []).join("\n"));
+  const [customFields, setCustomFields] = useState<KnowledgeProductCustomField[]>(product?.customFields ?? []);
   const [sourceUrl, setSourceUrl] = useState(product?.sourceUrl ?? "");
   const [sourceSummary, setSourceSummary] = useState(product?.sourceSummary ?? "");
   const [logoFile, setLogoFile] = useState<File | null>(null);
@@ -167,6 +243,11 @@ function ProductDialog({
       setError("ロゴ画像はPNGファイルを選択してください。");
       return;
     }
+    const normalizedCustomFields = normalizeCustomFields(customFields);
+    if (!normalizedCustomFields) {
+      setError("自由項目は項目名と中身を両方入力してください。");
+      return;
+    }
 
     setIsSaving(true);
     setError(null);
@@ -189,6 +270,7 @@ function ProductDialog({
         faq: splitLines(faq),
         successTalk: splitLines(successTalk),
         ngTalk: splitLines(ngTalk),
+        customFields: normalizedCustomFields,
         sourceUrl: sourceUrl.trim(),
         sourceSummary: analyzedSummary,
       };
@@ -295,6 +377,29 @@ function ProductDialog({
         <Field label="NGトーク">
           <textarea value={ngTalk} onChange={(event) => setNgTalk(event.target.value)} className={textareaClassName} placeholder="1行に1つ" />
         </Field>
+        <div className="md:col-span-2">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <div className="text-[13px] font-bold text-[#343b48]">自由項目</div>
+              <p className="mt-1 text-[12px] text-[#7a808c]">項目名と中身を自由に追加できます。</p>
+            </div>
+            <button type="button" onClick={() => setCustomFields((current) => [...current, createEmptyCustomField()])} className="h-10 rounded-[13px] border border-[#e4e8ef] bg-white px-4 text-[13px] font-black text-[#343b48]">項目を追加</button>
+          </div>
+          {customFields.length > 0 ? (
+            <div className="mt-3 space-y-3">
+              {customFields.map((field, index) => (
+                <div key={field.id} className="rounded-[14px] border border-[#eef1f5] bg-[#fcfcfd] p-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="text-[12px] font-bold text-[#8a909b]">自由項目 {index + 1}</div>
+                    <button type="button" onClick={() => setCustomFields((current) => current.filter((item) => item.id !== field.id))} className="text-[12px] font-bold text-[#b4232a]">削除</button>
+                  </div>
+                  <input value={field.label} onChange={(event) => updateCustomField(setCustomFields, field.id, "label", event.target.value)} className={inputClassName} placeholder="項目名 例：導入フロー" />
+                  <textarea value={field.value} onChange={(event) => updateCustomField(setCustomFields, field.id, "value", event.target.value)} className={textareaClassName} placeholder="中身" />
+                </div>
+              ))}
+            </div>
+          ) : null}
+        </div>
         </div>
         <div className="mt-6 flex justify-end gap-3">
           <button type="button" onClick={onClose} className="h-11 rounded-[14px] border border-[#e4e8ef] bg-white px-5 text-[14px] font-bold text-[#596273]">キャンセル</button>
@@ -312,11 +417,20 @@ function ProductLogo({ product }: { product: KnowledgeProduct }) {
   return <span className="inline-flex h-12 w-12 shrink-0 items-center justify-center rounded-[14px] bg-[#fff3cf] text-[18px] font-black text-[#8a6500]">{product.name.slice(0, 1)}</span>;
 }
 
-function Info({ label, value }: { label: string; value: string }) {
+function Info({ label, value, className = "" }: { label: string; value: string; className?: string }) {
   return (
-    <div className="rounded-[14px] border border-[#eef1f5] bg-white px-4 py-3">
+    <div className={`rounded-[14px] border border-[#eef1f5] bg-white px-4 py-3 ${className}`}>
       <div className="text-[12px] font-bold text-[#8a909b]">{label}</div>
       <div className="mt-1 text-[13px] font-bold text-[#343b48]">{value}</div>
+    </div>
+  );
+}
+
+function DetailItem({ label, value, className = "" }: { label: string; value: string; className?: string }) {
+  return (
+    <div className={`rounded-[14px] border border-[#eef1f5] bg-[#fcfcfd] px-4 py-3 ${className}`}>
+      <div className="text-[12px] font-bold text-[#8a909b]">{label}</div>
+      <div className="mt-2 whitespace-pre-wrap text-[14px] font-bold leading-7 text-[#343b48]">{value.trim() || "未登録"}</div>
     </div>
   );
 }
@@ -339,9 +453,8 @@ function formatTextSummary(value: string) {
   return normalized.length > 80 ? `${normalized.slice(0, 80)}...` : normalized;
 }
 
-function formatListSummary(items: string[]) {
-  if (items.length === 0) return "未登録";
-  return items.slice(0, 2).join(" / ");
+function formatLines(items: string[]) {
+  return items.join("\n");
 }
 
 function splitLines(value: string) {
@@ -350,6 +463,39 @@ function splitLines(value: string) {
 
 function joinLines(value: string[] | undefined) {
   return value?.filter(Boolean).join("\n") ?? "";
+}
+
+function createEmptyCustomField(): KnowledgeProductCustomField {
+  return {
+    id: `custom-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    label: "",
+    value: "",
+  };
+}
+
+function updateCustomField(
+  setCustomFields: React.Dispatch<React.SetStateAction<KnowledgeProductCustomField[]>>,
+  id: string,
+  key: "label" | "value",
+  value: string,
+) {
+  setCustomFields((current) => current.map((field) => (field.id === id ? { ...field, [key]: value } : field)));
+}
+
+function normalizeCustomFields(fields: KnowledgeProductCustomField[]) {
+  const normalized = fields
+    .map((field) => ({
+      id: field.id,
+      label: field.label.trim(),
+      value: field.value.trim(),
+    }))
+    .filter((field) => field.label || field.value);
+
+  if (normalized.some((field) => !field.label || !field.value)) {
+    return null;
+  }
+
+  return normalized;
 }
 
 async function analyzeProductUrl(url: string) {

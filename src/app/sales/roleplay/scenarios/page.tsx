@@ -11,6 +11,7 @@ import {
   createRoleplayScenario,
   subscribeToRoleplayAssignments,
   subscribeToRoleplayScenarios,
+  updateRoleplayScenario,
   type RoleplayAssignment,
   type RoleplayDifficulty,
   type RoleplayScenario,
@@ -19,12 +20,12 @@ import {
 export default function SalesRoleplayScenariosPage() {
   const { profile } = useAuth();
   const userId = profile?.uid;
-  const canManage = profile?.role === "admin";
   const [scenarios, setScenarios] = useState<RoleplayScenario[]>([]);
   const [assignments, setAssignments] = useState<RoleplayAssignment[]>([]);
   const [meetings, setMeetings] = useState<MeetingRecord[]>([]);
   const [products, setProducts] = useState<KnowledgeProduct[]>([]);
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [editingScenario, setEditingScenario] = useState<RoleplayScenario | null>(null);
   const [activeScenarioId, setActiveScenarioId] = useState("");
   const [error, setError] = useState<string | null>(null);
   const activeScenario = useMemo(
@@ -44,7 +45,7 @@ export default function SalesRoleplayScenariosPage() {
       ),
       subscribeToMeetings(
         { role: profile.role, userId: profile.uid, companyId: profile.companyId },
-        (nextMeetings) => setMeetings(nextMeetings.filter((meeting) => meeting.salesDomain === "teleapo")),
+        setMeetings,
         handleError,
       ),
       subscribeToKnowledgeProducts(profile.companyId, setProducts, handleError),
@@ -85,16 +86,14 @@ export default function SalesRoleplayScenariosPage() {
                   商品・顧客条件・反論パターンを選んで、AI顧客との練習を開始できます。
                 </p>
               </div>
-              {canManage ? (
-                <button
-                  type="button"
-                  onClick={() => setDialogOpen(true)}
-                  className="inline-flex h-11 items-center gap-2 rounded-[14px] border border-[#f0c655] bg-[#ffd84d] px-5 text-[13px] font-black text-[#171717]"
-                >
-                  <PlusIcon />
-                  シナリオ作成
-                </button>
-              ) : null}
+              <button
+                type="button"
+                onClick={() => setDialogOpen(true)}
+                className="inline-flex h-11 items-center gap-2 rounded-[14px] border border-[#f0c655] bg-[#ffd84d] px-5 text-[13px] font-black text-[#171717]"
+              >
+                <PlusIcon />
+                シナリオ作成
+              </button>
             </div>
 
             {activeAssignments.length > 0 ? (
@@ -150,6 +149,8 @@ export default function SalesRoleplayScenariosPage() {
                     </div>
                     <div className="mt-4 flex flex-wrap gap-2">
                       <Pill>{scenario.productName || "商品未設定"}</Pill>
+                      <Pill>{scenario.scenarioCategory || "分類未設定"}</Pill>
+                      <Pill>{scenario.targetSegment || "ターゲット未設定"}</Pill>
                       <Pill>{scenario.customerRole}</Pill>
                     </div>
                   </button>
@@ -179,6 +180,13 @@ export default function SalesRoleplayScenariosPage() {
                 <InfoBlock label="ゴール" value={activeScenario.goal} />
                 <InfoBlock label="想定反論" value={activeScenario.objections.join(" / ") || "未設定"} />
                 <InfoBlock label="採点基準" value={activeScenario.evaluationCriteria.join(" / ") || "未設定"} />
+                <button
+                  type="button"
+                  onClick={() => setEditingScenario(activeScenario)}
+                  className="inline-flex h-11 w-full items-center justify-center rounded-[14px] border border-[#e4e8ef] bg-white text-[14px] font-black text-[#343b48]"
+                >
+                  シナリオを編集
+                </button>
                 <Link
                   href={`/sales/roleplay?scenarioId=${encodeURIComponent(activeScenario.id)}`}
                   className="inline-flex h-12 w-full items-center justify-center rounded-[14px] bg-[#ffd12f] text-[14px] font-black text-[#171717]"
@@ -201,10 +209,23 @@ export default function SalesRoleplayScenariosPage() {
       {dialogOpen && userId && profile?.companyId ? (
         <ScenarioCreateDialog
           products={products}
+          meetings={meetings}
           userId={userId}
           companyId={profile.companyId}
           onClose={() => setDialogOpen(false)}
           onCreated={() => setDialogOpen(false)}
+          onError={setError}
+        />
+      ) : null}
+      {editingScenario && userId && profile?.companyId ? (
+        <ScenarioCreateDialog
+          products={products}
+          meetings={meetings}
+          userId={userId}
+          companyId={profile.companyId}
+          scenario={editingScenario}
+          onClose={() => setEditingScenario(null)}
+          onCreated={() => setEditingScenario(null)}
           onError={setError}
         />
       ) : null}
@@ -214,47 +235,91 @@ export default function SalesRoleplayScenariosPage() {
 
 function ScenarioCreateDialog({
   products,
+  meetings,
   userId,
   companyId,
+  scenario,
   onClose,
   onCreated,
   onError,
 }: {
   products: KnowledgeProduct[];
+  meetings: MeetingRecord[];
   userId: string;
   companyId: string;
+  scenario?: RoleplayScenario;
   onClose: () => void;
   onCreated: () => void;
   onError: (message: string | null) => void;
 }) {
-  const [title, setTitle] = useState("");
-  const [description, setDescription] = useState("");
-  const [productId, setProductId] = useState("");
-  const [customerRole, setCustomerRole] = useState("");
-  const [customerProfile, setCustomerProfile] = useState("");
-  const [goal, setGoal] = useState("");
-  const [objections, setObjections] = useState("");
-  const [criteria, setCriteria] = useState("");
-  const [difficulty, setDifficulty] = useState<RoleplayDifficulty>("normal");
+  const [title, setTitle] = useState(scenario?.title ?? "");
+  const [description, setDescription] = useState(scenario?.description ?? "");
+  const [productId, setProductId] = useState(scenario?.productId ?? "");
+  const [scenarioCategory, setScenarioCategory] = useState<"新規" | "既存" | "">(scenario?.scenarioCategory ?? "");
+  const [targetSegment, setTargetSegment] = useState(scenario?.targetSegment ?? "");
+  const [customerRole, setCustomerRole] = useState(scenario?.customerRole ?? "");
+  const [customerProfile, setCustomerProfile] = useState(scenario?.customerProfile ?? "");
+  const [goal, setGoal] = useState(scenario?.goal ?? "");
+  const [objections, setObjections] = useState((scenario?.objections ?? []).join("\n"));
+  const [criteria, setCriteria] = useState((scenario?.evaluationCriteria ?? []).join("\n"));
+  const [difficulty, setDifficulty] = useState<RoleplayDifficulty>(scenario?.difficulty ?? "normal");
   const [isSaving, setIsSaving] = useState(false);
+  const [isGenerating, setIsGenerating] = useState(false);
   const selectedProduct = products.find((product) => product.id === productId);
+
+  const handleGenerate = async () => {
+    if (!selectedProduct || !scenarioCategory || !targetSegment.trim()) {
+      onError("AI生成には商材、カテゴリー、ターゲット層を入力してください。");
+      return;
+    }
+
+    setIsGenerating(true);
+    onError(null);
+    try {
+      const generated = await generateRoleplayScenario({
+        product: selectedProduct,
+        category: scenarioCategory,
+        targetSegment,
+        meetingInsights: buildMeetingInsights({
+          meetings,
+          productName: selectedProduct.name,
+          category: scenarioCategory,
+          targetSegment,
+        }),
+      });
+      setTitle(generated.title);
+      setDescription(generated.description);
+      setCustomerRole(generated.customerRole);
+      setCustomerProfile(generated.customerProfile);
+      setGoal(generated.goal);
+      setObjections(generated.objections.join("\n"));
+      setCriteria(generated.evaluationCriteria.join("\n"));
+      setDifficulty(generated.difficulty);
+    } catch (nextError) {
+      onError(nextError instanceof Error ? nextError.message : "AI生成に失敗しました。");
+    } finally {
+      setIsGenerating(false);
+    }
+  };
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (!title.trim() || !customerRole.trim() || !goal.trim()) {
-      onError("タイトル、顧客役職、練習ゴールを入力してください。");
+    if (!selectedProduct || !scenarioCategory || !targetSegment.trim() || !title.trim() || !customerRole.trim() || !goal.trim()) {
+      onError("商材、カテゴリー、ターゲット層、タイトル、顧客役職、練習ゴールを入力してください。");
       return;
     }
 
     setIsSaving(true);
     onError(null);
     try {
-      await createRoleplayScenario({
+      const payload = {
         companyId,
         title: title.trim(),
         description: description.trim(),
-        productId: productId || null,
-        productName: selectedProduct?.name ?? "",
+        productId: selectedProduct.id,
+        productName: selectedProduct.name,
+        scenarioCategory,
+        targetSegment: targetSegment.trim(),
         customerRole: customerRole.trim(),
         customerProfile: customerProfile.trim(),
         goal: goal.trim(),
@@ -262,7 +327,12 @@ function ScenarioCreateDialog({
         evaluationCriteria: splitLines(criteria),
         difficulty,
         createdBy: userId,
-      });
+      };
+      if (scenario) {
+        await updateRoleplayScenario(scenario.id, payload);
+      } else {
+        await createRoleplayScenario(payload);
+      }
       onCreated();
     } catch (nextError) {
       onError(nextError instanceof Error ? nextError.message : "シナリオの作成に失敗しました。");
@@ -276,8 +346,8 @@ function ScenarioCreateDialog({
       <form onSubmit={handleSubmit} className="max-h-[92vh] w-full max-w-[760px] overflow-y-auto rounded-[24px] border border-[#eceef4] bg-white p-6 shadow-[0_24px_70px_rgba(17,24,39,0.18)]">
         <div className="flex items-start justify-between gap-4">
           <div>
-            <h2 className="text-[24px] font-black tracking-[-0.03em] text-[#171717]">シナリオ作成</h2>
-            <p className="mt-1 text-[13px] leading-6 text-[#7a808c]">商品・顧客条件・反論・採点基準を登録します。</p>
+            <h2 className="text-[24px] font-black tracking-[-0.03em] text-[#171717]">{scenario ? "シナリオ編集" : "シナリオ作成"}</h2>
+            <p className="mt-1 text-[13px] leading-6 text-[#7a808c]">商材・カテゴリー・ターゲット層からAI生成し、内容を編集して保存できます。</p>
           </div>
           <button type="button" onClick={onClose} className="text-[24px] leading-none text-[#9aa1ac]" aria-label="閉じる">
             ×
@@ -285,16 +355,31 @@ function ScenarioCreateDialog({
         </div>
 
         <div className="mt-5 grid gap-4 md:grid-cols-2">
-          <Field label="タイトル" required>
-            <input value={title} onChange={(event) => setTitle(event.target.value)} className="h-12 w-full rounded-[14px] border border-[#e4e8ef] bg-white px-4 text-[14px] text-[#171717] outline-none transition focus:border-[#e0bd4b]" placeholder="例：料金が高いと言われた時" />
-          </Field>
-          <Field label="商品">
+          <Field label="商材" required>
             <select value={productId} onChange={(event) => setProductId(event.target.value)} className="h-12 w-full rounded-[14px] border border-[#e4e8ef] bg-white px-4 text-[14px] text-[#171717] outline-none transition focus:border-[#e0bd4b]">
-              <option value="">未設定</option>
+              <option value="">商材を選択</option>
               {products.map((product) => (
                 <option key={product.id} value={product.id}>{product.name}</option>
               ))}
             </select>
+          </Field>
+          <Field label="カテゴリー" required>
+            <select value={scenarioCategory} onChange={(event) => setScenarioCategory(event.target.value as "新規" | "既存" | "")} className="h-12 w-full rounded-[14px] border border-[#e4e8ef] bg-white px-4 text-[14px] text-[#171717] outline-none transition focus:border-[#e0bd4b]">
+              <option value="">選択してください</option>
+              <option value="新規">新規</option>
+              <option value="既存">既存</option>
+            </select>
+          </Field>
+          <Field label="ターゲット層" required>
+            <input value={targetSegment} onChange={(event) => setTargetSegment(event.target.value)} className="h-12 w-full rounded-[14px] border border-[#e4e8ef] bg-white px-4 text-[14px] text-[#171717] outline-none transition focus:border-[#e0bd4b]" placeholder="例：不動産" />
+          </Field>
+          <div className="flex items-end">
+            <button type="button" onClick={() => void handleGenerate()} disabled={isGenerating} className="h-12 w-full rounded-[14px] border border-[#171717] bg-[#171717] px-4 text-[13px] font-black text-white disabled:opacity-60">
+              {isGenerating ? "生成中" : "AIでシナリオ生成"}
+            </button>
+          </div>
+          <Field label="タイトル" required className="md:col-span-2">
+            <input value={title} onChange={(event) => setTitle(event.target.value)} className="h-12 w-full rounded-[14px] border border-[#e4e8ef] bg-white px-4 text-[14px] text-[#171717] outline-none transition focus:border-[#e0bd4b]" placeholder="例：料金が高いと言われた時" />
           </Field>
           <Field label="顧客役職" required>
             <input value={customerRole} onChange={(event) => setCustomerRole(event.target.value)} className="h-12 w-full rounded-[14px] border border-[#e4e8ef] bg-white px-4 text-[14px] text-[#171717] outline-none transition focus:border-[#e0bd4b]" placeholder="例：営業部長" />
@@ -328,7 +413,7 @@ function ScenarioCreateDialog({
             キャンセル
           </button>
           <button type="submit" disabled={isSaving} className="inline-flex h-11 items-center justify-center rounded-[14px] border border-[#f0c655] bg-[#ffd84d] px-6 text-[14px] font-black text-[#171717] disabled:opacity-60">
-            {isSaving ? "保存中" : "作成する"}
+            {isSaving ? "保存中" : scenario ? "更新する" : "作成する"}
           </button>
         </div>
       </form>
@@ -489,6 +574,125 @@ function splitLines(value: string) {
     .map((item) => item.trim())
     .filter(Boolean)
     .slice(0, 8);
+}
+
+async function generateRoleplayScenario(input: {
+  product: KnowledgeProduct;
+  category: "新規" | "既存";
+  targetSegment: string;
+  meetingInsights?: string[];
+}) {
+  const response = await fetch("/api/roleplay/generate-scenario", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      product: input.product,
+      category: input.category,
+      targetSegment: input.targetSegment,
+      meetingInsights: input.meetingInsights ?? [],
+    }),
+  });
+  const payload = (await response.json()) as {
+    scenario?: {
+      title?: string;
+      description?: string;
+      customerRole?: string;
+      customerProfile?: string;
+      goal?: string;
+      objections?: string[];
+      evaluationCriteria?: string[];
+      difficulty?: RoleplayDifficulty;
+    };
+    error?: string;
+  };
+  if (!response.ok || !payload.scenario) {
+    throw new Error(payload.error ?? "AI生成に失敗しました。");
+  }
+  return {
+    title: payload.scenario.title ?? "",
+    description: payload.scenario.description ?? "",
+    customerRole: payload.scenario.customerRole ?? "",
+    customerProfile: payload.scenario.customerProfile ?? "",
+    goal: payload.scenario.goal ?? "",
+    objections: payload.scenario.objections ?? [],
+    evaluationCriteria: payload.scenario.evaluationCriteria ?? [],
+    difficulty: payload.scenario.difficulty ?? "normal",
+  };
+}
+
+function buildMeetingInsights(input: {
+  meetings: MeetingRecord[];
+  productName: string;
+  category: "新規" | "既存";
+  targetSegment: string;
+}) {
+  const normalizedProduct = input.productName.trim().toLowerCase();
+  const normalizedTarget = input.targetSegment.trim().toLowerCase();
+  const category = input.category === "新規" ? "new" : "existing";
+
+  return input.meetings
+    .filter((meeting) => meeting.aiSummary || meeting.status === "lost")
+    .map((meeting) => {
+      let score = 0;
+      const productType = meeting.productType.trim().toLowerCase();
+      const customerName = meeting.customerName.trim().toLowerCase();
+      const memo = meeting.memo.trim().toLowerCase();
+      if (normalizedProduct && productType && (productType.includes(normalizedProduct) || normalizedProduct.includes(productType))) score += 4;
+      if (meeting.customerType === category) score += 3;
+      if (normalizedTarget && [customerName, memo, meeting.location.toLowerCase()].some((value) => value.includes(normalizedTarget))) score += 2;
+      if (meeting.status === "lost") score += 2;
+      if (meeting.aiSummary?.manualCompliance?.missingCriteria.length) score += 2;
+      return { meeting, score };
+    })
+    .sort((left, right) => right.score - left.score || (right.meeting.recordedAt?.getTime() ?? 0) - (left.meeting.recordedAt?.getTime() ?? 0))
+    .slice(0, 5)
+    .flatMap(({ meeting }) => {
+      const compliance = meeting.aiSummary?.manualCompliance;
+      const fillerInsights = buildFillerInsights(meeting);
+      return [
+        meeting.status === "lost" ? `${meeting.customerName || "過去商談"}は失注/要改善。` : "",
+        meeting.aiSummary?.overview ? `要約: ${meeting.aiSummary.overview}` : "",
+        ...(meeting.aiSummary?.bullets ?? []).slice(0, 3).map((item) => `分析メモ: ${item}`),
+        ...(compliance?.missingCriteria ?? []).slice(0, 4).map((item) => `不足基準: ${item}`),
+        ...(compliance?.improvementPhrases ?? []).slice(0, 3).map((item) => `改善フレーズ: ${item}`),
+        ...(compliance?.productNotes ?? []).slice(0, 3).map((item) => `商品観点: ${item}`),
+        ...fillerInsights,
+      ].filter(Boolean);
+    })
+    .slice(0, 16);
+}
+
+const fillerPatterns = [
+  { label: "えー", pattern: /えー+/g },
+  { label: "えっと", pattern: /えっと/g },
+  { label: "あの", pattern: /あの[ー、,\s]/g },
+  { label: "その", pattern: /その[ー、,\s]/g },
+  { label: "まあ", pattern: /まあ/g },
+  { label: "なんか", pattern: /なんか/g },
+  { label: "はい", pattern: /はい/g },
+  { label: "はぁ", pattern: /はぁ/g },
+  { label: "なるほどですね", pattern: /なるほどですね/g },
+  { label: "みたいな", pattern: /みたいな/g },
+  { label: "ちょっと", pattern: /ちょっと/g },
+];
+
+function buildFillerInsights(meeting: MeetingRecord) {
+  const text = [
+    ...((meeting.conversationLogs ?? [])
+      .filter((log) => log.speaker === "speaker_1" || log.label.includes("営業"))
+      .map((log) => log.text)),
+    ...(meeting.conversationLogs?.length ? [] : [meeting.transcriptionProbeText ?? ""]),
+    ...(meeting.transcriptBlocks ?? []).map((block) => block.text),
+  ].join(" ");
+
+  if (!text.trim()) return [];
+
+  return fillerPatterns
+    .map(({ label, pattern }) => ({ label, count: text.match(pattern)?.length ?? 0 }))
+    .filter((item) => item.count >= 3)
+    .sort((left, right) => right.count - left.count)
+    .slice(0, 4)
+    .map((item) => `話し癖改善: 「${item.label}」が${item.count}回程度出ています。ロープレでは間を置いて言い換える練習を入れる。`);
 }
 
 function ScenarioIcon() {
