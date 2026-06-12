@@ -7,6 +7,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { FormEvent, useEffect, useMemo, useState } from "react";
 
 import { useAuth } from "@/features/auth/auth-provider";
+import { subscribeToUserProfiles, type AppUserProfile } from "@/lib/firebase/auth";
 import {
   addKnowledgeProductTab,
   createKnowledgeItem,
@@ -23,6 +24,8 @@ import {
   type KnowledgeProduct,
 } from "@/lib/firebase/knowledge";
 
+type PublicationTarget = "private" | "all_sales" | "selected_sales";
+
 type KnowledgeEditorScreenProps = {
   mode: "create" | "edit";
   knowledgeId?: string;
@@ -35,7 +38,6 @@ export function KnowledgeEditorScreen({ mode, knowledgeId, audience = "sales" }:
   const { profile } = useAuth();
   const userId = profile?.uid;
   const companyId = profile?.companyId;
-  const canCreateShared = profile?.role === "admin";
   const isAdminAuthoring = audience === "admin";
   const backHref = isAdminAuthoring ? "/admin/knowledge" : "/sales/knowledge";
   const pageTitle = isAdminAuthoring
@@ -47,6 +49,7 @@ export function KnowledgeEditorScreen({ mode, knowledgeId, audience = "sales" }:
       : "ナレッジを作成";
   const [categories, setCategories] = useState<KnowledgeCategory[]>([]);
   const [products, setProducts] = useState<KnowledgeProduct[]>([]);
+  const [salesUsers, setSalesUsers] = useState<AppUserProfile[]>([]);
   const [knowledge, setKnowledge] = useState<KnowledgeItem | null>(null);
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
@@ -58,9 +61,11 @@ export function KnowledgeEditorScreen({ mode, knowledgeId, audience = "sales" }:
   const [kind, setKind] = useState<CreateKnowledgeItemInput["kind"]>(
     readKind(searchParams.get("kind")) ?? "knowledge",
   );
-  const [scope, setScope] = useState<CreateKnowledgeItemInput["scope"]>(
-    isAdminAuthoring || searchParams.get("scope") === "shared" ? "shared" : "personal",
+  const [publicationTarget, setPublicationTarget] = useState<PublicationTarget>(
+    isAdminAuthoring || searchParams.get("scope") === "shared" ? "all_sales" : "private",
   );
+  const [selectedSalesUserIds, setSelectedSalesUserIds] = useState<string[]>([]);
+  const [visibleToAdmin, setVisibleToAdmin] = useState(isAdminAuthoring);
   const [tagsText, setTagsText] = useState("");
   const [links, setLinks] = useState<KnowledgeLink[]>([]);
   const [linkTitle, setLinkTitle] = useState("");
@@ -79,6 +84,7 @@ export function KnowledgeEditorScreen({ mode, knowledgeId, audience = "sales" }:
     const unsubscribers = [
       subscribeToKnowledgeCategories(companyId, setCategories, handleError),
       subscribeToKnowledgeProducts(companyId, setProducts, handleError),
+      subscribeToUserProfiles(setSalesUsers, handleError, companyId),
     ];
 
     return () => {
@@ -106,17 +112,20 @@ export function KnowledgeEditorScreen({ mode, knowledgeId, audience = "sales" }:
     setCategoryId(knowledge.categoryId ?? "");
     setProductId(knowledge.productId ?? "");
     setKind(knowledge.kind);
-    setScope(isAdminAuthoring ? "shared" : canCreateShared ? knowledge.scope : "personal");
+    setPublicationTarget(readPublicationTarget(knowledge));
+    setSelectedSalesUserIds(knowledge.sharedWithUserIds);
+    setVisibleToAdmin(isAdminAuthoring || knowledge.visibleToAdmin);
     setTagsText(knowledge.tags.join(", "));
     setLinks(knowledge.links);
     setAttachments(knowledge.attachments);
     setPendingFiles([]);
     setUploadProgress({});
-  }, [canCreateShared, isAdminAuthoring, knowledge]);
+  }, [isAdminAuthoring, knowledge]);
 
   useEffect(() => {
     if (isAdminAuthoring) {
-      setScope("shared");
+      setPublicationTarget("all_sales");
+      setVisibleToAdmin(true);
     }
   }, [isAdminAuthoring]);
 
@@ -124,17 +133,13 @@ export function KnowledgeEditorScreen({ mode, knowledgeId, audience = "sales" }:
     () => products.find((product) => product.id === productId),
     [productId, products],
   );
+  const selectableSalesUsers = useMemo(
+    () => salesUsers.filter((user) => user.role === "sales" && user.status === "active" && user.uid !== userId),
+    [salesUsers, userId],
+  );
   const tabOptions = useMemo(() => buildTabOptions(tabTitle, selectedProduct?.tabs ?? []), [selectedProduct?.tabs, tabTitle]);
   const [previewTab, setPreviewTab] = useState("");
-  const tags = useMemo(
-    () =>
-      tagsText
-        .split(",")
-        .map((tag) => tag.trim())
-        .filter(Boolean)
-        .slice(0, 12),
-    [tagsText],
-  );
+  const tags = useMemo(() => buildSearchTags(tagsText, productId ? tabTitle : ""), [productId, tabTitle, tagsText]);
   const wordCount = body.length;
   const lineCount = body ? body.split(/\n/).length : 0;
   const canEdit = mode === "create" || Boolean(knowledge && (knowledge.ownerId === userId || profile?.role === "admin"));
@@ -152,7 +157,7 @@ export function KnowledgeEditorScreen({ mode, knowledgeId, audience = "sales" }:
     }
   }, [productId, tabOptions, tabTitle]);
 
-  const saveKnowledge = async (nextScope = scope) => {
+  const saveKnowledge = async (nextPublicationTarget = publicationTarget) => {
     if (!userId || !companyId) {
       setError("ログイン情報を確認できませんでした。再読み込みしてからお試しください。");
       return;
@@ -168,6 +173,15 @@ export function KnowledgeEditorScreen({ mode, knowledgeId, audience = "sales" }:
       return;
     }
 
+    const effectivePublicationTarget = isAdminAuthoring ? "all_sales" : nextPublicationTarget;
+    const nextSharedWithUserIds =
+      effectivePublicationTarget === "selected_sales" ? selectedSalesUserIds : [];
+
+    if (effectivePublicationTarget === "selected_sales" && nextSharedWithUserIds.length === 0) {
+      setError("公開する営業マンを1名以上選択してください。");
+      return;
+    }
+
     setIsSaving(true);
     setError(null);
 
@@ -180,7 +194,9 @@ export function KnowledgeEditorScreen({ mode, knowledgeId, audience = "sales" }:
       categoryId: categoryId || null,
       productId: productId || null,
       ownerId: userId,
-      scope: isAdminAuthoring ? "shared" : canCreateShared ? nextScope : "personal",
+      scope: effectivePublicationTarget === "all_sales" ? "shared" : "personal",
+      sharedWithUserIds: nextSharedWithUserIds,
+      visibleToAdmin: isAdminAuthoring || visibleToAdmin,
       kind,
       tags,
       links,
@@ -261,7 +277,7 @@ export function KnowledgeEditorScreen({ mode, knowledgeId, audience = "sales" }:
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    void saveKnowledge(scope);
+    void saveKnowledge(publicationTarget);
   };
 
   const handleSelectTabTitle = (nextTabTitle: string) => {
@@ -278,7 +294,7 @@ export function KnowledgeEditorScreen({ mode, knowledgeId, audience = "sales" }:
     }
 
     if (!productId) {
-      setError("先に商品・サービスを選択してください。");
+      setError("先に商材を選択してください。");
       return;
     }
 
@@ -293,6 +309,14 @@ export function KnowledgeEditorScreen({ mode, knowledgeId, audience = "sales" }:
     } finally {
       setIsAddingTab(false);
     }
+  };
+
+  const handleToggleSalesUser = (salesUserId: string) => {
+    setSelectedSalesUserIds((current) =>
+      current.includes(salesUserId)
+        ? current.filter((userId) => userId !== salesUserId)
+        : [...current, salesUserId],
+    );
   };
 
   return (
@@ -329,7 +353,7 @@ export function KnowledgeEditorScreen({ mode, knowledgeId, audience = "sales" }:
             <button
               type="button"
               disabled={isSaving}
-              onClick={() => void saveKnowledge(isAdminAuthoring ? "shared" : canCreateShared ? "shared" : "personal")}
+              onClick={() => void saveKnowledge(publicationTarget)}
               className="inline-flex h-11 items-center justify-center rounded-[14px] border border-[#f0c655] bg-[#ffd84d] px-6 text-[13px] font-bold text-[#171717] shadow-[0_8px_18px_rgba(245,189,7,0.16)] disabled:opacity-60"
             >
               {isSaving ? "保存中" : isAdminAuthoring ? "公式として保存" : "公開する"}
@@ -359,7 +383,7 @@ export function KnowledgeEditorScreen({ mode, knowledgeId, audience = "sales" }:
               <h2 className="text-[18px] font-bold text-[#171717]">基本情報</h2>
 
               <div className="mt-5 grid gap-4 md:grid-cols-2">
-                <Field label="商品・サービス">
+                <Field label="商材">
                   <select
                     value={productId}
                     onChange={(event) => setProductId(event.target.value)}
@@ -375,7 +399,7 @@ export function KnowledgeEditorScreen({ mode, knowledgeId, audience = "sales" }:
                 </Field>
 
                 {productId ? (
-                <Field label="商品内タブ">
+                <Field label="商材内タブ">
                   <div className="space-y-2">
                     <div className="grid grid-cols-2 overflow-hidden rounded-[14px] border border-[#e4e8ef] bg-white md:grid-cols-5">
                       {tabOptions.slice(0, 5).map((tab) => (
@@ -395,7 +419,7 @@ export function KnowledgeEditorScreen({ mode, knowledgeId, audience = "sales" }:
                       <input
                         value={newTabTitle}
                         onChange={(event) => setNewTabTitle(event.target.value)}
-                        placeholder={productId ? "例：比較情報、活用シーン" : "商品を選択するとタブを追加できます"}
+                        placeholder={productId ? "例：比較情報、活用シーン" : "商材を選択するとタブを追加できます"}
                         disabled={!productId || isAddingTab}
                         className="h-11 w-full rounded-[13px] border border-dashed border-[#d7dde8] bg-white px-4 text-[13px] text-[#171717] outline-none transition placeholder:text-[#9aa1ac] focus:border-[#e0bd4b] disabled:bg-[#f7f8fb]"
                       />
@@ -417,12 +441,12 @@ export function KnowledgeEditorScreen({ mode, knowledgeId, audience = "sales" }:
                   <input
                     value={title}
                     onChange={(event) => setTitle(event.target.value)}
-                    placeholder="例：商品Aの概要"
+                    placeholder="例：商材Aの概要"
                     className="h-12 w-full rounded-[14px] border border-[#e4e8ef] bg-white px-4 text-[14px] text-[#171717] outline-none transition focus:border-[#e0bd4b]"
                   />
                 </Field>
 
-                <Field label="カテゴリ">
+                <Field label="商談シーン">
                   <select
                     value={categoryId}
                     onChange={(event) => setCategoryId(event.target.value)}
@@ -438,13 +462,18 @@ export function KnowledgeEditorScreen({ mode, knowledgeId, audience = "sales" }:
                   </select>
                 </Field>
 
-                <Field label="タグ" className="md:col-span-1">
+                <Field label="検索タグ" className="md:col-span-1">
                   <input
                     value={tagsText}
                     onChange={(event) => setTagsText(event.target.value)}
                     placeholder="サービス概要, SFA, 営業支援"
                     className="h-12 w-full rounded-[14px] border border-[#e4e8ef] bg-white px-4 text-[14px] text-[#171717] outline-none transition focus:border-[#e0bd4b]"
                   />
+                  {productId && tabTitle ? (
+                    <p className="mt-2 text-[12px] leading-5 text-[#7a808c]">
+                      商材内タブ「{tabTitle}」は保存時に検索タグへ自動追加されます。
+                    </p>
+                  ) : null}
                 </Field>
 
               </div>
@@ -627,7 +656,7 @@ export function KnowledgeEditorScreen({ mode, knowledgeId, audience = "sales" }:
                     <div className="rounded-[16px] border border-dashed border-[#d7dde8] bg-[#fcfcfd] px-5 py-10 text-center">
                       <h3 className="text-[18px] font-bold text-[#171717]">{previewTab}</h3>
                       <p className="mt-2 text-[13px] leading-6 text-[#7a808c]">
-                        このタブにはまだ本文がありません。商品ページでは、このタブに紐づくナレッジがここに表示されます。
+                        このタブにはまだ本文がありません。商材ページでは、このタブに紐づくナレッジがここに表示されます。
                       </p>
                     </div>
                   )}
@@ -647,14 +676,53 @@ export function KnowledgeEditorScreen({ mode, knowledgeId, audience = "sales" }:
                     </div>
                   ) : (
                     <div className="grid gap-3">
-                      <RadioButton checked={scope === "personal"} onClick={() => setScope("personal")}>
+                      <RadioButton checked={publicationTarget === "private"} onClick={() => setPublicationTarget("private")}>
                         自分のみ
                       </RadioButton>
-                      {canCreateShared ? (
-                        <RadioButton checked={scope === "shared"} onClick={() => setScope("shared")}>
-                          全体に公開
-                        </RadioButton>
+                      <RadioButton checked={publicationTarget === "all_sales"} onClick={() => setPublicationTarget("all_sales")}>
+                        他の営業マン全員
+                      </RadioButton>
+                      <RadioButton checked={publicationTarget === "selected_sales"} onClick={() => setPublicationTarget("selected_sales")}>
+                        営業マンを複数選択
+                      </RadioButton>
+                      {publicationTarget === "selected_sales" ? (
+                        <div className="rounded-[16px] border border-[#e4e8ef] bg-[#fcfcfd] px-3 py-3">
+                          {selectableSalesUsers.length > 0 ? (
+                            <div className="grid max-h-[220px] gap-2 overflow-y-auto pr-1">
+                              {selectableSalesUsers.map((salesUser) => (
+                                <label
+                                  key={salesUser.uid}
+                                  className="flex cursor-pointer items-center gap-3 rounded-[12px] bg-white px-3 py-2 text-[13px] font-bold text-[#343b48]"
+                                >
+                                  <input
+                                    type="checkbox"
+                                    checked={selectedSalesUserIds.includes(salesUser.uid)}
+                                    onChange={() => handleToggleSalesUser(salesUser.uid)}
+                                    className="h-4 w-4 accent-[#f0c655]"
+                                  />
+                                  <span className="min-w-0 flex-1 truncate">{salesUser.name ?? salesUser.email ?? "名前未設定"}</span>
+                                </label>
+                              ))}
+                            </div>
+                          ) : (
+                            <p className="text-[12px] leading-5 text-[#7a808c]">選択できる営業マンがまだいません。</p>
+                          )}
+                        </div>
                       ) : null}
+                      <label className="flex cursor-pointer items-start gap-3 rounded-[14px] border border-[#e4e8ef] bg-white px-3 py-3">
+                        <input
+                          type="checkbox"
+                          checked={visibleToAdmin}
+                          onChange={(event) => setVisibleToAdmin(event.target.checked)}
+                          className="mt-0.5 h-4 w-4 accent-[#f0c655]"
+                        />
+                        <span>
+                          <span className="block text-[13px] font-bold text-[#343b48]">adminにも公開</span>
+                          <span className="mt-1 block text-[12px] leading-5 text-[#7a808c]">
+                            管理者側で確認・整備できるナレッジとして扱います。
+                          </span>
+                        </span>
+                      </label>
                     </div>
                   )}
                 </Field>
@@ -668,15 +736,15 @@ export function KnowledgeEditorScreen({ mode, knowledgeId, audience = "sales" }:
                     </div>
                   ) : (
                     <div className="grid gap-3">
-                      <RadioButton checked>下書き</RadioButton>
-                      <RadioButton checked={false}>公開する</RadioButton>
+                      <RadioButton checked>{formatPublicationTarget(publicationTarget)}</RadioButton>
+                      {visibleToAdmin ? <RadioButton checked>adminにも公開</RadioButton> : null}
                     </div>
                   )}
                 </Field>
                 <button
                   type="button"
                   disabled={isSaving}
-                  onClick={() => void saveKnowledge(isAdminAuthoring ? "shared" : canCreateShared ? "shared" : "personal")}
+                  onClick={() => void saveKnowledge(publicationTarget)}
                   className="inline-flex h-12 w-full items-center justify-center rounded-[14px] border border-[#f0c655] bg-[#ffd84d] px-6 text-[14px] font-bold text-[#171717] shadow-[0_8px_18px_rgba(245,189,7,0.16)] disabled:opacity-60"
                 >
                   {isSaving ? "保存中" : isAdminAuthoring ? "公式として保存" : "公開する"}
@@ -806,13 +874,13 @@ function PreviewArticle({
         <ProductLogo product={selectedProduct} />
         <div className="min-w-0">
           <h3 className="text-[24px] font-bold tracking-[-0.03em] text-[#171717]">
-            {selectedProduct?.name || title || "商品名"}
+            {selectedProduct?.name || title || "商材名"}
           </h3>
         </div>
       </div>
 
       <section className="mt-6">
-        <h4 className="text-[16px] font-bold text-[#171717]">{title || `${selectedProduct?.name ?? "商品"} の概要`}</h4>
+        <h4 className="text-[16px] font-bold text-[#171717]">{title || `${selectedProduct?.name ?? "商材"} の概要`}</h4>
         {description ? <p className="mt-3 text-[14px] leading-7 text-[#3d4350]">{description}</p> : null}
         <div className="mt-5 whitespace-pre-wrap text-[14px] leading-7 text-[#2d3340]">
           {body || "本文のプレビューがここに表示されます。"}
@@ -912,6 +980,36 @@ function readKind(value: string | null): CreateKnowledgeItemInput["kind"] | null
   }
 
   return null;
+}
+
+function readPublicationTarget(knowledge: KnowledgeItem): PublicationTarget {
+  if (knowledge.scope === "shared") {
+    return "all_sales";
+  }
+
+  if (knowledge.sharedWithUserIds.length > 0) {
+    return "selected_sales";
+  }
+
+  return "private";
+}
+
+function formatPublicationTarget(target: PublicationTarget) {
+  if (target === "all_sales") return "他の営業マン全員に公開";
+  if (target === "selected_sales") return "選択した営業マンに公開";
+  return "自分のみ";
+}
+
+function buildSearchTags(tagsText: string, tabTitle: string) {
+  return Array.from(
+    new Set([
+      tabTitle.trim(),
+      ...tagsText
+        .split(",")
+        .map((tag) => tag.trim())
+        .filter(Boolean),
+    ].filter(Boolean)),
+  ).slice(0, 12);
 }
 
 function buildTabOptions(currentTabTitle: string, productTabs: string[]) {

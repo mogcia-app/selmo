@@ -23,6 +23,7 @@ type ProductPayload = {
 type GeneratedScenario = {
   title: string;
   description: string;
+  targetSegment: string;
   customerRole: string;
   customerProfile: string;
   goal: string;
@@ -45,8 +46,8 @@ export async function POST(request: Request) {
   const targetSegment = typeof body?.targetSegment === "string" ? body.targetSegment.trim() : "";
   const meetingInsights = readStringArray(body?.meetingInsights).slice(0, 16);
 
-  if (!product.name || !category || !targetSegment) {
-    return NextResponse.json({ error: "商材、カテゴリー、ターゲット層を入力してください。" }, { status: 400 });
+  if (!product.name || !category) {
+    return NextResponse.json({ error: "商材、カテゴリーを入力してください。" }, { status: 400 });
   }
 
   const analysisContext = await loadAnalysisContext({
@@ -79,6 +80,7 @@ export async function POST(request: Request) {
               properties: {
                 title: { type: "string" },
                 description: { type: "string" },
+                targetSegment: { type: "string" },
                 customerRole: { type: "string" },
                 customerProfile: { type: "string" },
                 goal: { type: "string" },
@@ -89,6 +91,7 @@ export async function POST(request: Request) {
               required: [
                 "title",
                 "description",
+                "targetSegment",
                 "customerRole",
                 "customerProfile",
                 "goal",
@@ -105,6 +108,7 @@ export async function POST(request: Request) {
             content: [
               "あなたは営業ロープレ教材を作る営業教育設計者です。",
               "商材情報、カテゴリー、ターゲット層、過去のアップロード分析に合わせて、実践的なAI顧客シナリオを日本語で作成してください。",
+              "ターゲット層が空の場合は、商材のターゲット顧客・顧客課題・過去分析から最も練習価値が高いターゲット層を1つ選び、targetSegmentに入れてください。",
               "マニュアルのスコアルールがある場合は、ロープレの採点基準に自然に反映してください。加点条件はできた行動、減点条件は避ける行動として表現してください。",
               "過去分析に改善点や不足基準がある場合、その改善練習になる反論・顧客プロフィール・採点基準を必ず含めてください。",
               "過去分析に「話し癖改善」「口癖」「フィラー語」の指摘がある場合、えー、あの、まあ等を減らす練習ゴールと採点基準を必ず含めてください。",
@@ -116,7 +120,7 @@ export async function POST(request: Request) {
             content: [
               `商材名: ${product.name}`,
               `カテゴリー: ${category}`,
-              `ターゲット層: ${targetSegment}`,
+              `ターゲット層: ${targetSegment || "AIで選定"}`,
               `概要: ${product.description ?? ""}`,
               `ターゲット顧客: ${product.targetCustomer ?? ""}`,
               `顧客課題: ${(product.painPoints ?? []).join(" / ")}`,
@@ -152,13 +156,15 @@ export async function POST(request: Request) {
 }
 
 function buildFallbackScenario(product: ProductPayload, category: ScenarioCategory, targetSegment: string, meetingInsights: string[] = []): GeneratedScenario {
+  const resolvedTargetSegment = resolveTargetSegment(product, targetSegment);
   const improvementFocus = meetingInsights[0] ?? "顧客課題を深掘りし、導入効果を具体的に示す";
   const fillerFocus = meetingInsights.find((item) => item.includes("話し癖改善") || item.includes("口癖") || item.includes("フィラー"));
   return {
-    title: `${product.name} ${category} ${targetSegment} 向け提案`,
-    description: `${targetSegment}の${category}顧客に対して、${product.name}の価値を伝え、過去分析で見えた改善点を練習するシナリオです。`,
+    title: `${product.name} ${category} ${resolvedTargetSegment} 向け提案`,
+    description: `${resolvedTargetSegment}の${category}顧客に対して、${product.name}の価値を伝え、過去分析で見えた改善点を練習するシナリオです。`,
+    targetSegment: resolvedTargetSegment,
     customerRole: category === "新規" ? "部門責任者" : "既存顧客の責任者",
-    customerProfile: `${targetSegment}領域で課題を感じているが、導入効果や運用負担に慎重な顧客。過去商談での改善テーマは「${improvementFocus}」。`,
+    customerProfile: `${resolvedTargetSegment}領域で課題を感じているが、導入効果や運用負担に慎重な顧客。過去商談での改善テーマは「${improvementFocus}」。`,
     goal: `顧客課題を確認し、価値訴求と導入後の成果を具体的に伝えて次回アクションにつなげる。特に「${improvementFocus}」を改善する。${fillerFocus ? "話し癖を抑え、短く明確に話す練習も行う。" : ""}`,
     objections: ["費用対効果が見えません", "今のやり方でも困っていません", "導入や運用が大変そうです"],
     evaluationCriteria: [
@@ -177,6 +183,7 @@ function normalizeScenario(value: GeneratedScenario): GeneratedScenario {
   return {
     title: readString(value.title) || fallback.title,
     description: readString(value.description),
+    targetSegment: readString(value.targetSegment) || fallback.targetSegment,
     customerRole: readString(value.customerRole) || fallback.customerRole,
     customerProfile: readString(value.customerProfile),
     goal: readString(value.goal) || fallback.goal,
@@ -184,6 +191,16 @@ function normalizeScenario(value: GeneratedScenario): GeneratedScenario {
     evaluationCriteria: readStringArray(value.evaluationCriteria),
     difficulty: value.difficulty === "easy" || value.difficulty === "hard" ? value.difficulty : "normal",
   };
+}
+
+function resolveTargetSegment(product: ProductPayload, targetSegment: string) {
+  const explicit = targetSegment.trim();
+  if (explicit) return explicit;
+  const targetCustomer = readString(product.targetCustomer).split(/[、,\n/]/)[0]?.trim();
+  if (targetCustomer) return targetCustomer;
+  const painPoint = product.painPoints?.find(Boolean);
+  if (painPoint) return `${painPoint}がある顧客`;
+  return "重点ターゲット";
 }
 
 function buildScoringRuleInsights(context: Awaited<ReturnType<typeof loadAnalysisContext>>) {

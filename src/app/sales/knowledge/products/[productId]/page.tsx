@@ -16,6 +16,11 @@ import {
   type KnowledgeProduct,
 } from "@/lib/firebase/knowledge";
 
+type ProductSection = {
+  title: string;
+  body: string;
+};
+
 export default function SalesKnowledgeProductPage() {
   const params = useParams<{ productId: string }>();
   const { profile } = useAuth();
@@ -51,7 +56,8 @@ export default function SalesKnowledgeProductPage() {
     () => products.find((candidate) => candidate.id === productId) ?? null,
     [productId, products],
   );
-  const tabs = useMemo(() => buildProductTabs(items, product?.tabs ?? []), [items, product?.tabs]);
+  const productSections = useMemo(() => buildProductSections(product), [product]);
+  const tabs = useMemo(() => buildProductTabs(items, product?.tabs ?? [], productSections), [items, product?.tabs, productSections]);
   const visibleItems = useMemo(
     () =>
       activeTab === "all"
@@ -59,10 +65,14 @@ export default function SalesKnowledgeProductPage() {
         : items.filter((item) => getProductTabTitle(item) === activeTab),
     [activeTab, items],
   );
+  const visibleProductSections = useMemo(
+    () => (activeTab === "all" ? productSections : productSections.filter((section) => section.title === activeTab)),
+    [activeTab, productSections],
+  );
 
   return (
-    <main className="min-h-screen overflow-x-hidden bg-[#fbfbfc]">
-      <div className="min-w-0 px-6 py-8 md:px-10">
+    <main className="overflow-x-hidden bg-transparent">
+      <div className="min-w-0 px-6 pb-8 pt-6 md:px-10 md:pb-10">
         <div className="mx-auto max-w-[1180px] min-w-0">
           <Link
             href="/sales/knowledge"
@@ -83,10 +93,10 @@ export default function SalesKnowledgeProductPage() {
               <div>
                 <ProductLogo product={product} />
                 <h1 className="mt-4 text-[34px] font-bold tracking-[-0.03em] text-[#171717]">
-                  {product?.name ?? "商品"}
+                  {product?.name ?? "商材"}
                 </h1>
                 <p className="mt-3 max-w-[640px] text-[15px] leading-7 text-[#596273]">
-                  この商品に紐づくナレッジ、メモ、Q&Aを確認できます。
+                  この商材に紐づくナレッジ、メモ、Q&Aを確認できます。
                 </p>
               </div>
               <div className="flex flex-wrap gap-3">
@@ -95,7 +105,7 @@ export default function SalesKnowledgeProductPage() {
                   onClick={() => setProductDialogOpen(true)}
                   className="inline-flex h-[46px] items-center gap-2 rounded-[14px] border border-[#e4e8ef] bg-white px-5 text-[14px] font-bold text-[#343b48] shadow-[0_8px_18px_rgba(17,24,39,0.04)]"
                 >
-                  商品設定
+                  商材設定
                 </button>
                 <Link
                   href={`/sales/knowledge/new?kind=knowledge&scope=personal&productId=${encodeURIComponent(productId)}${
@@ -112,7 +122,7 @@ export default function SalesKnowledgeProductPage() {
             <div className="mt-6 flex flex-wrap gap-2 border-t border-[#eef1f5] pt-5">
               <TabButton active={activeTab === "all"} onClick={() => setActiveTab("all")}>
                 すべて
-                <span className="ml-2 text-[11px] text-[#8a909b]">{items.length}</span>
+                <span className="ml-2 text-[11px] text-[#8a909b]">{items.length + productSections.length}</span>
               </TabButton>
               {tabs.map((tab) => (
                 <TabButton key={tab.title} active={activeTab === tab.title} onClick={() => setActiveTab(tab.title)}>
@@ -131,6 +141,7 @@ export default function SalesKnowledgeProductPage() {
             </div>
 
             <div className="mt-6 flex flex-wrap gap-3 text-[13px] text-[#596273]">
+              <Pill>{`商材情報 ${productSections.length}件`}</Pill>
               <Pill>{`ナレッジ ${items.filter((item) => item.kind === "knowledge").length}件`}</Pill>
               <Pill>{`メモ ${items.filter((item) => item.kind === "memo").length}件`}</Pill>
               <Pill>{`Q&A ${items.filter((item) => item.kind === "qa").length}件`}</Pill>
@@ -139,8 +150,35 @@ export default function SalesKnowledgeProductPage() {
           </section>
 
           <section className="mt-6">
-            {visibleItems.length > 0 ? (
+            {visibleProductSections.length > 0 || visibleItems.length > 0 ? (
               <div className="space-y-3">
+                {visibleProductSections.map((section) => (
+                  <article
+                    key={`product-section-${section.title}`}
+                    className="grid gap-4 rounded-[14px] border border-[#e5e9f0] bg-white px-4 py-4 shadow-[0_6px_16px_rgba(17,24,39,0.025)] md:grid-cols-[56px_minmax(0,1fr)_112px]"
+                  >
+                    <span className="inline-flex h-14 w-14 items-center justify-center rounded-[12px] bg-[#fff3cf] text-[#8a6500] [&_svg]:h-6 [&_svg]:w-6">
+                      <ProductIcon />
+                    </span>
+                    <div className="min-w-0">
+                      <h3 className="truncate text-[16px] font-bold text-[#171717]">{section.title}</h3>
+                      <p className="mt-1 line-clamp-3 whitespace-pre-wrap text-[13px] leading-6 text-[#596273]">
+                        {section.body}
+                      </p>
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        <span className="rounded-full bg-[#edf2ff] px-2.5 py-0.5 text-[11px] font-bold text-[#5767c8]">
+                          admin登録
+                        </span>
+                        <span className="rounded-full bg-[#fff3cf] px-2.5 py-0.5 text-[11px] font-bold text-[#a97d00]">
+                          商材情報
+                        </span>
+                      </div>
+                    </div>
+                    <div className="flex items-start justify-end">
+                      <span className="text-[12px] text-[#596273]">標準</span>
+                    </div>
+                  </article>
+                ))}
                 {visibleItems.map((item) => (
                   <Link
                     key={item.id}
@@ -179,10 +217,10 @@ export default function SalesKnowledgeProductPage() {
                   <PlusIcon />
                 </div>
                 <h2 className="mt-4 text-[22px] font-bold text-[#171717]">
-                  {activeTab === "all" ? "この商品のナレッジはまだありません" : `${activeTab} のナレッジはまだありません`}
+                  {activeTab === "all" ? "この商材のナレッジはまだありません" : `${activeTab} のナレッジはまだありません`}
                 </h2>
                 <p className="mx-auto mt-2 max-w-[420px] text-[14px] leading-7 text-[#7a808c]">
-                  商品に紐づけて作成したナレッジやメモが、タブごとに表示されます。
+                  商材に紐づけて作成したナレッジやメモが、タブごとに表示されます。
                 </p>
                 <Link
                   href={`/sales/knowledge/new?kind=knowledge&scope=personal&productId=${encodeURIComponent(productId)}${
@@ -225,9 +263,9 @@ export default function SalesKnowledgeProductPage() {
           >
             <div className="flex items-start justify-between gap-4">
               <div>
-                <h2 className="text-[22px] font-bold text-[#171717]">商品タブを追加</h2>
+                <h2 className="text-[22px] font-bold text-[#171717]">商材タブを追加</h2>
                 <p className="mt-2 text-[13px] leading-6 text-[#7a808c]">
-                  追加したタブは、この商品の共有ナレッジや自分のナレッジにも共通で表示されます。
+                  追加したタブは、この商材の共有ナレッジや自分のナレッジにも共通で表示されます。
                 </p>
               </div>
               <button
@@ -285,13 +323,17 @@ function getKnowledgeDetailHref(item: KnowledgeItem) {
   return `/sales/knowledge/categories/${item.categoryId ?? "how-to"}/knowledge/${item.id}`;
 }
 
-function buildProductTabs(items: KnowledgeItem[], productTabs: string[]) {
+function buildProductTabs(items: KnowledgeItem[], productTabs: string[], productSections: ProductSection[]) {
   const counts = new Map<string, number>();
+
+  productSections.forEach((section) => {
+    counts.set(section.title, (counts.get(section.title) ?? 0) + 1);
+  });
 
   productTabs.forEach((tab) => {
     const title = tab.trim();
     if (title) {
-      counts.set(title, 0);
+      counts.set(title, counts.get(title) ?? 0);
     }
   });
 
@@ -307,6 +349,30 @@ function buildProductTabs(items: KnowledgeItem[], productTabs: string[]) {
       if (right.title === "未分類") return -1;
       return left.title.localeCompare(right.title, "ja");
     });
+}
+
+function buildProductSections(product: KnowledgeProduct | null): ProductSection[] {
+  if (!product) {
+    return [];
+  }
+
+  return [
+    { title: "商材概要", body: product.description },
+    { title: "商材URL", body: product.sourceUrl },
+    { title: "ターゲット顧客", body: product.targetCustomer },
+    { title: "URL解析メモ", body: product.sourceSummary },
+    { title: "顧客課題", body: product.painPoints.join("\n") },
+    { title: "価値訴求", body: product.valueProposition },
+    { title: "料金", body: product.pricing },
+    { title: "競合", body: product.competitors.join("\n") },
+    { title: "よくある反論", body: product.commonObjections.join("\n") },
+    { title: "FAQ", body: product.faq.join("\n") },
+    { title: "成功トーク", body: product.successTalk.join("\n") },
+    { title: "NGトーク", body: product.ngTalk.join("\n") },
+    ...product.customFields.map((field) => ({ title: field.label, body: field.value })),
+  ]
+    .map((section) => ({ title: section.title.trim(), body: section.body.trim() }))
+    .filter((section) => section.title && section.body);
 }
 
 function getProductTabTitle(item: KnowledgeItem) {
@@ -446,7 +512,7 @@ function ProductEditDialog({
           }
 
           if (!nextName) {
-            setLocalError("商品名を入力してください。");
+            setLocalError("商材名を入力してください。");
             return;
           }
 
@@ -481,7 +547,7 @@ function ProductEditDialog({
             });
             onClose();
           } catch (nextError) {
-            setLocalError(nextError instanceof Error ? nextError.message : "商品の更新に失敗しました。");
+            setLocalError(nextError instanceof Error ? nextError.message : "商材の更新に失敗しました。");
           } finally {
             setIsSaving(false);
           }
@@ -490,8 +556,8 @@ function ProductEditDialog({
       >
         <div className="flex items-start justify-between gap-4">
           <div>
-            <h2 className="text-[22px] font-bold text-[#171717]">商品設定</h2>
-            <p className="mt-2 text-[13px] leading-6 text-[#7a808c]">商品名とロゴ画像を編集できます。</p>
+            <h2 className="text-[22px] font-bold text-[#171717]">商材設定</h2>
+            <p className="mt-2 text-[13px] leading-6 text-[#7a808c]">商材名とロゴ画像を編集できます。</p>
           </div>
           <button
             type="button"
@@ -510,7 +576,7 @@ function ProductEditDialog({
         ) : null}
 
         <label className="mt-5 block">
-          <span className="text-[13px] font-bold text-[#343b48]">商品名</span>
+          <span className="text-[13px] font-bold text-[#343b48]">商材名</span>
           <input
             value={name}
             onChange={(event) => setName(event.target.value)}

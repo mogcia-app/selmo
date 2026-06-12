@@ -22,14 +22,6 @@ import {
   type KnowledgeSearchHistory,
 } from "@/lib/firebase/knowledge";
 
-const DEFAULT_CATEGORY = {
-  id: "how-to",
-  title: "使い方",
-  description: "Selmoの使い方やナレッジ整理の基本",
-  knowledgeCount: 0,
-  updatedAt: null,
-} as const;
-
 export default function SalesKnowledgePage() {
   const router = useRouter();
   const { profile } = useAuth();
@@ -70,6 +62,10 @@ export default function SalesKnowledgePage() {
   const sharedItems = useMemo(
     () => items.filter((item) => item.scope === "shared").slice(0, 3),
     [items],
+  );
+  const visibleCategories = useMemo(
+    () => categories.filter((category) => category.id !== "how-to").slice(0, 4),
+    [categories],
   );
 
   const handleSearch = (event: FormEvent<HTMLFormElement>) => {
@@ -123,7 +119,7 @@ export default function SalesKnowledgePage() {
   };
 
   return (
-    <main className="min-h-screen bg-[#f7f8fb] px-5 py-6 md:px-8">
+    <main className="overflow-x-hidden bg-transparent px-5 pb-6 pt-4 md:px-8 md:pb-8">
       <div className="mx-auto max-w-[1500px]">
         <header className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_440px]">
           <section className="rounded-[28px] border border-[#eceef4] bg-white p-5 shadow-[0_12px_34px_rgba(17,24,39,0.04)] md:p-7">
@@ -135,13 +131,13 @@ export default function SalesKnowledgePage() {
                   </span>
                   <div>
                     <p className="text-[13px] font-bold text-[#8a6500]">営業ナレッジ</p>
-                    <h1 className="text-[30px] font-bold tracking-[-0.04em] text-[#171717] md:text-[38px]">
-                      商品別に探して、商談中にすぐ答える
+                    <h1 className="text-[24px] font-bold tracking-[-0.03em] text-[#171717] md:text-[30px]">
+                      商材別に探して、商談中にすぐ答える
                     </h1>
                   </div>
                 </div>
                 <p className="mt-4 max-w-[760px] text-[14px] leading-7 text-[#596273]">
-                  管理者が共有した商品資料やマニュアル、自分で保存したメモをまとめて検索できます。
+                  管理者が共有した商材資料やマニュアル、自分で保存したメモをまとめて検索できます。
                 </p>
               </div>
               <div className="flex flex-wrap gap-3">
@@ -229,8 +225,8 @@ export default function SalesKnowledgePage() {
       <section className="mt-6 rounded-[28px] border border-[#eceef4] bg-white p-5 shadow-[0_12px_34px_rgba(17,24,39,0.04)] md:p-6">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <h2 className="text-[28px] font-bold tracking-[-0.04em] text-[#171717]">商品・サービス別ナレッジ</h2>
-            <p className="mt-1 text-[14px] text-[#7a808c]">商品ごとの概要、料金、機能、フロー、Q&Aを確認できます。</p>
+            <h2 className="text-[28px] font-bold tracking-[-0.04em] text-[#171717]">商材別ナレッジ</h2>
+            <p className="mt-1 text-[14px] text-[#7a808c]">商材ごとの概要、料金、機能、フロー、Q&Aを確認できます。</p>
           </div>
           <button
             type="button"
@@ -238,7 +234,7 @@ export default function SalesKnowledgePage() {
             className="inline-flex h-[42px] items-center gap-2 rounded-[14px] border border-[#f0c655] bg-white px-4 text-[13px] font-semibold text-[#171717] shadow-[0_8px_18px_rgba(17,24,39,0.05)]"
           >
             <PlusIcon />
-            商品を追加
+            商材を追加
           </button>
         </div>
 
@@ -257,7 +253,7 @@ export default function SalesKnowledgePage() {
               </div>
             </Link>
           ))}
-          <AddCard title="商品を追加" count="公式ナレッジの入口を作成" onClick={() => setProductDialogOpen(true)} />
+          <AddCard title="商材を追加" count="公式ナレッジの入口を作成" onClick={() => setProductDialogOpen(true)} />
         </div>
       </section>
 
@@ -267,7 +263,7 @@ export default function SalesKnowledgePage() {
           description="商談メモや、自分用にアレンジした内容"
           items={personalItems}
           emptyTitle="自分用メモを作成"
-          emptyBody="商品に紐づかないメモも保存できます"
+          emptyBody="商材に紐づかないメモも保存できます"
           actionLabel="メモを作成"
           onAction={() => openCreateDialog({ kind: "memo", scope: "personal" })}
         />
@@ -277,7 +273,7 @@ export default function SalesKnowledgePage() {
           description="管理者やチームから配られた公式情報"
           items={sharedItems}
           emptyTitle="共有ナレッジはまだありません"
-          emptyBody="商品別に作られた公式ナレッジもここに表示されます"
+          emptyBody="商材別に作られた公式ナレッジもここに表示されます"
           actionLabel={canCreateShared ? "公式ナレッジを作成" : undefined}
           onAction={
             canCreateShared
@@ -290,7 +286,7 @@ export default function SalesKnowledgePage() {
           <div className="flex items-center justify-between gap-3">
             <div>
               <h2 className="text-[22px] font-bold text-[#171717]">補助カテゴリ</h2>
-              <p className="mt-1 text-[13px] text-[#7a808c]">商品に紐づかない使い方や社内メモ</p>
+              <p className="mt-1 text-[13px] text-[#7a808c]">商材に紐づかない使い方や社内メモ</p>
             </div>
             <button
               type="button"
@@ -302,10 +298,14 @@ export default function SalesKnowledgePage() {
             </button>
           </div>
           <div className="mt-5 space-y-2">
-            <CategoryRow category={DEFAULT_CATEGORY} />
-            {categories.slice(0, 4).map((category) => (
+            {visibleCategories.map((category) => (
               <CategoryRow key={category.id} category={category} />
             ))}
+            {visibleCategories.length === 0 ? (
+              <div className="rounded-[14px] border border-dashed border-[#d7dde8] bg-[#fcfcfd] px-4 py-5 text-center text-[13px] text-[#7a808c]">
+                補助カテゴリはまだありません
+              </div>
+            ) : null}
           </div>
         </article>
       </section>
@@ -424,8 +424,8 @@ function ProductCreateDialog({
 
   return (
     <SimpleDialogFrame
-      title="商品を追加"
-      description="ナレッジを商品別に探せるようにします。"
+      title="商材を追加"
+      description="ナレッジを商材別に探せるようにします。"
       error={error}
       isSaving={isSaving}
       submitLabel="追加する"
@@ -433,7 +433,7 @@ function ProductCreateDialog({
       onSubmit={async (event) => {
         event.preventDefault();
         if (!name.trim()) {
-          setError("商品名を入力してください。");
+          setError("商材名を入力してください。");
           return;
         }
         if (logoFile && logoFile.type !== "image/png" && !logoFile.name.toLowerCase().endsWith(".png")) {
@@ -446,14 +446,14 @@ function ProductCreateDialog({
           await onSubmit({ name: name.trim(), logoFile });
           onClose();
         } catch (nextError) {
-          setError(nextError instanceof Error ? nextError.message : "商品の追加に失敗しました。");
+          setError(nextError instanceof Error ? nextError.message : "商材の追加に失敗しました。");
         } finally {
           setIsSaving(false);
         }
       }}
     >
       <label>
-        <span className="text-[13px] font-bold text-[#343b48]">商品名</span>
+        <span className="text-[13px] font-bold text-[#343b48]">商材名</span>
         <input
           value={name}
           onChange={(event) => setName(event.target.value)}

@@ -30,7 +30,7 @@ export default function SalesRoleplayResultsPage() {
   }, [companyId, isAdmin, userId]);
 
   return (
-    <main className="min-h-screen overflow-x-hidden bg-[#f7f8fb] px-5 py-5">
+    <main className="overflow-x-hidden bg-transparent px-5 pb-6 pt-5 md:px-8 md:pb-8 md:pt-6">
       <div className="mx-auto max-w-[1380px]">
         <RoleplayHeader activeStep="results" />
 
@@ -92,7 +92,7 @@ function ResultCard({ result }: { result: RoleplayResult }) {
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div className="min-w-0">
           <h2 className="truncate text-[20px] font-black text-[#171717]">{result.scenarioTitle}</h2>
-          <p className="mt-1 text-[13px] text-[#7a808c]">{result.productName || "商品未設定"} ・ {formatDate(result.createdAt)}</p>
+          <p className="mt-1 text-[13px] text-[#7a808c]">{result.productName || "商材未設定"} ・ {formatDate(result.createdAt)}</p>
         </div>
         <div className="rounded-[16px] bg-[#171717] px-4 py-3 text-center text-white">
           <div className="text-[24px] font-black leading-none">{result.score}</div>

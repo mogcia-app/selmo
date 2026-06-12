@@ -65,6 +65,41 @@ export type MeetingConversationLog = {
 export type MeetingAiSummary = {
   overview: string;
   bullets: string[];
+  diagnosis?: {
+    status: {
+      label: string;
+      stage:
+        | "relationship_building"
+        | "discovery"
+        | "proposal_preparation"
+        | "proposal_done"
+        | "comparison"
+        | "decision_pending"
+        | "stalled";
+      description: string;
+      tone: "positive" | "warning" | "neutral";
+      evidence: string[];
+    };
+    temperature: {
+      level: "high" | "middle" | "low";
+      stars: number;
+      label: string;
+      description: string;
+      evidence: string[];
+    };
+    consideration: {
+      score: number;
+      label: string;
+      description: string;
+      evidence: string[];
+    };
+    salesEvaluation: Array<{
+      label: string;
+      score: number;
+      description: string;
+      evidence: string[];
+    }>;
+  };
   manualCompliance?: {
     mode: "manual" | "generic";
     score: number | null;
@@ -162,6 +197,7 @@ export async function createMeeting(input: CreateMeetingInput) {
   const now = serverTimestamp();
   const companyId = resolveCompanyId(input.companyId);
   const salesDomain = input.salesDomain ?? "meeting";
+  const normalizedAudioDurationSec = input.audioDurationSec ?? null;
 
   await setDoc(meetingRef, {
     companyId,
@@ -180,7 +216,7 @@ export async function createMeeting(input: CreateMeetingInput) {
     audioDownloadUrl: null,
     audioFileName: input.audioFile?.name ?? null,
     audioSizeBytes: input.audioFile?.size ?? null,
-    audioDurationSec: input.audioDurationSec ?? null,
+    audioDurationSec: normalizedAudioDurationSec,
     audioDeletedAt: null,
     audioMimeType: input.audioFile?.type || "audio/mpeg",
     processingStatus: input.audioFile ? "uploading" : "uploaded",
@@ -196,12 +232,12 @@ export async function createMeeting(input: CreateMeetingInput) {
           transcriptionProbeSegments: [
             {
               startSec: 0,
-              endSec: 0,
+              endSec: normalizedAudioDurationSec ?? 0,
               text: input.transcriptText.trim(),
               speaker: null,
             },
           ],
-          transcriptionProbeDurationSec: null,
+          transcriptionProbeDurationSec: normalizedAudioDurationSec,
           transcriptionProbeTestedAt: now,
           conversationLogStatus: "completed",
           conversationLogModel: "manual-paste",
@@ -972,7 +1008,64 @@ function toAiSummary(value: unknown): MeetingAiSummary | null {
   return {
     overview,
     bullets: bullets.filter((item): item is string => typeof item === "string"),
+    diagnosis: toAiDiagnosis((value as { diagnosis?: unknown }).diagnosis),
     manualCompliance: toManualCompliance((value as { manualCompliance?: unknown }).manualCompliance),
+  };
+}
+
+function toAiDiagnosis(value: unknown): MeetingAiSummary["diagnosis"] {
+  if (!value || typeof value !== "object") {
+    return undefined;
+  }
+
+  const data = value as Record<string, unknown>;
+  const status = readRecord(data.status);
+  const temperature = readRecord(data.temperature);
+  const consideration = readRecord(data.consideration);
+  const salesEvaluation = Array.isArray(data.salesEvaluation)
+    ? data.salesEvaluation
+        .map((item) => {
+          const record = readRecord(item);
+          if (!record) return null;
+          const label = readString(record.label).trim();
+          const score = readClampedScore(record.score);
+          const description = readString(record.description).trim();
+          const evidence = readStringArray(record.evidence);
+          return label ? { label, score, description, evidence } : null;
+        })
+        .filter((item): item is { label: string; score: number; description: string; evidence: string[] } => Boolean(item))
+    : [];
+
+  if (!status || !temperature || !consideration) {
+    return undefined;
+  }
+
+  const stage = readString(status.stage);
+  const tone = readString(status.tone);
+  const level = readString(temperature.level);
+
+  return {
+    status: {
+      label: readString(status.label) || "前向きに検討中",
+      stage: isDiagnosisStage(stage) ? stage : "discovery",
+      description: readString(status.description),
+      tone: tone === "positive" || tone === "warning" || tone === "neutral" ? tone : "neutral",
+      evidence: readStringArray(status.evidence),
+    },
+    temperature: {
+      level: level === "high" || level === "middle" || level === "low" ? level : "middle",
+      stars: Math.min(5, Math.max(1, Math.round(readNumber(temperature.stars) ?? 3))),
+      label: readString(temperature.label) || "温度感は中程度",
+      description: readString(temperature.description),
+      evidence: readStringArray(temperature.evidence),
+    },
+    consideration: {
+      score: readClampedScore(consideration.score),
+      label: readString(consideration.label) || "検討の具体度",
+      description: readString(consideration.description),
+      evidence: readStringArray(consideration.evidence),
+    },
+    salesEvaluation,
   };
 }
 
@@ -996,4 +1089,33 @@ function toManualCompliance(value: unknown): MeetingAiSummary["manualCompliance"
 
 function readStringArray(value: unknown) {
   return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
+}
+
+function readRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" ? (value as Record<string, unknown>) : null;
+}
+
+function readString(value: unknown) {
+  return typeof value === "string" ? value : "";
+}
+
+function readNumber(value: unknown) {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function readClampedScore(value: unknown) {
+  const score = readNumber(value);
+  return score === null ? 0 : Math.min(100, Math.max(0, Math.round(score)));
+}
+
+function isDiagnosisStage(value: string): value is NonNullable<MeetingAiSummary["diagnosis"]>["status"]["stage"] {
+  return [
+    "relationship_building",
+    "discovery",
+    "proposal_preparation",
+    "proposal_done",
+    "comparison",
+    "decision_pending",
+    "stalled",
+  ].includes(value);
 }

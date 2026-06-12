@@ -204,7 +204,7 @@ export function KnowledgeCreateDialog({
           </label>
 
           <label>
-            <span className="text-[13px] font-bold text-[#343b48]">商品</span>
+            <span className="text-[13px] font-bold text-[#343b48]">商材</span>
             <select
               value={productId}
               onChange={(event) => setProductId(event.target.value)}

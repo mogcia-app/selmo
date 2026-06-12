@@ -85,7 +85,7 @@ export default function AdminMeetingDetailPage() {
                           <div className="mt-3 grid gap-3 md:grid-cols-2">
                             <ReviewList title="salesに表示された達成基準" items={meeting.aiSummary.manualCompliance.matchedCriteria} />
                             <ReviewList title="salesに表示された不足基準" items={meeting.aiSummary.manualCompliance.missingCriteria} />
-                            <ReviewList title="商品観点" items={meeting.aiSummary.manualCompliance.productNotes} />
+                            <ReviewList title="商材観点" items={meeting.aiSummary.manualCompliance.productNotes} />
                             <ReviewList title="次回フレーズ" items={meeting.aiSummary.manualCompliance.improvementPhrases} />
                           </div>
                         </div>

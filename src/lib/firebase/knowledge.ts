@@ -100,6 +100,8 @@ export type KnowledgeItem = {
   productId: string | null;
   ownerId: string | null;
   scope: "personal" | "shared";
+  sharedWithUserIds: string[];
+  visibleToAdmin: boolean;
   kind: "knowledge" | "memo" | "qa";
   tags: string[];
   links: KnowledgeLink[];
@@ -135,6 +137,8 @@ export type CreateKnowledgeItemInput = {
   productId?: string | null;
   ownerId: string;
   scope: "personal" | "shared";
+  sharedWithUserIds?: string[];
+  visibleToAdmin?: boolean;
   kind?: "knowledge" | "memo" | "qa";
   tags?: string[];
   links?: KnowledgeLink[];
@@ -235,17 +239,22 @@ export function subscribeToVisibleKnowledgeItems(
     where("companyId", "==", input.companyId),
     where("ownerId", "==", input.userId),
   );
+  const assignedQuery = query(
+    collection(firestore, "knowledgeItems"),
+    where("companyId", "==", input.companyId),
+    where("sharedWithUserIds", "array-contains", input.userId),
+  );
 
   let isActive = true;
 
-  Promise.all([getDocs(sharedQuery), getDocs(personalQuery)])
-    .then(([sharedSnapshot, personalSnapshot]) => {
+  Promise.all([getDocs(sharedQuery), getDocs(personalQuery), getDocs(assignedQuery)])
+    .then(([sharedSnapshot, personalSnapshot, assignedSnapshot]) => {
       if (!isActive) {
         return;
       }
 
       const itemsById = new Map<string, KnowledgeItem>();
-      [...sharedSnapshot.docs, ...personalSnapshot.docs].forEach((snapshot) => {
+      [...sharedSnapshot.docs, ...personalSnapshot.docs, ...assignedSnapshot.docs].forEach((snapshot) => {
         itemsById.set(snapshot.id, mapKnowledgeItem(snapshot));
       });
 
@@ -451,7 +460,7 @@ export async function addKnowledgeProductTab(input: { productId: string; title: 
     const snapshot = await transaction.get(productRef);
 
     if (!snapshot.exists()) {
-      throw new Error("商品が見つかりませんでした。");
+      throw new Error("商材が見つかりませんでした。");
     }
 
     const product = mapKnowledgeProduct(snapshot);
@@ -482,6 +491,8 @@ export async function createKnowledgeItem(input: CreateKnowledgeItemInput) {
       productId,
       ownerId: input.ownerId,
       scope: input.scope,
+      sharedWithUserIds: normalizeStringArray(input.sharedWithUserIds),
+      visibleToAdmin: input.visibleToAdmin === true,
       kind,
       tags: input.tags ?? [],
       links: input.links ?? [],
@@ -533,6 +544,8 @@ export async function updateKnowledgeItem(input: UpdateKnowledgeItemInput) {
       categoryId: nextCategoryId,
       productId: nextProductId,
       scope: input.scope,
+      sharedWithUserIds: normalizeStringArray(input.sharedWithUserIds),
+      visibleToAdmin: input.visibleToAdmin === true,
       kind: nextKind,
       tags: input.tags ?? [],
       links: input.links ?? [],
@@ -614,7 +627,7 @@ export async function uploadKnowledgeProductLogo(input: {
   onUploadProgress?: (progress: number) => void;
 }) {
   if (input.file.type !== "image/png" && !input.file.name.toLowerCase().endsWith(".png")) {
-    throw new Error("商品ロゴはPNGファイルを選択してください。");
+    throw new Error("商材ロゴはPNGファイルを選択してください。");
   }
 
   const { firebaseStorage } = assertFirebaseClient();
@@ -701,7 +714,7 @@ function mapKnowledgeProduct(snapshot: QueryDocumentSnapshot<DocumentData>): Kno
   return {
     id: snapshot.id,
     companyId: readNullableString(data.companyId),
-    name: readString(data.name, "未設定商品"),
+    name: readString(data.name, "未設定商材"),
     description: readString(data.description),
     targetCustomer: readString(data.targetCustomer),
     painPoints: readStringArray(data.painPoints),
@@ -740,6 +753,8 @@ function mapKnowledgeItem(snapshot: QueryDocumentSnapshot<DocumentData> | Docume
     productId: readNullableString(data.productId),
     ownerId: readNullableString(data.ownerId),
     scope,
+    sharedWithUserIds: readStringArray(data.sharedWithUserIds),
+    visibleToAdmin: data.visibleToAdmin === true,
     kind,
     tags: Array.isArray(data.tags) ? data.tags.filter((tag): tag is string => typeof tag === "string") : [],
     links: readKnowledgeLinks(data.links),
@@ -767,6 +782,10 @@ function readStringArray(value: unknown) {
   return Array.isArray(value)
     ? value.filter((item): item is string => typeof item === "string" && Boolean(item.trim()))
     : [];
+}
+
+function normalizeStringArray(value: string[] | undefined) {
+  return Array.from(new Set((value ?? []).map((item) => item.trim()).filter(Boolean)));
 }
 
 function readProductCustomFields(value: unknown): KnowledgeProductCustomField[] {

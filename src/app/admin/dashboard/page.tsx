@@ -173,7 +173,7 @@ export default function AdminDashboardPage() {
                 <OverviewMetric icon={<MeetingIcon />} label="商談件数" value={`${meetings.length}件`} note="登録済み商談" />
                 <OverviewMetric icon={<TargetIcon />} label="成約率" value={winRate === null ? "-" : `${winRate}%`} note={winRate === null ? "商談なし" : `成約 ${wonMeetings}件`} tone={winRate !== null && winRate >= 30 ? "good" : "normal"} />
                 <OverviewMetric icon={<SparkIcon />} label="分析済み商談" value={`${analyzedMeetingCount}件`} note={meetings.length > 0 ? `${Math.round((analyzedMeetingCount / meetings.length) * 100)}% 分析済み` : "商談データ待ち"} />
-                <OverviewMetric icon={<BookIcon />} label="共有ナレッジ" value={`${sharedKnowledgeCount}件`} note={`商品 ${products.length}件`} />
+                <OverviewMetric icon={<BookIcon />} label="共有ナレッジ" value={`${sharedKnowledgeCount}件`} note={`商材 ${products.length}件`} />
               </div>
             </section>
 
@@ -188,11 +188,11 @@ export default function AdminDashboardPage() {
                 </Panel>
 
                 <section className="grid gap-6 lg:grid-cols-2">
-                  <Panel title="商材別 成約率" actionLabel="商品を見る" href="/admin/products">
+                  <Panel title="商材別 成約率" actionLabel="商材を見る" href="/admin/products">
                     {productRows.length > 0 ? (
                       <ProductWinList rows={productRows} meetings={meetings} />
                     ) : (
-                      <EmptyState title="商品はまだありません" body="商品別ナレッジを追加すると、商材別の状況が表示されます。" />
+                      <EmptyState title="商材はまだありません" body="商材別ナレッジを追加すると、商材別の状況が表示されます。" />
                     )}
                   </Panel>
 

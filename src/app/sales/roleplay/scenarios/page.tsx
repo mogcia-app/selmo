@@ -80,7 +80,7 @@ export default function SalesRoleplayScenariosPage() {
   );
 
   return (
-    <main className="min-h-screen overflow-x-hidden bg-[#f7f8fb] px-5 py-5">
+    <main className="overflow-x-hidden bg-transparent px-5 pb-6 pt-5 md:px-8 md:pb-8 md:pt-6">
       <div className="mx-auto max-w-[1380px]">
         <RoleplayHeader activeStep="scenario" />
 
@@ -97,7 +97,7 @@ export default function SalesRoleplayScenariosPage() {
                 <p className="text-[12px] font-bold text-[#8a6500]">SCENARIOS</p>
                 <h2 className="mt-1 text-[28px] font-black tracking-[-0.04em] text-[#171717]">シナリオを選択</h2>
                 <p className="mt-2 text-[14px] leading-6 text-[#596273]">
-                  商品・顧客条件・反論パターンを選んで、AI顧客との練習を開始できます。
+                  商材・顧客条件・反論パターンを選んで、AI顧客との練習を開始できます。
                 </p>
               </div>
               <button
@@ -162,7 +162,7 @@ export default function SalesRoleplayScenariosPage() {
                       <DifficultyBadge difficulty={scenario.difficulty} />
                     </div>
                     <div className="mt-4 flex flex-wrap gap-2">
-                      <Pill>{scenario.productName || "商品未設定"}</Pill>
+                      <Pill>{scenario.productName || "商材未設定"}</Pill>
                       <Pill>{scenario.scenarioCategory || "分類未設定"}</Pill>
                       <Pill>{scenario.targetSegment || "ターゲット未設定"}</Pill>
                       <Pill>{scenario.customerRole}</Pill>
@@ -177,7 +177,7 @@ export default function SalesRoleplayScenariosPage() {
                 </span>
                 <h3 className="mt-4 text-[20px] font-black text-[#171717]">シナリオはまだありません</h3>
                 <p className="mx-auto mt-2 max-w-[460px] text-[14px] leading-7 text-[#7a808c]">
-                  管理者が商品別の練習テーマを追加すると、ここからロープレを開始できます。
+                  管理者が商材別の練習テーマを追加すると、ここからロープレを開始できます。
                 </p>
               </div>
             )}
@@ -282,8 +282,8 @@ function ScenarioCreateDialog({
   const selectedProduct = products.find((product) => product.id === productId);
 
   const handleGenerate = async () => {
-    if (!selectedProduct || !scenarioCategory || !targetSegment.trim()) {
-      onError("AI生成には商材、カテゴリー、ターゲット層を入力してください。");
+    if (!selectedProduct || !scenarioCategory) {
+      onError("AI生成には商材、カテゴリーを選択してください。");
       return;
     }
 
@@ -304,6 +304,7 @@ function ScenarioCreateDialog({
       });
       setTitle(generated.title);
       setDescription(generated.description);
+      setTargetSegment(generated.targetSegment);
       setCustomerRole(generated.customerRole);
       setCustomerProfile(generated.customerProfile);
       setGoal(generated.goal);
@@ -319,8 +320,8 @@ function ScenarioCreateDialog({
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (!selectedProduct || !scenarioCategory || !targetSegment.trim() || !title.trim() || !customerRole.trim() || !goal.trim()) {
-      onError("商材、カテゴリー、ターゲット層、タイトル、顧客役職、練習ゴールを入力してください。");
+    if (!selectedProduct || !scenarioCategory || !goal.trim()) {
+      onError("商材、カテゴリー、練習ゴールを入力してください。");
       return;
     }
 
@@ -329,13 +330,13 @@ function ScenarioCreateDialog({
     try {
       const payload = {
         companyId,
-        title: title.trim(),
+        title: title.trim() || `${selectedProduct.name} ${scenarioCategory}ロープレ`,
         description: description.trim(),
         productId: selectedProduct.id,
         productName: selectedProduct.name,
         scenarioCategory,
         targetSegment: targetSegment.trim(),
-        customerRole: customerRole.trim(),
+        customerRole: customerRole.trim() || "担当者",
         customerProfile: customerProfile.trim(),
         goal: goal.trim(),
         objections: splitLines(objections),
@@ -363,7 +364,7 @@ function ScenarioCreateDialog({
         <div className="flex items-start justify-between gap-4">
           <div>
             <h2 className="text-[24px] font-black tracking-[-0.03em] text-[#171717]">{scenario ? "シナリオ編集" : "シナリオ作成"}</h2>
-            <p className="mt-1 text-[13px] leading-6 text-[#7a808c]">商材・カテゴリー・ターゲット層からAI生成し、内容を編集して保存できます。</p>
+            <p className="mt-1 text-[13px] leading-6 text-[#7a808c]">商材・カテゴリーからAI生成し、ターゲット層もAIに選ばせられます。</p>
           </div>
           <button type="button" onClick={onClose} className="text-[24px] leading-none text-[#9aa1ac]" aria-label="閉じる">
             ×
@@ -386,18 +387,18 @@ function ScenarioCreateDialog({
               <option value="既存">既存</option>
             </select>
           </Field>
-          <Field label="ターゲット層" required>
-            <input value={targetSegment} onChange={(event) => setTargetSegment(event.target.value)} className="h-12 w-full rounded-[14px] border border-[#e4e8ef] bg-white px-4 text-[14px] text-[#171717] outline-none transition focus:border-[#e0bd4b]" placeholder="例：不動産" />
+          <Field label="ターゲット層">
+            <input value={targetSegment} onChange={(event) => setTargetSegment(event.target.value)} className="h-12 w-full rounded-[14px] border border-[#e4e8ef] bg-white px-4 text-[14px] text-[#171717] outline-none transition focus:border-[#e0bd4b]" placeholder="空欄ならAIが選定" />
           </Field>
           <div className="flex items-end">
             <button type="button" onClick={() => void handleGenerate()} disabled={isGenerating} className="h-12 w-full rounded-[14px] border border-[#171717] bg-[#171717] px-4 text-[13px] font-black text-white disabled:opacity-60">
               {isGenerating ? "生成中" : "AIでシナリオ生成"}
             </button>
           </div>
-          <Field label="タイトル" required className="md:col-span-2">
+          <Field label="タイトル" className="md:col-span-2">
             <input value={title} onChange={(event) => setTitle(event.target.value)} className="h-12 w-full rounded-[14px] border border-[#e4e8ef] bg-white px-4 text-[14px] text-[#171717] outline-none transition focus:border-[#e0bd4b]" placeholder="例：料金が高いと言われた時" />
           </Field>
-          <Field label="顧客役職" required>
+          <Field label="顧客役職">
             <input value={customerRole} onChange={(event) => setCustomerRole(event.target.value)} className="h-12 w-full rounded-[14px] border border-[#e4e8ef] bg-white px-4 text-[14px] text-[#171717] outline-none transition focus:border-[#e0bd4b]" placeholder="例：営業部長" />
           </Field>
           <Field label="難易度">
@@ -614,6 +615,7 @@ async function generateRoleplayScenario(input: {
     scenario?: {
       title?: string;
       description?: string;
+      targetSegment?: string;
       customerRole?: string;
       customerProfile?: string;
       goal?: string;
@@ -629,6 +631,7 @@ async function generateRoleplayScenario(input: {
   return {
     title: payload.scenario.title ?? "",
     description: payload.scenario.description ?? "",
+    targetSegment: payload.scenario.targetSegment ?? "",
     customerRole: payload.scenario.customerRole ?? "",
     customerProfile: payload.scenario.customerProfile ?? "",
     goal: payload.scenario.goal ?? "",
@@ -673,7 +676,7 @@ function buildMeetingInsights(input: {
         ...(meeting.aiSummary?.bullets ?? []).slice(0, 3).map((item) => `分析メモ: ${item}`),
         ...(compliance?.missingCriteria ?? []).slice(0, 4).map((item) => `不足基準: ${item}`),
         ...(compliance?.improvementPhrases ?? []).slice(0, 3).map((item) => `改善フレーズ: ${item}`),
-        ...(compliance?.productNotes ?? []).slice(0, 3).map((item) => `商品観点: ${item}`),
+        ...(compliance?.productNotes ?? []).slice(0, 3).map((item) => `商材観点: ${item}`),
         ...fillerInsights,
       ].filter(Boolean);
     })

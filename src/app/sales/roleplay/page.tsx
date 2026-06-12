@@ -153,7 +153,7 @@ export default function SalesRoleplayPage() {
   };
 
   return (
-    <main className="min-h-screen overflow-x-hidden bg-[#f7f8fb] px-5 py-5">
+    <main className="overflow-x-hidden bg-transparent px-5 pb-6 pt-5 md:px-8 md:pb-8 md:pt-6">
       <div className="mx-auto max-w-[1380px]">
         <RoleplayHeader activeStep="practice" />
 
@@ -167,7 +167,7 @@ export default function SalesRoleplayPage() {
           <section className="mt-4 grid gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
             <article className="flex min-h-[650px] flex-col rounded-[24px] border border-[#e2e6ee] bg-white shadow-[0_8px_24px_rgba(17,24,39,0.04)]">
               <div className="border-b border-[#eef1f5] px-5 py-4">
-                <p className="text-[12px] font-bold text-[#8a6500]">{scenario.productName || "商品未設定"}</p>
+                <p className="text-[12px] font-bold text-[#8a6500]">{scenario.productName || "商材未設定"}</p>
                 <h1 className="mt-1 text-[24px] font-black tracking-[-0.03em] text-[#171717]">{scenario.title}</h1>
               </div>
 
@@ -229,7 +229,7 @@ export default function SalesRoleplayPage() {
             <Image src="/mojiokoshi.png" alt="AIロープレ" width={180} height={180} priority className="mx-auto h-[140px] w-[140px] object-contain" />
             <h1 className="mt-5 text-[28px] font-black tracking-[-0.04em] text-[#171717]">シナリオを選択してください</h1>
             <p className="mx-auto mt-3 max-w-[560px] text-[15px] leading-7 text-[#596273]">
-              商品別の練習テーマを選択すると、AI顧客とのロープレを開始できます。
+              商材別の練習テーマを選択すると、AI顧客とのロープレを開始できます。
             </p>
             <Link href="/sales/roleplay/scenarios" className="mt-7 inline-flex h-12 items-center justify-center rounded-[14px] bg-[#ffd12f] px-7 text-[14px] font-black text-[#171717] shadow-[0_10px_22px_rgba(245,189,7,0.22)]">
               シナリオを選択

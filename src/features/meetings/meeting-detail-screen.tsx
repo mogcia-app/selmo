@@ -3,17 +3,15 @@
 import { FirebaseError } from "firebase/app";
 import Image from "next/image";
 import Link from "next/link";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { useAuth } from "@/features/auth/auth-provider";
 import { saveSalesActivityEvent } from "@/lib/firebase/activity";
 import {
-  getMeetingPurposeLabel,
   saveMeetingAiSummary,
   saveMeetingConversationLogs,
   saveMeetingTranscriptionProbe,
   subscribeToMeeting,
-  updateMeetingMetadata,
   type MeetingRecord,
 } from "@/lib/firebase/meetings";
 import { updateAudioProcessingJob } from "@/lib/firebase/operations";
@@ -23,17 +21,6 @@ const transcriptionRequestTimeoutMs = 10 * 60 * 1000;
 const transientBannerDurationMs = 5 * 1000;
 const monthlyLimitMessage =
   "月間利用上限に達しました。管理者にプラン変更または上限変更を依頼してください。";
-const meetingPurposeOptions: MeetingRecord["meetingPurpose"][] = [
-  "new_proposal",
-  "closing",
-  "existing_followup",
-  "relationship_building",
-  "check_in",
-  "upsell_cross_sell",
-  "onboarding",
-  "retention",
-];
-
 type DisplayLog = {
   id: string;
   startSec?: number | null;
@@ -77,15 +64,9 @@ export function MeetingDetailScreen({
   const [isTranscribing, setIsTranscribing] = useState(false);
   const [logSearch, setLogSearch] = useState("");
   const [transcriptViewMode, setTranscriptViewMode] = useState("all");
-  const [transcriptSidebarTab, setTranscriptSidebarTab] = useState<"keywords" | "important" | "extract">("keywords");
-  const [currentPlaybackSec, setCurrentPlaybackSec] = useState<number | null>(null);
+  const [transcriptSidebarTab, setTranscriptSidebarTab] = useState<"keywords" | "important" | "checkpoints">("keywords");
   const [selectedTranscriptBlockIndex, setSelectedTranscriptBlockIndex] = useState<number | null>(null);
   const [transcriptionVisualProgress, setTranscriptionVisualProgress] = useState(12);
-  const [draftMeetingPurpose, setDraftMeetingPurpose] = useState<MeetingRecord["meetingPurpose"]>("new_proposal");
-  const [draftStatus, setDraftStatus] = useState<MeetingRecord["status"]>("considering");
-  const [draftMemo, setDraftMemo] = useState("");
-  const [isSavingMetadata, setIsSavingMetadata] = useState(false);
-  const [metadataMessage, setMetadataMessage] = useState<string | null>(null);
   const [transcriptScrollbar, setTranscriptScrollbar] = useState<ScrollbarMetrics>({
     thumbHeight: 0,
     thumbTop: 0,
@@ -95,6 +76,7 @@ export function MeetingDetailScreen({
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const transcriptBlockRefs = useRef<Array<HTMLElement | null>>([]);
   const transcriptScrollRef = useRef<HTMLDivElement | null>(null);
+  const summaryGenerationRequestedRef = useRef(false);
 
   useEffect(() => {
     const unsubscribe = subscribeToMeeting(
@@ -117,6 +99,10 @@ export function MeetingDetailScreen({
   }, [meetingId]);
 
   useEffect(() => {
+    summaryGenerationRequestedRef.current = false;
+  }, [meetingId]);
+
+  useEffect(() => {
     if (!meeting) {
       return;
     }
@@ -126,9 +112,6 @@ export function MeetingDetailScreen({
       return;
     }
 
-    setDraftMeetingPurpose(meeting.meetingPurpose);
-    setDraftStatus(meeting.status);
-    setDraftMemo(meeting.memo ?? "");
   }, [meeting, profile]);
 
   useEffect(() => {
@@ -176,7 +159,7 @@ export function MeetingDetailScreen({
     };
   }, [isTranscribing, meeting?.audioDurationSec]);
 
-  async function generateAiSummaryInBackground(transcriptText: string) {
+  const generateAiSummaryInBackground = useCallback(async (transcriptText: string) => {
     try {
       await saveMeetingAiSummary(meetingId, {
         status: "running",
@@ -195,6 +178,8 @@ export function MeetingDetailScreen({
           userId: profile?.uid ?? meeting?.userId ?? null,
           productName: meeting?.productType ?? null,
           meetingPurpose: meeting?.meetingPurpose ?? null,
+          customerType: meeting?.customerType ?? null,
+          salesDomain: meeting?.salesDomain ?? null,
           transcriptText,
         }),
         timeoutMs: null,
@@ -258,7 +243,7 @@ export function MeetingDetailScreen({
         // noop
       }
     }
-  }
+  }, [meeting, meetingId, profile]);
 
   async function runTranscription({
     model,
@@ -363,18 +348,10 @@ export function MeetingDetailScreen({
 
       setTranscriptionVisualProgress(100);
 
-      if (payload.text?.trim()) {
-        await updateAudioProcessingJob(meetingId, {
-          status: "analyzing",
-          errorMessage: null,
-        }).catch(() => undefined);
-        void generateAiSummaryInBackground(payload.text);
-      } else {
-        await updateAudioProcessingJob(meetingId, {
-          status: "completed",
-          errorMessage: null,
-        }).catch(() => undefined);
-      }
+      await updateAudioProcessingJob(meetingId, {
+        status: "completed",
+        errorMessage: null,
+      }).catch(() => undefined);
     } catch (error) {
       const message =
         error instanceof FirebaseError
@@ -438,60 +415,35 @@ export function MeetingDetailScreen({
     setEditableLogs(baseLogs);
   }, [baseLogs]);
 
-  const filteredPreviewLogs = useMemo(() => {
-    const normalizedSearch = logSearch.trim().toLowerCase();
-
-    return editableLogs
-      .map((log, index) => ({ log, index }))
-      .filter(({ log }) => {
-        const matchesSearch =
-          normalizedSearch.length === 0 ||
-          log.text.toLowerCase().includes(normalizedSearch) ||
-          log.label.toLowerCase().includes(normalizedSearch);
-
-        return matchesSearch;
-      });
-  }, [editableLogs, logSearch]);
-
-  const displayLogs = useMemo(() => {
-    if (filteredPreviewLogs.length > 0) {
-      return filteredPreviewLogs;
-    }
-
-    if (editableLogs.length > 0) {
-      return [];
-    }
-
-    return buildTranscriptPreviewLogs(meeting?.transcriptionProbeText).map((log, index) => ({
-      log,
-      index,
-    }));
-  }, [editableLogs.length, filteredPreviewLogs, meeting?.transcriptionProbeText]);
-
   const aiSummary = useMemo<NonNullable<MeetingRecord["aiSummary"]>>(
     () => meeting?.aiSummary ?? buildAiSummary(meeting?.transcriptionProbeText, editableLogs),
     [editableLogs, meeting?.aiSummary, meeting?.transcriptionProbeText],
   );
   const transcriptMetrics = useMemo(() => buildTranscriptMetrics(editableLogs), [editableLogs]);
+  const isManualTranscript = meeting?.transcriptionProbeModel === "manual-paste";
+  const shouldShowTranscriptionRetry =
+    !isManualTranscript &&
+    Boolean(meeting?.audioDownloadUrl) &&
+    (meeting?.transcriptionProbeStatus === "failed" || editableLogs.length === 0);
   const analysisPanels = useMemo(
     () => buildAnalysisPanels(aiSummary, editableLogs),
     [aiSummary, editableLogs],
   );
   const aiScorecards = useMemo(
-    () => buildAiScorecards(transcriptMetrics, meeting?.status ?? "considering"),
-    [meeting?.status, transcriptMetrics],
+    () => buildAiScorecards(transcriptMetrics, meeting?.status ?? "considering", aiSummary.diagnosis?.salesEvaluation, editableLogs, meeting?.salesDomain ?? "meeting"),
+    [aiSummary.diagnosis?.salesEvaluation, editableLogs, meeting?.salesDomain, meeting?.status, transcriptMetrics],
   );
-  const considerationScore = useMemo(
-    () => buildDecisionMakerScore(meeting?.status ?? "considering"),
-    [meeting?.status],
+  const considerationSummary = useMemo(
+    () => buildConsiderationSummary(meeting?.status ?? "considering", aiSummary.diagnosis?.consideration, editableLogs),
+    [aiSummary.diagnosis?.consideration, editableLogs, meeting?.status],
   );
   const meetingStatusSummary = useMemo(
-    () => buildMeetingStatusSummary(meeting?.status ?? "considering"),
-    [meeting?.status],
+    () => buildMeetingStatusSummary(meeting?.status ?? "considering", aiSummary.diagnosis?.status, editableLogs),
+    [aiSummary.diagnosis?.status, editableLogs, meeting?.status],
   );
   const temperatureSummary = useMemo(
-    () => buildTemperatureSummary(meeting?.status ?? "considering"),
-    [meeting?.status],
+    () => buildTemperatureSummary(meeting?.status ?? "considering", aiSummary.diagnosis?.temperature, editableLogs),
+    [aiSummary.diagnosis?.temperature, editableLogs, meeting?.status],
   );
   const mentionedNextDate = useMemo(
     () =>
@@ -510,84 +462,51 @@ export function MeetingDetailScreen({
         .join("\n\n"),
     [editableLogs],
   );
+
+  useEffect(() => {
+    if (!isSummaryView || !meeting || summaryGenerationRequestedRef.current) {
+      return;
+    }
+
+    if (meeting.aiSummary || meeting.aiSummaryStatus === "running") {
+      return;
+    }
+
+    const transcriptText = exportTranscriptText.trim() || meeting.transcriptionProbeText?.trim() || "";
+    if (!transcriptText) {
+      return;
+    }
+
+    summaryGenerationRequestedRef.current = true;
+    void generateAiSummaryInBackground(transcriptText);
+  }, [
+    exportTranscriptText,
+    generateAiSummaryInBackground,
+    isSummaryView,
+    meeting,
+  ]);
   const transcriptImportantLogs = useMemo(
     () => buildImportantTranscriptLogs(editableLogs).slice(0, 3),
     [editableLogs],
   );
   const transcriptFrequentWords = useMemo(() => buildFrequentWords(editableLogs), [editableLogs]);
   const transcriptAiExtracts = useMemo(
-    () =>
-      [
-        ...analysisPanels.issues,
-        ...analysisPanels.requests,
-        ...analysisPanels.actions,
-      ]
-        .slice(0, 4)
-        .map((text, index) => ({
-          label: `ポイント${index + 1}`,
-          text,
-        })),
-    [analysisPanels],
+    () => buildGroundedTranscriptExtractLogs(editableLogs).slice(0, 4),
+    [editableLogs],
   );
-  const transcriptReadingBlocks = useMemo(() => buildTranscriptReadingBlocks(displayLogs.map(({ log }) => log)), [displayLogs]);
-  const activeTranscriptBlockIndex = useMemo(
-    () =>
-      currentPlaybackSec === null
-        ? -1
-        : transcriptReadingBlocks.findIndex((block) =>
-            block.ranges.some(
-              (range) =>
-                typeof range.startSec === "number" &&
-                typeof range.endSec === "number" &&
-                currentPlaybackSec >= range.startSec &&
-                currentPlaybackSec <= range.endSec,
-            ),
-          ),
-    [currentPlaybackSec, transcriptReadingBlocks],
-  );
-  const visibleTranscriptBlockIndex =
-    activeTranscriptBlockIndex >= 0 ? activeTranscriptBlockIndex : selectedTranscriptBlockIndex;
+  const transcriptReadingBlocks = useMemo(() => buildTranscriptReadingBlocks(editableLogs), [editableLogs]);
+  const normalizedLogSearch = logSearch.trim().toLowerCase();
+  const visibleTranscriptReadingBlocks = useMemo(() => {
+    const indexedBlocks = transcriptReadingBlocks.map((block, index) => ({ block, index }));
 
-  useEffect(() => {
-    const audioElement = audioRef.current;
-
-    if (!audioElement) {
-      return;
+    if (!normalizedLogSearch) {
+      return indexedBlocks;
     }
 
-    const handleTimeUpdate = () => {
-      setCurrentPlaybackSec(audioElement.currentTime);
-    };
-    const handlePlay = () => {
-      setCurrentPlaybackSec(audioElement.currentTime);
-    };
-    const handleEnded = () => {
-      setCurrentPlaybackSec(null);
-    };
-
-    audioElement.addEventListener("timeupdate", handleTimeUpdate);
-    audioElement.addEventListener("play", handlePlay);
-    audioElement.addEventListener("seeking", handleTimeUpdate);
-    audioElement.addEventListener("ended", handleEnded);
-    audioElement.addEventListener("pause", handleTimeUpdate);
-
-    return () => {
-      audioElement.removeEventListener("timeupdate", handleTimeUpdate);
-      audioElement.removeEventListener("play", handlePlay);
-      audioElement.removeEventListener("seeking", handleTimeUpdate);
-      audioElement.removeEventListener("ended", handleEnded);
-      audioElement.removeEventListener("pause", handleTimeUpdate);
-    };
-  }, [meeting?.audioDownloadUrl]);
-
-  useEffect(() => {
-    if (activeTranscriptBlockIndex < 0) {
-      return;
-    }
-
-    const target = transcriptBlockRefs.current[activeTranscriptBlockIndex];
-    target?.scrollIntoView({ block: "nearest", behavior: "smooth" });
-  }, [activeTranscriptBlockIndex]);
+    return indexedBlocks.filter(({ block }) =>
+      block.text.toLowerCase().includes(normalizedLogSearch),
+    );
+  }, [normalizedLogSearch, transcriptReadingBlocks]);
 
   function handleJumpToTranscriptLog(log: DisplayLog) {
     const targetIndex = findTranscriptReadingBlockIndexForLog(log, transcriptReadingBlocks);
@@ -641,8 +560,7 @@ export function MeetingDetailScreen({
       window.removeEventListener("resize", updateTranscript);
     };
   }, [
-    displayLogs,
-    transcriptReadingBlocks,
+    visibleTranscriptReadingBlocks,
   ]);
 
   async function handleCopyTranscript() {
@@ -679,42 +597,6 @@ export function MeetingDetailScreen({
     setErrorMessage(null);
   }
 
-  async function handleSaveMeetingMetadata() {
-    if (!meeting) {
-      return;
-    }
-
-    setIsSavingMetadata(true);
-    setMetadataMessage(null);
-    setErrorMessage(null);
-
-    try {
-      await updateMeetingMetadata(meeting.id, {
-        customerName: meeting.customerName,
-        productType: meeting.productType,
-        customerType: meeting.customerType,
-        meetingPurpose: draftMeetingPurpose,
-        recordedAt: meeting.recordedAt,
-        location: meeting.location,
-        memo: draftMemo.trim(),
-        status: draftStatus,
-      });
-      setMetadataMessage("商談情報を保存しました。");
-    } catch (error) {
-      if (error instanceof FirebaseError) {
-        setErrorMessage(
-          error.code === "permission-denied"
-            ? "この商談を更新する権限がありません。"
-            : "商談情報の保存に失敗しました。",
-        );
-      } else {
-        setErrorMessage("商談情報の保存に失敗しました。");
-      }
-    } finally {
-      setIsSavingMetadata(false);
-    }
-  }
-
   if (isLoading) {
     return (
       <main className="min-h-screen bg-[#f7f7f8] px-5 py-6 md:px-8 md:py-7">
@@ -746,11 +628,16 @@ export function MeetingDetailScreen({
   }
 
   const meetingTitle = meeting.customerName || "未設定";
-  const attendeeLines = [
-    `${profile?.name ?? "担当者"}`,
-    `${meeting.customerName || "お客様"}`,
-    meeting.location ? `${meeting.location}` : null,
-  ].filter(Boolean) as string[];
+  const isTeleapo = meeting.salesDomain === "teleapo";
+  const domainCopy = {
+    statusTitle: isTeleapo ? "架電ステータス" : "商談ステータス",
+    evaluationTitle: isTeleapo ? "架電評価サマリー" : "商談評価サマリー",
+    pointTitle: isTeleapo ? "AIによる架電ポイント分析" : "AIによる商談ポイント分析",
+    metaTitle: isTeleapo ? "架電名" : "商談名",
+    manualDescription: isTeleapo
+      ? "管理者が登録した成功基準・商品情報をもとに、次の架電で直すべきポイントを整理しています。"
+      : "管理者が登録した成功基準・商品情報をもとに、次の商談で直すべきポイントを整理しています。",
+  };
 
   return (
     <main className="min-h-screen bg-[#f5f6f8] px-5 py-6 md:px-8 md:py-8">
@@ -786,7 +673,6 @@ export function MeetingDetailScreen({
                 </div>
               </div>
             </div>
-            <HeaderActionButton icon={<RefreshGlyph />} label="分析を再実行" />
           </div>
 
           <article className="mt-4 rounded-[24px] bg-white p-6">
@@ -797,24 +683,25 @@ export function MeetingDetailScreen({
                 accent="amber"
                 description={aiSummary.overview}
                 className="xl:min-h-[188px]"
-                actionLabel="要約を再生成"
-                actionIcon={<RefreshGlyph />}
               />
               <StatusSummaryCard
-                title="商談ステータス"
+                title={domainCopy.statusTitle}
                 label={meetingStatusSummary.label}
                 description={meetingStatusSummary.description}
                 tone={meetingStatusSummary.tone}
+                evidence={meetingStatusSummary.evidence}
               />
               <TemperatureSummaryCard
                 title="温度感"
                 stars={temperatureSummary.stars}
                 description={temperatureSummary.description}
+                evidence={temperatureSummary.evidence}
               />
               <ConsiderationSummaryCard
                 title="検討度"
-                score={Math.round(considerationScore * 20)}
-                description={temperatureSummary.shortLabel}
+                score={considerationSummary.score}
+                description={considerationSummary.description}
+                evidence={considerationSummary.evidence}
               />
             </div>
 
@@ -839,12 +726,12 @@ export function MeetingDetailScreen({
           </article>
 
           {aiSummary.manualCompliance ? (
-            <ManualComplianceInsight compliance={aiSummary.manualCompliance} />
+            <ManualComplianceInsight compliance={aiSummary.manualCompliance} manualDescription={domainCopy.manualDescription} />
           ) : null}
 
           <article className="mt-6 rounded-[24px] border border-[#eceef4] bg-white p-6 shadow-[0_6px_18px_rgba(17,24,39,0.04)]">
-            <div className="text-[18px] font-bold text-[#171717]">商談評価サマリー</div>
-            <div className="mt-6 grid gap-4 xl:grid-cols-4">
+            <div className="text-[18px] font-bold text-[#171717]">{domainCopy.evaluationTitle}</div>
+            <div className="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-5">
               {aiScorecards.map((score) => (
                 <SummaryMetricCard
                   key={score.label}
@@ -852,7 +739,8 @@ export function MeetingDetailScreen({
                   value={`${score.value}`}
                   unit="/100"
                   color={score.color}
-                  description={buildScoreDescription(score.label, score.value)}
+                  description={buildScoreDescription(score.label, score.value, score.description)}
+                  evidence={score.evidence}
                   variant="ring"
                 />
               ))}
@@ -860,15 +748,15 @@ export function MeetingDetailScreen({
           </article>
 
           <article className="mt-5 rounded-[24px] border border-[#eceef4] bg-white p-6 shadow-[0_6px_18px_rgba(17,24,39,0.04)]">
-            <div className="text-[18px] font-bold text-[#171717]">AIによる商談ポイント分析</div>
+            <div className="text-[18px] font-bold text-[#171717]">{domainCopy.pointTitle}</div>
             <div className="mt-3 text-[13px] leading-6 text-[#7a808c]">
               顧客視点の要点と、次回の進め方につながるポイントを整理しています。
             </div>
 
             <div className="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-              <EvidenceInsightCard title="顧客の課題" icon={<IssueGlyph />} bullets={analysisPanels.issues} evidenceCount={8} />
-              <EvidenceInsightCard title="顧客の要望" icon={<InterestGlyph />} bullets={analysisPanels.requests} evidenceCount={7} />
-              <EvidenceInsightCard title="顧客の不安・懸念" icon={<ConcernGlyph />} bullets={analysisPanels.concerns} evidenceCount={6} />
+              <EvidenceInsightCard title="顧客の課題" icon={<IssueGlyph />} bullets={analysisPanels.issues} evidence={buildTranscriptEvidence(editableLogs, 8)} />
+              <EvidenceInsightCard title="顧客の要望" icon={<InterestGlyph />} bullets={analysisPanels.requests} evidence={buildTranscriptEvidence(editableLogs, 7)} />
+              <EvidenceInsightCard title="顧客の不安・懸念" icon={<ConcernGlyph />} bullets={analysisPanels.concerns} evidence={buildTranscriptEvidence(editableLogs, 6)} />
               <ActionInsightCard actions={analysisPanels.actions} mentionedNextDate={mentionedNextDate} />
             </div>
           </article>
@@ -876,15 +764,32 @@ export function MeetingDetailScreen({
           <article className="mt-5 rounded-[24px] border border-[#eceef4] bg-white p-6 shadow-[0_6px_18px_rgba(17,24,39,0.04)]">
             <div className="text-[18px] font-bold text-[#171717]">AIからのフィードバック</div>
             <div className="mt-5 grid gap-4 md:grid-cols-3">
-              <FeedbackInsightCard title="良かった点" tone="positive" bullets={buildFeedbackBullets(aiScorecards, "positive")} footer="根拠となる発話を見る（5件）" />
-              <FeedbackInsightCard title="改善ポイント" tone="warning" bullets={buildFeedbackBullets(aiScorecards, "warning")} footer="根拠となる発話を見る（4件）" />
-              <FeedbackInsightCard title="次回意識すること" tone="info" bullets={buildFeedbackBullets(aiScorecards, "next")} footer="詳細なアドバイスを見る" />
+              <FeedbackInsightCard
+                title="良かった点"
+                tone="positive"
+                bullets={buildFeedbackBullets(aiScorecards, "positive")}
+                footer="根拠となる発話を見る"
+                details={buildTranscriptEvidence(editableLogs, 5)}
+              />
+              <FeedbackInsightCard
+                title="改善ポイント"
+                tone="warning"
+                bullets={buildFeedbackBullets(aiScorecards, "warning")}
+                footer="根拠となる発話を見る"
+                details={buildTranscriptEvidence(editableLogs, 4)}
+              />
+              <FeedbackInsightCard
+                title="次回意識すること"
+                tone="info"
+                bullets={buildFeedbackBullets(aiScorecards, "next")}
+                footer="詳細なアドバイスを見る"
+                details={buildDetailedAdvice(aiScorecards, analysisPanels.actions)}
+              />
             </div>
           </article>
 
           <div className="mt-5 rounded-[18px] border border-[#eceef4] bg-[#fffaf0] px-5 py-4 text-[14px] leading-7 text-[#6f6250]">
-            この分析は文字起こしデータをもとにAIが自動で生成しています。まだ誤りが含まれる可能性があります。
-            重要な判断は必ずご自身でご確認ください。
+            この分析は文字起こしデータをもとにAIが自動で生成しています。誤りが含まれる可能性があるため、重要な判断は必ずご自身でご確認ください。
           </div>
         </section>
         ) : null}
@@ -903,15 +808,17 @@ export function MeetingDetailScreen({
                 <h2 className="text-[24px] font-bold tracking-[-0.03em] text-[#171717]">文字起こし</h2>
               </div>
               <div className="flex flex-wrap gap-3">
-              <HeaderActionButton
-                icon={<SparkGlyph />}
-                label={isTranscribing ? "文字起こし中..." : "文字起こしを実行"}
-                onClick={() => {
-                  void handleRunTranscription();
-                }}
-                disabled={isTranscribing}
-                variant="warm"
-              />
+              {shouldShowTranscriptionRetry ? (
+                <HeaderActionButton
+                  icon={<SparkGlyph />}
+                  label={isTranscribing ? "文字起こし中..." : "文字起こしを再実行"}
+                  onClick={() => {
+                    void handleRunTranscription();
+                  }}
+                  disabled={isTranscribing}
+                  variant="warm"
+                />
+              ) : null}
               <Link
                 href={`/meetings/${meetingId}/summary`}
                 className="inline-flex h-[38px] items-center gap-1.5 rounded-[12px] border border-[#ead8a8] bg-white px-3 text-[12px] font-semibold text-[#6c5730] shadow-[0_4px_12px_rgba(15,23,42,0.05)] transition hover:border-[#ddc173] hover:bg-[#fffaf0]"
@@ -939,8 +846,8 @@ export function MeetingDetailScreen({
           </div>
 
           <div className="mt-4 overflow-hidden rounded-[20px] border border-[#eceef4] bg-white">
-            <div className="grid gap-0 xl:grid-cols-[1.1fr_1.45fr_0.56fr_1.8fr]">
-              <TranscriptMetaItem label="商談名" value={meetingTitle} className="xl:border-r xl:border-[#eceef4]" />
+            <div className="grid gap-0 xl:grid-cols-[1fr_1.4fr]">
+              <TranscriptMetaItem label={domainCopy.metaTitle} value={meetingTitle} className="xl:border-r xl:border-[#eceef4]" />
               <TranscriptMetaItem
                 label="日時"
                 value={
@@ -948,77 +855,21 @@ export function MeetingDetailScreen({
                     ? formatMeetingDateTimeRange(meeting.recordedAt, meeting.audioDurationSec ?? null)
                     : "未設定"
                 }
-                className="xl:border-r xl:border-[#eceef4]"
               />
-              <TranscriptMetaItem
-                label="時間"
-                value={meeting.audioDurationSec !== null ? formatDuration(meeting.audioDurationSec) : "未取得"}
-                className="xl:border-r xl:border-[#eceef4]"
-              />
-              <TranscriptMetaItem label="参加者" value={attendeeLines.join(" / ")} />
             </div>
 
             <div className="border-t border-[#eceef4] px-5 py-4">
               <div className="min-w-0">
                 {meeting.audioDownloadUrl ? (
                   <audio ref={audioRef} controls src={meeting.audioDownloadUrl} className="w-full" />
+                ) : isManualTranscript ? (
+                  <div className="rounded-[14px] border border-[#e6eaf0] bg-[#fcfcfd] px-4 py-3 text-[13px] leading-6 text-[#7a808c]">
+                    文字起こし貼り付けで登録されたため、音声ファイルはありません。
+                  </div>
                 ) : (
                   <div className="text-[13px] text-[#7a808c]">音声ファイルの保存がまだ完了していません。</div>
                 )}
               </div>
-            </div>
-          </div>
-
-          <div className="mt-4 grid gap-4 rounded-[20px] border border-[#eceef4] bg-[#fffdf8] p-4 xl:grid-cols-[0.72fr_0.72fr_1.28fr_auto] xl:items-end">
-            <div>
-              <div className="text-[13px] font-semibold text-[#505866]">商談目的</div>
-              <select
-                value={draftMeetingPurpose}
-                onChange={(event) => setDraftMeetingPurpose(event.target.value as MeetingRecord["meetingPurpose"])}
-                className="mt-2 h-[44px] w-full rounded-[12px] border border-[#d8dde6] bg-white px-4 text-[14px] text-[#171717] outline-none"
-              >
-                {meetingPurposeOptions.map((option) => (
-                  <option key={option} value={option}>
-                    {getMeetingPurposeLabel(option)}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <div className="text-[13px] font-semibold text-[#505866]">成約/失注ステータス</div>
-              <select
-                value={draftStatus}
-                onChange={(event) => setDraftStatus(event.target.value as MeetingRecord["status"])}
-                className="mt-2 h-[44px] w-full rounded-[12px] border border-[#d8dde6] bg-white px-4 text-[14px] text-[#171717] outline-none"
-              >
-                <option value="considering">検討中</option>
-                <option value="won">成約</option>
-                <option value="lost">失注</option>
-              </select>
-            </div>
-            <div>
-              <div className="text-[13px] font-semibold text-[#505866]">営業メモ</div>
-              <textarea
-                value={draftMemo}
-                onChange={(event) => setDraftMemo(event.target.value)}
-                placeholder="次回アクション、顧客の不安、上司に確認したいことなど"
-                className="mt-2 min-h-[84px] w-full resize-y rounded-[12px] border border-[#d8dde6] bg-white px-4 py-3 text-[14px] leading-7 text-[#171717] outline-none placeholder:text-[#9aa1ac]"
-              />
-            </div>
-            <div className="flex flex-col gap-2">
-              <button
-                type="button"
-                onClick={() => {
-                  void handleSaveMeetingMetadata();
-                }}
-                disabled={isSavingMetadata}
-                className="inline-flex h-[44px] items-center justify-center rounded-[12px] bg-[#171717] px-5 text-[13px] font-semibold text-white transition disabled:cursor-not-allowed disabled:bg-[#9ca3af]"
-              >
-                {isSavingMetadata ? "保存中..." : "保存する"}
-              </button>
-              {metadataMessage ? (
-                <div className="text-center text-[12px] font-semibold text-[#2f8f56]">{metadataMessage}</div>
-              ) : null}
             </div>
           </div>
 
@@ -1082,21 +933,22 @@ export function MeetingDetailScreen({
                     </div>
                     <p className="mt-5 text-[8px] font-medium text-[#8a909b]">しばらくお待ちください</p>
                   </div>
-                ) : displayLogs.length > 0 ? (
+                ) : transcriptReadingBlocks.length > 0 ? (
                   <>
                     <div className="relative min-h-0 flex-1">
                     <div
                       ref={transcriptScrollRef}
                       className="always-visible-scrollbar min-h-0 h-full space-y-4 overflow-y-scroll pr-6"
                     >
-                      {transcriptReadingBlocks.map((block, index) => (
+                      {visibleTranscriptReadingBlocks.length > 0 ? (
+                        visibleTranscriptReadingBlocks.map(({ block, index }) => (
                         <article
                           key={`reading_block_${index}`}
                           ref={(node) => {
                             transcriptBlockRefs.current[index] = node;
                           }}
                           className={`max-w-[94%] rounded-[18px] border px-5 py-4 shadow-[0_3px_10px_rgba(17,24,39,0.03)] transition ${
-                            visibleTranscriptBlockIndex === index
+                            selectedTranscriptBlockIndex === index
                               ? "border-[#171717] bg-[#f8fafc] shadow-[0_8px_22px_rgba(17,24,39,0.08)]"
                               : "border-[#eceef4] bg-white"
                           }`}
@@ -1104,12 +956,12 @@ export function MeetingDetailScreen({
                           <div className="mb-3 flex items-center gap-2">
                             <span
                               className={`h-2 w-2 rounded-full ${
-                                visibleTranscriptBlockIndex === index ? "bg-[#171717]" : "bg-[#ffd54a]"
+                                selectedTranscriptBlockIndex === index ? "bg-[#171717]" : "bg-[#ffd54a]"
                               }`}
                             />
                             <span
                               className={`text-[12px] font-semibold tracking-[0.12em] ${
-                                visibleTranscriptBlockIndex === index ? "text-[#171717]" : "text-[#9aa1ac]"
+                                selectedTranscriptBlockIndex === index ? "text-[#171717]" : "text-[#9aa1ac]"
                               }`}
                             >
                               {String(index + 1).padStart(3, "0")}
@@ -1119,7 +971,12 @@ export function MeetingDetailScreen({
                             {renderHighlightedText(block.text, logSearch)}
                           </p>
                         </article>
-                      ))}
+                        ))
+                      ) : (
+                        <div className="rounded-[18px] border border-dashed border-[#d9dee7] bg-[#fcfcfd] px-5 py-10 text-[14px] leading-7 text-[#7a808c]">
+                          該当する文字起こしブロックがありません。
+                        </div>
+                      )}
                     </div>
                     <div className="pointer-events-none absolute inset-y-0 right-0 w-3 rounded-full bg-[#fff4d6]">
                       {transcriptScrollbar.isScrollable ? (
@@ -1155,17 +1012,17 @@ export function MeetingDetailScreen({
                   </button>
                   <button
                     type="button"
-                    onClick={() => setTranscriptSidebarTab("extract")}
-                    className={`rounded-[12px] px-3 py-2.5 text-center transition ${transcriptSidebarTab === "extract" ? "bg-[#ffcf33] text-[#5f4700] shadow-[0_4px_10px_rgba(240,180,0,0.18)]" : "text-[#7a808c] hover:bg-white hover:text-[#5f4700]"}`}
-                  >
-                    AI抽出
-                  </button>
-                  <button
-                    type="button"
                     onClick={() => setTranscriptSidebarTab("important")}
                     className={`rounded-[12px] px-3 py-2.5 text-center transition ${transcriptSidebarTab === "important" ? "bg-[#ffcf33] text-[#5f4700] shadow-[0_4px_10px_rgba(240,180,0,0.18)]" : "text-[#7a808c] hover:bg-white hover:text-[#5f4700]"}`}
                   >
-                    重要な発言
+                    注目発言
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setTranscriptSidebarTab("checkpoints")}
+                    className={`rounded-[12px] px-3 py-2.5 text-center transition ${transcriptSidebarTab === "checkpoints" ? "bg-[#ffcf33] text-[#5f4700] shadow-[0_4px_10px_rgba(240,180,0,0.18)]" : "text-[#7a808c] hover:bg-white hover:text-[#5f4700]"}`}
+                  >
+                    確認ポイント
                   </button>
                 </div>
 
@@ -1211,35 +1068,27 @@ export function MeetingDetailScreen({
                 ) : (
                   <div className="flex min-h-0 flex-1 flex-col pt-4">
                     <div className="min-h-0 flex-1 space-y-3 overflow-y-auto pr-1">
-                      {transcriptAiExtracts.map((item, index) => (
-                        <div key={`${item.label}_${index}`} className="rounded-[18px] border border-[#efe5cd] bg-[#fffdfa] px-4 py-4 shadow-[0_3px_10px_rgba(17,24,39,0.03)]">
-                          <div className="text-[12px] font-semibold text-[#9c7600]">{item.label}</div>
-                          <div className="mt-2 text-[14px] leading-7 text-[#171717]">{item.text}</div>
+                      {transcriptAiExtracts.length > 0 ? (
+                        transcriptAiExtracts.map((item, index) => (
+                          <div key={item.id} className="rounded-[18px] border border-[#efe5cd] bg-[#fffdfa] px-4 py-4 shadow-[0_3px_10px_rgba(17,24,39,0.03)]">
+                            <div className="text-[12px] font-semibold text-[#9c7600]">ポイント{index + 1}</div>
+                            <button
+                              type="button"
+                              onClick={() => handleJumpToTranscriptLog(item)}
+                              className="mt-2 block w-full text-left text-[14px] leading-7 text-[#171717] transition hover:text-[#8a6500]"
+                            >
+                              {renderHighlightedText(item.text, logSearch)}
+                            </button>
+                          </div>
+                        ))
+                      ) : (
+                        <div className="rounded-[16px] border border-dashed border-[#d9dee7] px-4 py-8 text-[14px] leading-7 text-[#7a808c]">
+                          文字起こし本文から抽出できる発言がまだありません。
                         </div>
-                      ))}
+                      )}
                     </div>
                   </div>
                 )}
-              </div>
-
-              <div className="rounded-[20px] border border-[#eceef4] bg-white p-4">
-                <div className="text-[18px] font-bold text-[#171717]">書き出し・共有</div>
-                <div className="mt-4 grid gap-3">
-                  <HeaderActionButton
-                    icon={<CopyGlyph />}
-                    label="この範囲をコピー"
-                    onClick={handleCopyTranscript}
-                    disabled={!exportTranscriptText}
-                    variant="outline"
-                  />
-                  <HeaderActionButton
-                    icon={<DownloadGlyph />}
-                    label="この範囲をダウンロード"
-                    onClick={handleDownloadTranscript}
-                    disabled={!exportTranscriptText}
-                    variant="outline"
-                  />
-                </div>
               </div>
 
               <div className="rounded-[18px] border border-[#f4e2a4] bg-[#fff7db] px-4 py-4 text-[14px] leading-7 text-[#7b6740]">
@@ -1521,12 +1370,15 @@ function StatusSummaryCard({
   label,
   description,
   tone,
+  evidence,
 }: {
   title: string;
   label: string;
   description: string;
   tone: "positive" | "warning" | "neutral";
+  evidence: string[];
 }) {
+  const [isEvidenceOpen, setIsEvidenceOpen] = useState(false);
   const toneStyles =
     tone === "positive"
       ? "bg-[#eff9ef] text-[#2f8f56]"
@@ -1537,11 +1389,12 @@ function StatusSummaryCard({
   return (
     <article className="rounded-[18px] border border-[#eceef4] bg-white p-5 shadow-[0_4px_12px_rgba(17,24,39,0.04)]">
       <div className="text-[14px] font-semibold text-[#171717]">{title}</div>
-      <div className={`mt-5 inline-flex items-center gap-3 rounded-full px-4 py-2 text-[14px] font-semibold ${toneStyles}`}>
+      <div className={`mt-5 inline-flex items-center gap-3 rounded-full px-4 py-2 text-[12px] font-semibold ${toneStyles}`}>
         <MoodGlyph />
         {label}
       </div>
       <div className="mt-5 text-[14px] leading-7 text-[#667085]">{description}</div>
+      <EvidenceToggle evidence={evidence} isOpen={isEvidenceOpen} onToggle={() => setIsEvidenceOpen((current) => !current)} />
     </article>
   );
 }
@@ -1550,11 +1403,14 @@ function TemperatureSummaryCard({
   title,
   stars,
   description,
+  evidence,
 }: {
   title: string;
   stars: number;
   description: string;
+  evidence: string[];
 }) {
+  const [isEvidenceOpen, setIsEvidenceOpen] = useState(false);
   return (
     <article className="rounded-[18px] border border-[#eceef4] bg-white p-5 shadow-[0_4px_12px_rgba(17,24,39,0.04)]">
       <div className="text-[14px] font-semibold text-[#171717]">{title}</div>
@@ -1566,6 +1422,7 @@ function TemperatureSummaryCard({
         ))}
       </div>
       <div className="mt-5 text-[14px] leading-7 text-[#667085]">{description}</div>
+      <EvidenceToggle evidence={evidence} isOpen={isEvidenceOpen} onToggle={() => setIsEvidenceOpen((current) => !current)} />
     </article>
   );
 }
@@ -1574,11 +1431,14 @@ function ConsiderationSummaryCard({
   title,
   score,
   description,
+  evidence,
 }: {
   title: string;
   score: number;
   description: string;
+  evidence: string[];
 }) {
+  const [isEvidenceOpen, setIsEvidenceOpen] = useState(false);
   return (
     <article className="rounded-[18px] border border-[#eceef4] bg-white p-5 shadow-[0_4px_12px_rgba(17,24,39,0.04)]">
       <div className="text-[14px] font-semibold text-[#171717]">{title}</div>
@@ -1591,6 +1451,7 @@ function ConsiderationSummaryCard({
         </div>
       </div>
       <div className="mt-5 text-[14px] leading-7 text-[#667085]">{description}</div>
+      <EvidenceToggle evidence={evidence} isOpen={isEvidenceOpen} onToggle={() => setIsEvidenceOpen((current) => !current)} />
     </article>
   );
 }
@@ -1655,8 +1516,10 @@ function SummaryBulletPanel({
 
 function ManualComplianceInsight({
   compliance,
+  manualDescription,
 }: {
   compliance: NonNullable<NonNullable<MeetingRecord["aiSummary"]>["manualCompliance"]>;
+  manualDescription: string;
 }) {
   const isManual = compliance.mode === "manual";
 
@@ -1674,7 +1537,7 @@ function ManualComplianceInsight({
           </div>
           <p className="mt-2 text-[13px] leading-6 text-[#6f6250]">
             {isManual
-              ? "管理者が登録した成功基準・商品情報をもとに、次の商談で直すべきポイントを整理しています。"
+              ? manualDescription
               : "会社基準が未登録のため、AIの一般的な営業観点で改善ポイントを整理しています。"}
           </p>
         </div>
@@ -1719,6 +1582,7 @@ function SummaryMetricCard({
   unit,
   color,
   description,
+  evidence = [],
   variant,
 }: {
   title: string;
@@ -1726,8 +1590,11 @@ function SummaryMetricCard({
   unit?: string;
   color: string;
   description: string;
+  evidence?: string[];
   variant: "ring" | "stars" | "gauge" | "heat";
 }) {
+  const [isEvidenceOpen, setIsEvidenceOpen] = useState(false);
+
   return (
     <article className="rounded-[18px] bg-[#fcfcfd] px-4 py-4 xl:min-h-[220px] xl:border-r xl:border-[#eceef4] xl:rounded-none xl:bg-transparent last:border-r-0">
       <div className="text-center text-[15px] font-semibold text-[#171717]">{title}</div>
@@ -1760,7 +1627,45 @@ function SummaryMetricCard({
         )}
       </div>
       <div className="mt-4 text-center text-[13px] leading-6 text-[#667085]">{description}</div>
+      <EvidenceToggle evidence={evidence} isOpen={isEvidenceOpen} onToggle={() => setIsEvidenceOpen((current) => !current)} />
     </article>
+  );
+}
+
+function EvidenceToggle({
+  evidence,
+  isOpen,
+  onToggle,
+}: {
+  evidence: string[];
+  isOpen: boolean;
+  onToggle: () => void;
+}) {
+  const visibleEvidence = evidence.filter(Boolean);
+
+  if (visibleEvidence.length === 0) {
+    return null;
+  }
+
+  return (
+    <div className="mt-4 border-t border-[#eef1f5] pt-3">
+      <button
+        type="button"
+        onClick={onToggle}
+        className="text-[12px] font-semibold text-[#8a6500] transition hover:text-[#5f4700]"
+      >
+        根拠を見る{isOpen ? "を閉じる" : `（${visibleEvidence.length}件）`}
+      </button>
+      {isOpen ? (
+        <ul className="mt-3 space-y-2 text-left text-[12px] leading-6 text-[#667085]">
+          {visibleEvidence.map((item, index) => (
+            <li key={`${item}_${index}`} className="rounded-[10px] bg-[#fffaf0] px-3 py-2">
+              {item}
+            </li>
+          ))}
+        </ul>
+      ) : null}
+    </div>
   );
 }
 
@@ -1768,13 +1673,15 @@ function EvidenceInsightCard({
   title,
   icon,
   bullets,
-  evidenceCount,
+  evidence,
 }: {
   title: string;
   icon: React.ReactNode;
   bullets: string[];
-  evidenceCount: number;
+  evidence: string[];
 }) {
+  const [isOpen, setIsOpen] = useState(false);
+
   return (
     <article className="rounded-[18px] border border-[#eceef4] bg-white p-5 shadow-[0_4px_12px_rgba(17,24,39,0.04)]">
       <div className="flex items-center gap-3 text-[14px] font-semibold text-[#171717]">
@@ -1791,11 +1698,21 @@ function EvidenceInsightCard({
       </ul>
       <button
         type="button"
+        onClick={() => setIsOpen((current) => !current)}
         className="mt-6 inline-flex items-center gap-2 text-[13px] font-medium text-[#4f5663]"
       >
-        根拠となる発話を見る（{evidenceCount}件）
-        <span aria-hidden="true">›</span>
+        根拠となる発話{isOpen ? "を閉じる" : `を見る（${evidence.length}件）`}
+        <span aria-hidden="true">{isOpen ? "⌃" : "›"}</span>
       </button>
+      {isOpen ? (
+        <div className="mt-4 space-y-2 rounded-[14px] border border-[#eef1f5] bg-[#fcfcfd] p-3">
+          {evidence.map((item) => (
+            <p key={item} className="text-[12px] leading-6 text-[#505866]">
+              {item}
+            </p>
+          ))}
+        </div>
+      ) : null}
     </article>
   );
 }
@@ -1838,13 +1755,16 @@ function FeedbackInsightCard({
   tone,
   bullets,
   footer,
+  details,
 }: {
   title: string;
   tone: "positive" | "warning" | "info";
   bullets: string[];
   footer: string;
+  details: string[];
 }) {
   const icon = tone === "positive" ? "👍" : tone === "warning" ? "⚠️" : "💡";
+  const [isOpen, setIsOpen] = useState(false);
 
   return (
     <article className="flex h-full flex-col rounded-[18px] border border-[#eceef4] bg-white p-5 shadow-[0_4px_12px_rgba(17,24,39,0.04)]">
@@ -1860,9 +1780,24 @@ function FeedbackInsightCard({
           </li>
         ))}
       </ul>
-      <button type="button" className="mt-auto pt-6 text-left text-[13px] font-medium text-[#4f5663]">
+      <button
+        type="button"
+        onClick={() => setIsOpen((current) => !current)}
+        className="mt-auto pt-6 text-left text-[13px] font-medium text-[#4f5663]"
+      >
         {footer}
+        {tone === "info" ? "" : `（${details.length}件）`}
+        <span className="ml-1" aria-hidden="true">{isOpen ? "⌃" : "›"}</span>
       </button>
+      {isOpen ? (
+        <div className="mt-4 space-y-2 rounded-[14px] border border-[#eef1f5] bg-[#fcfcfd] p-3">
+          {details.map((item) => (
+            <p key={item} className="text-[12px] leading-6 text-[#505866]">
+              {item}
+            </p>
+          ))}
+        </div>
+      ) : null}
     </article>
   );
 }
@@ -1952,17 +1887,6 @@ function DownloadGlyph() {
   );
 }
 
-function RefreshGlyph() {
-  return (
-    <svg viewBox="0 0 24 24" aria-hidden="true" className="h-3.5 w-3.5 fill-none stroke-current stroke-[1.9]">
-      <path d="M20 6v5h-5" />
-      <path d="M4 18v-5h5" />
-      <path d="M6.7 9.2A7 7 0 0 1 18 7.5L20 11" />
-      <path d="M17.3 14.8A7 7 0 0 1 6 16.5L4 13" />
-    </svg>
-  );
-}
-
 function SummaryGlyph() {
   return (
     <svg viewBox="0 0 24 24" aria-hidden="true" className="h-3.5 w-3.5 fill-none stroke-current stroke-[1.8]">
@@ -2006,19 +1930,6 @@ function ActionGlyph() {
       <path d="m9.2 12.2 1.7 1.7 4-4.4" />
     </svg>
   );
-}
-
-function formatDuration(durationSec: number) {
-  const totalSeconds = Math.max(0, Math.round(durationSec));
-  const hours = Math.floor(totalSeconds / 3600);
-  const minutes = Math.floor((totalSeconds % 3600) / 60);
-  const seconds = totalSeconds % 60;
-
-  if (hours > 0) {
-    return `${hours}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
-  }
-
-  return `${minutes}:${String(seconds).padStart(2, "0")}`;
 }
 
 function formatMeetingDateTimeRange(date: Date, durationSec: number | null) {
@@ -2072,10 +1983,7 @@ function renderHighlightedText(text: string, keyword: string) {
 function buildImportantTranscriptLogs(logs: DisplayLog[]) {
   return logs
     .map((log, index) => ({
-      log: {
-        ...log,
-        text: summarizeImportantTranscriptText(log.text),
-      },
+      log,
       index,
       score: scoreImportantTranscriptLog(log.text),
     }))
@@ -2084,7 +1992,99 @@ function buildImportantTranscriptLogs(logs: DisplayLog[]) {
     .map(({ log }) => log);
 }
 
+function buildGroundedTranscriptExtractLogs(logs: DisplayLog[]) {
+  const extracted = logs.flatMap((log, logIndex) =>
+    splitIntoSentences(log.text)
+      .map((sentence) => sentence.trim())
+      .filter(Boolean)
+      .map((sentence, sentenceIndex) => ({
+        log: {
+          ...log,
+          id: `${log.id}_extract_${sentenceIndex}`,
+          text: sentence,
+        },
+        logIndex,
+        sentenceIndex,
+        score: scoreGroundedTranscriptExtract(sentence),
+      })),
+  );
+  const scored = extracted
+    .filter(({ score }) => score > 0)
+    .sort((left, right) => right.score - left.score || left.logIndex - right.logIndex || left.sentenceIndex - right.sentenceIndex);
+
+  if (scored.length > 0) {
+    return dedupeTranscriptExtracts(scored.map(({ log }) => log));
+  }
+
+  return dedupeTranscriptExtracts(
+    extracted
+      .filter(({ log }) => cleanTranscriptSentence(log.text).length >= 16)
+      .sort((left, right) => left.logIndex - right.logIndex || left.sentenceIndex - right.sentenceIndex)
+      .map(({ log }) => log),
+  );
+}
+
+function scoreGroundedTranscriptExtract(text: string) {
+  const normalized = cleanTranscriptSentence(text);
+
+  if (!normalized || normalized.length < 8) {
+    return 0;
+  }
+
+  let score = 0;
+  const rules: Array<{ pattern: RegExp; weight: number }> = [
+    { pattern: /課題|問題|困って|悩んで|ネック|ボトルネック|負担|時間がかかる/, weight: 5 },
+    { pattern: /要望|希望|したい|ほしい|欲しい|必要|求めて|楽に|効率化/, weight: 5 },
+    { pattern: /不安|懸念|心配|リスク|止まる|故障|属人|共有|更新/, weight: 4 },
+    { pattern: /見積|見積もり|費用|コスト|金額|価格|予算|月額|リース/, weight: 4 },
+    { pattern: /次回|宿題|送付|提出|確認|共有|資料|事例|スケジュール/, weight: 4 },
+    { pattern: /決裁|承認|稟議|社内|比較|検討|導入/, weight: 3 },
+    { pattern: /[?？]$|できますか|でしょうか|ありますか|可能ですか|いかが/, weight: 2 },
+  ];
+
+  for (const rule of rules) {
+    if (rule.pattern.test(normalized)) {
+      score += rule.weight;
+    }
+  }
+
+  if (normalized.length >= 24) {
+    score += 1;
+  }
+
+  if (/^(はい|ええ|なるほど|了解|承知しました|ありがとうございます)[。！! ]*$/.test(normalized)) {
+    score -= 4;
+  }
+
+  return Math.max(score, 0);
+}
+
+function dedupeTranscriptExtracts(logs: DisplayLog[]) {
+  const seen = new Set<string>();
+  const deduped: DisplayLog[] = [];
+
+  for (const log of logs) {
+    const key = normalizeTranscriptMatchText(log.text);
+    if (!key || seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    deduped.push(log);
+  }
+
+  return deduped;
+}
+
 function findTranscriptReadingBlockIndexForLog(log: DisplayLog, blocks: TranscriptReadingBlock[]) {
+  const normalizedLogText = normalizeTranscriptMatchText(log.text);
+  const textIndex = normalizedLogText
+    ? blocks.findIndex((block) => normalizeTranscriptMatchText(block.text).includes(normalizedLogText))
+    : -1;
+
+  if (textIndex >= 0) {
+    return textIndex;
+  }
+
   const { startSec, endSec } = log;
 
   if (typeof startSec === "number" && typeof endSec === "number") {
@@ -2103,63 +2103,11 @@ function findTranscriptReadingBlockIndexForLog(log: DisplayLog, blocks: Transcri
     }
   }
 
-  return blocks.findIndex((block) => block.text.includes(log.text));
+  return -1;
 }
 
-function summarizeImportantTranscriptText(text: string) {
-  const normalized = text.replace(/\s+/g, " ").trim();
-
-  if (!normalized) {
-    return "";
-  }
-
-  const normalizedSummary = buildImportantTranscriptLabel(normalized);
-  if (normalizedSummary) {
-    return normalizedSummary;
-  }
-
-  const sentences = splitIntoSentences(normalized);
-
-  if (sentences.length === 0) {
-    return truncateTranscriptText(cleanTranscriptSentence(normalized), 60);
-  }
-
-  const bestSentence = sentences
-    .map((sentence, index) => ({
-      sentence,
-      index,
-      score: scoreImportantTranscriptLog(sentence),
-    }))
-    .sort((left, right) => right.score - left.score || left.index - right.index)[0]?.sentence;
-
-  const bestSummary = bestSentence ? buildImportantTranscriptLabel(bestSentence) : null;
-  if (bestSummary) {
-    return bestSummary;
-  }
-
-  return truncateTranscriptText(cleanTranscriptSentence(bestSentence ?? normalized), 60);
-}
-
-function buildImportantTranscriptLabel(text: string) {
-  const normalized = cleanTranscriptSentence(text);
-
-  const labelRules: Array<{ test: RegExp; label: string }> = [
-    { test: /アナログ|火災報知|防火扉|fax|ファックス/i, label: "アナログ回線が必要な設備が残る" },
-    { test: /光|乗せ替え|切り替え/, label: "FAXのみなら光回線へ切り替え候補" },
-    { test: /部品.*ない|部品.*終息|保険.*ない|リスク.*高い/, label: "部品・保険切れで運用リスクが高い" },
-    { test: /一式.*交換|互換性|主装置|電話機/, label: "主装置と電話機の一式交換が必要" },
-    { test: /月々|6000|6,000|費用|コスト|予算|金額|価格/, label: "月額費用は約6,000円を想定" },
-    { test: /見積|見積もり/, label: "見積もりの確認が必要" },
-    { test: /提案|ご提案/, label: "提案内容の確認が必要" },
-    { test: /次回|宿題|送付|提出|共有|確認/, label: "次回対応・共有事項がある" },
-    { test: /決裁|承認|稟議/, label: "社内決裁や承認確認が必要" },
-    { test: /比較|検討/, label: "比較検討の論点がある" },
-    { test: /課題|問題|困って|悩んで|ネック|ボトルネック/, label: "運用上の課題がある" },
-    { test: /要望|希望|したい|ほしい|欲しい|必要/, label: "顧客要望の確認が必要" },
-    { test: /不安|懸念/, label: "懸念点の確認が必要" },
-  ];
-
-  return labelRules.find((rule) => rule.test.test(normalized))?.label ?? null;
+function normalizeTranscriptMatchText(text: string) {
+  return text.replace(/[（）]/g, "").replace(/\s+/g, " ").trim();
 }
 
 function cleanTranscriptSentence(text: string) {
@@ -2167,14 +2115,6 @@ function cleanTranscriptSentence(text: string) {
     .replace(/^(えっと|あのー|あの|その|まー|まあ|ま|それこそ|要は|基本的には|ちょっと)+/g, "")
     .replace(/\s+/g, " ")
     .trim();
-}
-
-function truncateTranscriptText(text: string, maxLength: number) {
-  if (text.length <= maxLength) {
-    return text;
-  }
-
-  return `${text.slice(0, Math.max(0, maxLength - 1)).trim()}…`;
 }
 
 function scoreImportantTranscriptLog(text: string) {
@@ -2286,12 +2226,28 @@ function buildTranscriptReadingBlocks(logs: DisplayLog[]) {
   return blocks;
 }
 
-function buildMeetingStatusSummary(status: MeetingRecord["status"]) {
+function buildMeetingStatusSummary(
+  status: MeetingRecord["status"],
+  diagnosisStatus?: NonNullable<NonNullable<MeetingRecord["aiSummary"]>["diagnosis"]>["status"],
+  logs: DisplayLog[] = [],
+) {
+  if (diagnosisStatus) {
+    return {
+      label: diagnosisStatus.label,
+      description: diagnosisStatus.description,
+      tone: diagnosisStatus.tone,
+      evidence: diagnosisStatus.evidence,
+    };
+  }
+
+  const evidence = buildTranscriptEvidence(logs, 3);
+
   if (status === "won") {
     return {
       label: "導入に向けて前進中",
       description: "導入条件や次の進め方まで話が進み、意思決定に向けた具体検討に入っている状態です。",
       tone: "positive" as const,
+      evidence,
     };
   }
 
@@ -2300,6 +2256,7 @@ function buildMeetingStatusSummary(status: MeetingRecord["status"]) {
       label: "慎重に見極め中",
       description: "優先度や条件面のハードルが残っており、再提案や整理が必要な状態です。",
       tone: "warning" as const,
+      evidence,
     };
   }
 
@@ -2307,15 +2264,32 @@ function buildMeetingStatusSummary(status: MeetingRecord["status"]) {
     label: "前向きに検討中",
     description: "導入意欲はありつつ、課題整理と比較検討を進めているフェーズです。",
     tone: "neutral" as const,
+    evidence,
   };
 }
 
-function buildTemperatureSummary(status: MeetingRecord["status"]) {
+function buildTemperatureSummary(
+  status: MeetingRecord["status"],
+  diagnosisTemperature?: NonNullable<NonNullable<MeetingRecord["aiSummary"]>["diagnosis"]>["temperature"],
+  logs: DisplayLog[] = [],
+) {
+  if (diagnosisTemperature) {
+    return {
+      stars: diagnosisTemperature.stars,
+      shortLabel: diagnosisTemperature.label,
+      description: diagnosisTemperature.description,
+      evidence: diagnosisTemperature.evidence,
+    };
+  }
+
+  const evidence = buildTranscriptEvidence(logs, 3);
+
   if (status === "won") {
     return {
       stars: 5,
       shortLabel: "導入確度が高い状態",
       description: "比較検討よりも具体条件の確認が中心で、温度感はかなり高めです。",
+      evidence,
     };
   }
 
@@ -2324,6 +2298,7 @@ function buildTemperatureSummary(status: MeetingRecord["status"]) {
       stars: 2,
       shortLabel: "慎重な見極め段階",
       description: "懸念や優先順位の確認が多く、前進には追加の材料が必要です。",
+      evidence,
     };
   }
 
@@ -2331,6 +2306,7 @@ function buildTemperatureSummary(status: MeetingRecord["status"]) {
     stars: 4,
     shortLabel: "導入への関心が高い",
     description: "課題認識は明確で、導入メリットに前向きな反応が見られます。",
+    evidence,
   };
 }
 
@@ -2506,6 +2482,7 @@ function buildFrequentWords(logs: DisplayLog[]) {
   }
 
   return Array.from(counts.entries())
+    .filter(([, count]) => count >= 2)
     .map(([term, count]) => ({ term, count }))
     .sort((left, right) => right.count - left.count || left.term.localeCompare(right.term))
     .slice(0, 12);
@@ -2671,21 +2648,51 @@ function isCustomerSideSentence(sentence: string) {
 function buildAiScorecards(
   metrics: { entryCount: number; characterCount: number; averageCharactersPerEntry: number },
   status: MeetingRecord["status"],
+  evaluation?: NonNullable<NonNullable<MeetingRecord["aiSummary"]>["diagnosis"]>["salesEvaluation"],
+  logs: DisplayLog[] = [],
+  salesDomain: MeetingRecord["salesDomain"] = "meeting",
 ) {
+  const closingLabel = salesDomain === "teleapo" ? "アポ打診" : "クロージング";
+  const colors: Record<string, string> = {
+    "ヒアリング": "#4ade80",
+    "課題深掘り": "#facc15",
+    "提案接続": "#fbbf24",
+    "反論対応": "#60a5fa",
+    "クロージング": "#f87171",
+    "アポ打診": "#f87171",
+  };
+
+  if (evaluation && evaluation.length > 0) {
+    return evaluation.map((item) => ({
+      label: salesDomain === "teleapo" && item.label === "クロージング" ? "アポ打診" : item.label,
+      value: item.score,
+      color: colors[item.label] ?? "#fbbf24",
+      description: item.description,
+      evidence: item.evidence,
+    }));
+  }
+
   const hearing = clampScore(55 + Math.min(35, metrics.entryCount * 4));
   const discovery = clampScore(45 + Math.min(30, Math.round(metrics.averageCharactersPerEntry / 8)));
   const proposal = clampScore(status === "won" ? 82 : status === "considering" ? 68 : 52);
+  const objection = clampScore(status === "lost" ? 42 : status === "considering" ? 58 : 74);
   const closing = clampScore(status === "won" ? 78 : status === "considering" ? 46 : 32);
+  const evidence = buildTranscriptEvidence(logs, 3);
 
   return [
-    { label: "ヒアリング", value: hearing, color: "#4ade80" },
-    { label: "課題深掘り", value: discovery, color: "#facc15" },
-    { label: "提案内容", value: proposal, color: "#fbbf24" },
-    { label: "クロージング", value: closing, color: "#f87171" },
+    { label: "ヒアリング", value: hearing, color: "#4ade80", description: undefined, evidence },
+    { label: "課題深掘り", value: discovery, color: "#facc15", description: undefined, evidence },
+    { label: "提案接続", value: proposal, color: "#fbbf24", description: undefined, evidence },
+    { label: "反論対応", value: objection, color: "#60a5fa", description: undefined, evidence },
+    { label: closingLabel, value: closing, color: "#f87171", description: undefined, evidence },
   ];
 }
 
-function buildScoreDescription(label: string, value: number) {
+function buildScoreDescription(label: string, value: number, description?: string) {
+  if (description) {
+    return description;
+  }
+
   if (label === "ヒアリング") {
     return value >= 80 ? "深掘り質問が多く、ニーズの把握ができています" : "ヒアリングは進んでいますが、追加確認の余地があります";
   }
@@ -2694,8 +2701,16 @@ function buildScoreDescription(label: string, value: number) {
     return value >= 70 ? "課題の背景まで確認できています" : "課題の深掘りがやや浅い印象です";
   }
 
-  if (label === "提案内容") {
+  if (label === "提案接続") {
     return value >= 70 ? "提案の方向性は伝わっています" : "比較優位や具体性の補強があるとより良いです";
+  }
+
+  if (label === "反論対応") {
+    return value >= 70 ? "懸念に対して確認や切り返しができています" : "不安や反論を掘り下げる余地があります";
+  }
+
+  if (label === "アポ打診") {
+    return value >= 60 ? "次回接点やアポイントにつながっています" : "アポ打診や次回接点化の強化余地があります";
   }
 
   return value >= 60 ? "次回アクションまでつながっています" : "クロージングトークの強化余地があります";
@@ -2706,8 +2721,8 @@ function buildFeedbackBullets(
   tone: "positive" | "warning" | "next",
 ) {
   const hearing = scores.find((score) => score.label === "ヒアリング")?.value ?? 0;
-  const proposal = scores.find((score) => score.label === "提案内容")?.value ?? 0;
-  const closing = scores.find((score) => score.label === "クロージング")?.value ?? 0;
+  const proposal = scores.find((score) => score.label === "提案接続")?.value ?? 0;
+  const closing = scores.find((score) => score.label === "クロージング" || score.label === "アポ打診")?.value ?? 0;
 
   if (tone === "positive") {
     return [
@@ -2730,6 +2745,38 @@ function buildFeedbackBullets(
     "決裁プロセスやスケジュールを確認する",
     "ROIや定量的な効果を提示する",
   ];
+}
+
+function buildTranscriptEvidence(logs: DisplayLog[], limit: number) {
+  const evidence = logs
+    .filter((log) => log.text.trim().length >= 8)
+    .map((log, index) => ({
+      text: `${log.label}: ${truncateText(log.text.trim(), 120)}`,
+      score: scoreImportantTranscriptLog(log.text),
+      index,
+    }))
+    .sort((left, right) => right.score - left.score || left.index - right.index)
+    .map((item) => item.text);
+
+  return (evidence.length > 0 ? evidence : ["根拠となる発話はまだ抽出できていません。"]).slice(0, limit);
+}
+
+function buildDetailedAdvice(scores: Array<{ label: string; value: number }>, actions: string[]) {
+  const lowestScore = [...scores].sort((left, right) => left.value - right.value)[0];
+  const primaryAction = actions[0] ?? "次回アクションを商談の最後に明確に合意する";
+
+  return [
+    lowestScore
+      ? `${lowestScore.label}が相対的に弱いので、次回はこの観点を重点的に改善してください。`
+      : "次回は商談の目的と着地を冒頭で揃えてから進めてください。",
+    `商談終盤では「${primaryAction}」まで具体的に確認すると、次の動きにつながりやすくなります。`,
+    "顧客の発言を言い換えて確認し、課題・不安・判断条件を相手の言葉で残してください。",
+  ];
+}
+
+function truncateText(value: string, maxLength: number) {
+  const normalized = value.replace(/\s+/g, " ").trim();
+  return normalized.length > maxLength ? `${normalized.slice(0, maxLength - 3)}...` : normalized;
 }
 
 function clampScore(value: number) {
@@ -2770,16 +2817,42 @@ function calculateTranscriptionGaugeProgress(
   return 95;
 }
 
-function buildDecisionMakerScore(status: MeetingRecord["status"]) {
+function buildConsiderationSummary(
+  status: MeetingRecord["status"],
+  diagnosisConsideration?: NonNullable<NonNullable<MeetingRecord["aiSummary"]>["diagnosis"]>["consideration"],
+  logs: DisplayLog[] = [],
+) {
+  if (diagnosisConsideration) {
+    return {
+      score: diagnosisConsideration.score,
+      description: diagnosisConsideration.description,
+      evidence: diagnosisConsideration.evidence,
+    };
+  }
+
+  const evidence = buildTranscriptEvidence(logs, 4);
+
   if (status === "won") {
-    return 4.6;
+    return {
+      score: 92,
+      description: "導入条件や次回アクションが具体的で、検討の具体度が高い状態です。",
+      evidence,
+    };
   }
 
   if (status === "lost") {
-    return 2.4;
+    return {
+      score: 48,
+      description: "優先度や条件面のハードルが残っており、再整理が必要です。",
+      evidence,
+    };
   }
 
-  return 4.0;
+  return {
+    score: 80,
+    description: "興味は見えていますが、予算・時期・決裁者・次回アクションの具体化で精度が上がります。",
+    evidence,
+  };
 }
 
 function renderStars(score: number) {

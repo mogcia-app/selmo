@@ -84,7 +84,7 @@ export default function AdminProductsPage() {
                       </button>
                     </div>
 
-                    <Info label="商品概要" value={formatTextSummary(product.description)} className="mt-4" />
+                    <Info label="商材概要" value={formatTextSummary(product.description)} className="mt-4" />
 
                     <div className="mt-4 flex flex-wrap gap-2 text-[12px] font-bold text-[#596273]">
                       <span className="rounded-full bg-white px-3 py-1">ナレッジ {linkedKnowledge.length}件</span>
@@ -145,8 +145,8 @@ function ProductDetailDialog({
         </div>
 
         <div className="mt-5 grid gap-3 md:grid-cols-2">
-          <DetailItem label="商品概要" value={product.description} className="md:col-span-2" />
-          <DetailItem label="商品URL" value={product.sourceUrl} />
+          <DetailItem label="商材概要" value={product.description} className="md:col-span-2" />
+          <DetailItem label="商材URL" value={product.sourceUrl} />
           <DetailItem label="ターゲット顧客" value={product.targetCustomer} />
           <DetailItem label="URL解析メモ" value={product.sourceSummary} className="md:col-span-2" />
           <DetailItem label="顧客課題" value={formatLines(product.painPoints)} />
@@ -308,7 +308,7 @@ function ProductDialog({
             <div>
               <div className="text-[14px] font-black text-[#171717]">一括貼り付け</div>
               <p className="mt-1 text-[12px] leading-5 text-[#6f6250]">
-                商品資料・LP本文・提案メモを貼ると、概要、顧客課題、価値訴求、反論、競合などに自動で分けます。
+                商材資料・LP本文・提案メモを貼ると、概要、顧客課題、価値訴求、反論、競合などに自動で分けます。
               </p>
             </div>
             <button
@@ -341,13 +341,13 @@ function ProductDialog({
           </span>
           <input type="file" accept="image/png,.png" onChange={(event) => setLogoFile(event.target.files?.[0] ?? null)} className="sr-only" />
         </label>
-        <Field label="商品URL">
+        <Field label="商材URL">
           <input value={sourceUrl} onChange={(event) => setSourceUrl(event.target.value)} className={inputClassName} placeholder="https://..." />
         </Field>
         <Field label="ターゲット顧客">
           <input value={targetCustomer} onChange={(event) => setTargetCustomer(event.target.value)} className={inputClassName} placeholder="例：中小企業の管理部門" />
         </Field>
-        <Field label="商品概要" className="md:col-span-2">
+        <Field label="商材概要" className="md:col-span-2">
           <textarea value={description} onChange={(event) => setDescription(event.target.value)} className={textareaClassName} />
         </Field>
         <Field label="URL解析メモ" className="md:col-span-2">

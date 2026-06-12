@@ -11,14 +11,25 @@ import {
   buildKnowledgeSearchTerms,
   filterKnowledgeItems,
   saveKnowledgeSearch,
+  subscribeToKnowledgeProducts,
   subscribeToVisibleKnowledgeItems,
   type KnowledgeItem,
+  type KnowledgeProduct,
 } from "@/lib/firebase/knowledge";
 import { saveKnowledgeSearchEvent } from "@/lib/firebase/operations";
 
 type KnowledgeSearchEvidence = {
-  item: KnowledgeItem;
+  id: string;
+  title: string;
+  kind: KnowledgeItem["kind"] | "product";
+  scope: "personal" | "shared";
+  href: string;
   snippets: string[];
+};
+
+type ProductSnippet = {
+  label: string;
+  value: string;
 };
 
 type AiAnswer = {
@@ -34,6 +45,7 @@ export default function SalesKnowledgeSearchPage() {
   const query = searchParams.get("q")?.trim() ?? "";
   const [searchTerm, setSearchTerm] = useState(query);
   const [items, setItems] = useState<KnowledgeItem[]>([]);
+  const [products, setProducts] = useState<KnowledgeProduct[]>([]);
   const [aiAnswer, setAiAnswer] = useState<AiAnswer | null>(null);
   const [aiStatus, setAiStatus] = useState<"idle" | "loading" | "ready" | "fallback" | "error">("idle");
   const [aiError, setAiError] = useState<string | null>(null);
@@ -57,6 +69,16 @@ export default function SalesKnowledgeSearchPage() {
   }, [companyId, userId]);
 
   useEffect(() => {
+    if (!companyId) return;
+
+    return subscribeToKnowledgeProducts(
+      companyId,
+      setProducts,
+      (nextError: FirebaseError) => setError(nextError.message),
+    );
+  }, [companyId]);
+
+  useEffect(() => {
     if (!userId || !query) return;
     void saveKnowledgeSearch(userId, query).catch((nextError: unknown) => {
       setError(nextError instanceof Error ? nextError.message : "検索履歴の保存に失敗しました。");
@@ -64,7 +86,13 @@ export default function SalesKnowledgeSearchPage() {
   }, [query, userId]);
 
   const results = useMemo(() => filterKnowledgeItems(items, query), [items, query]);
-  const evidence = useMemo(() => buildSearchEvidence(results, query), [query, results]);
+  const productResults = useMemo(() => filterKnowledgeProducts(products, query), [products, query]);
+  const knowledgeEvidence = useMemo(() => buildSearchEvidence(results, query), [query, results]);
+  const productEvidence = useMemo(() => buildProductEvidence(productResults), [productResults]);
+  const evidence = useMemo(
+    () => [...knowledgeEvidence, ...productEvidence],
+    [knowledgeEvidence, productEvidence],
+  );
   const personalResults = results.filter((item) => item.scope === "personal");
   const sharedResults = results.filter((item) => item.scope === "shared");
   const qaResults = results.filter((item) => item.kind === "qa");
@@ -72,7 +100,7 @@ export default function SalesKnowledgeSearchPage() {
   useEffect(() => {
     if (!userId || !query) return;
 
-    const eventKey = `${userId}:${query}:${results.length}:${evidence.length > 0}`;
+    const eventKey = `${userId}:${query}:${results.length}:${productResults.length}:${evidence.length > 0}`;
     if (loggedSearchEventKeyRef.current === eventKey) return;
     loggedSearchEventKeyRef.current = eventKey;
 
@@ -80,10 +108,10 @@ export default function SalesKnowledgeSearchPage() {
       companyId: profile?.companyId,
       userId,
       query,
-      resultCount: results.length,
-      usedAi: evidence.length > 0,
+      resultCount: results.length + productResults.length,
+      usedAi: evidence.length > 0 || productResults.length > 0,
     }).catch(() => undefined);
-  }, [evidence.length, profile?.companyId, query, results.length, userId]);
+  }, [evidence.length, productResults.length, profile?.companyId, query, results.length, userId]);
 
   useEffect(() => {
     if (!query || evidence.length === 0) {
@@ -106,12 +134,12 @@ export default function SalesKnowledgeSearchPage() {
         companyId: profile?.companyId ?? null,
         userId,
         query,
-        sources: evidence.slice(0, 8).map(({ item, snippets }) => ({
+        sources: evidence.slice(0, 8).map((item) => ({
           id: item.id,
           title: item.title,
           kind: item.kind,
           scope: item.scope,
-          snippets,
+          snippets: item.snippets,
         })),
       }),
     })
@@ -282,6 +310,7 @@ export default function SalesKnowledgeSearchPage() {
           </section>
 
           <EvidenceSection query={query} evidence={evidence} />
+          <ProductResultSection query={query} products={productResults} />
           <ResultSection title="関連ナレッジ" query={query} items={results} emptyTitle="関連ナレッジはまだありません" />
           <ResultSection title="マイナレッジ" query={query} items={personalResults} emptyTitle="自分のナレッジはまだありません" />
           <ResultSection title="共有ナレッジ" query={query} items={sharedResults} emptyTitle="共有ナレッジはまだありません" />
@@ -292,6 +321,7 @@ export default function SalesKnowledgeSearchPage() {
           <section className="rounded-[20px] border border-[#eceef4] bg-white px-5 py-5 shadow-[0_8px_22px_rgba(17,24,39,0.04)]">
             <h2 className="text-[17px] font-bold text-[#171717]">検索サマリー</h2>
             <div className="mt-5 space-y-4">
+              <SummaryRow label="商材情報" value={`${productResults.length}件`} icon={<BriefcaseIcon />} />
               <SummaryRow label="関連ナレッジ" value={`${results.length}件`} icon={<DocumentIcon />} />
               <SummaryRow label="根拠箇所" value={`${evidence.reduce((total, item) => total + item.snippets.length, 0)}件`} icon={<SparkIcon />} />
               <SummaryRow label="マイナレッジ" value={`${personalResults.length}件`} icon={<DocumentIcon />} />
@@ -341,10 +371,10 @@ function EvidenceSection({ query, evidence }: { query: string; evidence: Knowled
         </span>
       </div>
       <div className="mt-4 space-y-3">
-        {evidence.slice(0, 5).map(({ item, snippets }) => (
+        {evidence.slice(0, 5).map((item) => (
           <Link
             key={item.id}
-            href={getKnowledgeDetailHref(item)}
+            href={item.href}
             className="block rounded-[16px] border border-[#eef1f5] bg-[#fcfcfd] px-4 py-4 transition hover:border-[#ead8a8] hover:bg-[#fffdf7]"
           >
             <div className="flex flex-wrap items-center justify-between gap-3">
@@ -352,13 +382,67 @@ function EvidenceSection({ query, evidence }: { query: string; evidence: Knowled
               <span className="text-[12px] font-semibold text-[#8a909b]">{formatKind(item.kind)}</span>
             </div>
             <div className="mt-3 space-y-2">
-              {snippets.slice(0, 2).map((snippet) => (
+              {item.snippets.slice(0, 2).map((snippet) => (
                 <p
                   key={snippet}
                   className="border-l-4 border-[#ffd84d] bg-white px-3 py-2 text-[13px] leading-6 text-[#343b48]"
                 >
                   <HighlightedText text={snippet} query={query} />
                 </p>
+              ))}
+            </div>
+          </Link>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function ProductResultSection({
+  query,
+  products,
+}: {
+  query: string;
+  products: Array<{ product: KnowledgeProduct; snippets: ProductSnippet[] }>;
+}) {
+  if (!query || products.length === 0) {
+    return null;
+  }
+
+  return (
+    <section className="rounded-[20px] border border-[#eceef4] bg-white px-5 py-5 shadow-[0_8px_22px_rgba(17,24,39,0.04)]">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <h2 className="text-[17px] font-bold text-[#171717]">商材登録データ</h2>
+        <span className="rounded-full bg-[#edf2ff] px-3 py-1 text-[12px] font-bold text-[#5767c8]">
+          admin登録情報
+        </span>
+      </div>
+      <div className="mt-4 grid gap-4 lg:grid-cols-2">
+        {products.map(({ product, snippets }) => (
+          <Link
+            key={product.id}
+            href={`/sales/knowledge/products/${product.id}`}
+            className="min-w-0 rounded-[16px] border border-[#eef1f5] bg-[#fcfcfd] px-4 py-4 transition hover:border-[#ead8a8] hover:bg-[#fffdf7]"
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <h3 className="truncate text-[15px] font-bold text-[#171717]">{product.name}</h3>
+                <p className="mt-1 line-clamp-2 text-[12px] leading-5 text-[#6d7481]">
+                  {product.description || product.sourceSummary || product.valueProposition || "商材情報"}
+                </p>
+              </div>
+              <span className="shrink-0 rounded-full bg-white px-2.5 py-1 text-[11px] font-bold text-[#8a909b]">
+                商材
+              </span>
+            </div>
+            <div className="mt-3 space-y-2">
+              {snippets.slice(0, 3).map((snippet) => (
+                <div key={`${product.id}-${snippet.label}`} className="rounded-[12px] bg-white px-3 py-2">
+                  <div className="text-[11px] font-bold text-[#8a6500]">{snippet.label}</div>
+                  <p className="mt-1 line-clamp-2 text-[12px] leading-5 text-[#343b48]">
+                    <HighlightedText text={snippet.value} query={query} />
+                  </p>
+                </div>
               ))}
             </div>
           </Link>
@@ -404,8 +488,15 @@ function ResultSection({
                   <HighlightedText text={buildBestSnippet(item, query) || "該当箇所を詳細で確認できます。"} query={query} />
                 </p>
               ) : null}
-              <div className="mt-4 flex items-center justify-between text-[11px] text-[#8a909b]">
-                <span>{item.scope === "shared" ? "共有" : "自分用"}</span>
+              <div className="mt-4 flex flex-wrap items-center justify-between gap-2 text-[11px] text-[#8a909b]">
+                <span className="flex flex-wrap items-center gap-1.5">
+                  <span>{item.scope === "shared" ? "共有" : "自分用"}</span>
+                  {item.tabTitle ? (
+                    <span className="rounded-full bg-[#fff3cf] px-2 py-0.5 font-bold text-[#8a6500]">
+                      {item.tabTitle}
+                    </span>
+                  ) : null}
+                </span>
                 <span>{formatDate(item.updatedAt)}</span>
               </div>
             </Link>
@@ -429,7 +520,11 @@ function buildSearchEvidence(items: KnowledgeItem[], query: string): KnowledgeSe
 
   return items
     .map((item) => ({
-      item,
+      id: item.id,
+      title: item.title,
+      kind: item.kind,
+      scope: item.scope,
+      href: getKnowledgeDetailHref(item),
       snippets: buildKnowledgeSnippets(item, query),
     }))
     .filter((entry) => entry.snippets.length > 0)
@@ -458,6 +553,56 @@ function buildKnowledgeSnippets(item: KnowledgeItem, query: string) {
   ).slice(0, 4);
 }
 
+function filterKnowledgeProducts(products: KnowledgeProduct[], query: string) {
+  const searchTerms = buildKnowledgeSearchTerms(query);
+  if (searchTerms.length === 0) {
+    return [];
+  }
+
+  return products
+    .map((product) => {
+      const snippets = buildProductSnippets(product).filter((snippet) => {
+        const searchableText = `${product.name} ${snippet.label} ${snippet.value}`.toLowerCase();
+        return searchTerms.some((term) => searchableText.includes(term));
+      });
+
+      return { product, snippets };
+    })
+    .filter((entry) => entry.snippets.length > 0)
+    .sort((left, right) => right.snippets.length - left.snippets.length);
+}
+
+function buildProductEvidence(products: Array<{ product: KnowledgeProduct; snippets: ProductSnippet[] }>): KnowledgeSearchEvidence[] {
+  return products.map(({ product, snippets }) => ({
+    id: `product-${product.id}`,
+    title: product.name,
+    kind: "product",
+    scope: "shared",
+    href: `/sales/knowledge/products/${product.id}`,
+    snippets: snippets.map((snippet) => `${snippet.label}: ${snippet.value}`).slice(0, 4),
+  }));
+}
+
+function buildProductSnippets(product: KnowledgeProduct): ProductSnippet[] {
+  return [
+    { label: "商材概要", value: product.description },
+    { label: "商材URL", value: product.sourceUrl },
+    { label: "ターゲット顧客", value: product.targetCustomer },
+    { label: "URL解析メモ", value: product.sourceSummary },
+    { label: "顧客課題", value: product.painPoints.join("\n") },
+    { label: "価値訴求", value: product.valueProposition },
+    { label: "料金", value: product.pricing },
+    { label: "競合", value: product.competitors.join("\n") },
+    { label: "よくある反論", value: product.commonObjections.join("\n") },
+    { label: "FAQ", value: product.faq.join("\n") },
+    { label: "成功トーク", value: product.successTalk.join("\n") },
+    { label: "NGトーク", value: product.ngTalk.join("\n") },
+    ...product.customFields.map((field) => ({ label: field.label, value: field.value })),
+  ]
+    .map((snippet) => ({ label: snippet.label.trim(), value: snippet.value.trim() }))
+    .filter((snippet) => snippet.label && snippet.value);
+}
+
 function buildBestSnippet(item: KnowledgeItem, query: string) {
   return buildKnowledgeSnippets(item, query)[0] ?? "";
 }
@@ -478,7 +623,7 @@ function buildFallbackAnswer(query: string, evidence: KnowledgeSearchEvidence[])
     overview: `「${query}」に関連するナレッジが ${sourceCount} 件、根拠になりそうな箇所が ${snippetCount} 件見つかりました。該当箇所を確認して、商談前の説明や切り返しに利用できます。`,
     bullets: [
       topTerms.length > 1 ? `関連語として「${topTerms.join("」「")}」も含めて検索しています。` : `「${query}」を含む箇所を抽出しています。`,
-      evidence[0]?.item.title ? `特に「${evidence[0].item.title}」に関連する記述があります。` : "関連ナレッジの本文や概要から根拠を抽出しています。",
+      evidence[0]?.title ? `特に「${evidence[0].title}」に関連する記述があります。` : "関連ナレッジの本文や概要から根拠を抽出しています。",
     ],
     followUps: [],
   };
@@ -518,7 +663,8 @@ function escapeRegExp(value: string) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-function formatKind(kind: KnowledgeItem["kind"]) {
+function formatKind(kind: KnowledgeItem["kind"] | "product") {
+  if (kind === "product") return "商材情報";
   if (kind === "memo") return "メモ";
   if (kind === "qa") return "Q&A";
   return "ナレッジ";

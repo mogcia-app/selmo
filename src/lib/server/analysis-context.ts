@@ -31,6 +31,7 @@ export type AnalysisContext = {
     closingRules: string[];
     customFields: Array<{ label: string; value: string }>;
   } | null;
+  pastTrends: string[];
 };
 
 export async function loadAnalysisContext(input: {
@@ -39,12 +40,13 @@ export async function loadAnalysisContext(input: {
 }): Promise<AnalysisContext> {
   const db = getFirebaseAdminDb();
   if (!db || !input.companyId) {
-    return { product: null, manual: null };
+    return { product: null, manual: null, pastTrends: [] };
   }
 
-  const [productsSnapshot, manualsSnapshot] = await Promise.all([
+  const [productsSnapshot, manualsSnapshot, meetingsSnapshot] = await Promise.all([
     db.collection("knowledgeProducts").where("companyId", "==", input.companyId).get(),
     db.collection("salesManuals").where("companyId", "==", input.companyId).where("status", "==", "active").get(),
+    db.collection("meetings").where("companyId", "==", input.companyId).limit(40).get(),
   ]);
   const normalizedProductName = input.productName?.trim() ?? "";
   const productDoc =
@@ -59,6 +61,7 @@ export async function loadAnalysisContext(input: {
   return {
     product: productDoc ? mapProduct(productDoc.data()) : null,
     manual: manualDoc ? mapManual(manualDoc.data()) : null,
+    pastTrends: buildPastTrends(meetingsSnapshot.docs.map((doc) => doc.data()), matchedProductName),
   };
 }
 
@@ -69,7 +72,7 @@ export function buildAnalysisContextPrompt(context: AnalysisContext) {
     sections.push(
       [
         "【商材情報】",
-        `商品名: ${context.product.name}`,
+        `商材名: ${context.product.name}`,
         `概要: ${context.product.description}`,
         `ターゲット: ${context.product.targetCustomer}`,
         `顧客課題: ${context.product.painPoints.join(" / ")}`,
@@ -102,6 +105,15 @@ export function buildAnalysisContextPrompt(context: AnalysisContext) {
         `クロージング基準: ${context.manual.closingRules.join(" / ")}`,
         ...context.manual.customFields.map((field) => `${field.label}: ${field.value}`),
       ].filter((line) => !line.endsWith(": ")).join("\n"),
+    );
+  }
+
+  if (context.pastTrends.length > 0) {
+    sections.push(
+      [
+        "【過去分析の傾向】",
+        ...context.pastTrends.map((trend, index) => `${index + 1}. ${trend}`),
+      ].join("\n"),
     );
   }
 
@@ -161,4 +173,28 @@ function readCustomFields(value: unknown) {
       return label && fieldValue ? { label, value: fieldValue } : null;
     })
     .filter((item): item is { label: string; value: string } => Boolean(item));
+}
+
+function buildPastTrends(meetings: DocumentData[], productName: string) {
+  return meetings
+    .filter((meeting) => {
+      const meetingProduct = readString(meeting.productType);
+      return productName ? meetingProduct === productName || meetingProduct.includes(productName) : true;
+    })
+    .map((meeting) => {
+      const aiSummary = meeting.aiSummary;
+      if (!aiSummary || typeof aiSummary !== "object") return "";
+      const data = aiSummary as Record<string, unknown>;
+      const overview = readString(data.overview).trim();
+      const manualCompliance = data.manualCompliance && typeof data.manualCompliance === "object"
+        ? (data.manualCompliance as Record<string, unknown>)
+        : null;
+      const missing = readStringArray(manualCompliance?.missingCriteria).slice(0, 2).join(" / ");
+      const improvement = readStringArray(manualCompliance?.improvementPhrases).slice(0, 1).join(" / ");
+      return [overview, missing ? `不足: ${missing}` : "", improvement ? `改善例: ${improvement}` : ""]
+        .filter(Boolean)
+        .join(" / ");
+    })
+    .filter(Boolean)
+    .slice(0, 5);
 }

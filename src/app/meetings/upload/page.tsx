@@ -6,15 +6,11 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { useAuth } from "@/features/auth/auth-provider";
-import { saveSalesActivityEvent } from "@/lib/firebase/activity";
 import { subscribeToKnowledgeProducts, type KnowledgeProduct } from "@/lib/firebase/knowledge";
 import {
   createMeeting,
-  saveMeetingAiSummary,
-  saveMeetingConversationLogs,
   subscribeToMeetings,
   getMeetingPurposeLabel,
-  type MeetingConversationLog,
   type MeetingRecord,
 } from "@/lib/firebase/meetings";
 import { canUseSalesDomain, type SalesDomain } from "@/lib/sales-domains";
@@ -50,6 +46,7 @@ export default function MeetingUploadPage() {
   const { firebaseError, isFirebaseReady, isLoading, missingEnvKeys, profile } =
     useAuth();
   const [recordedAt, setRecordedAt] = useState(() => toDatetimeLocalValue(new Date()));
+  const [transcriptEndedAtTime, setTranscriptEndedAtTime] = useState(() => toTimeInputValue(addMinutes(new Date(), 60)));
   const [customerName, setCustomerName] = useState("");
   const [products, setProducts] = useState<KnowledgeProduct[]>([]);
   const [meetings, setMeetings] = useState<MeetingRecord[]>([]);
@@ -150,10 +147,20 @@ export default function MeetingUploadPage() {
       return;
     }
 
+    const normalizedRecordedAt = recordedAt ? new Date(recordedAt) : new Date();
+    const transcriptDurationSec =
+      inputMode === "transcript"
+        ? calculateTranscriptDurationSec(normalizedRecordedAt, transcriptEndedAtTime)
+        : null;
+
+    if (inputMode === "transcript" && transcriptDurationSec === null) {
+      setErrorMessage("終了時間は実施日時より後の時間を入力してください。");
+      return;
+    }
+
     setIsSubmitting(true);
     setUploadProgress(0);
 
-    const normalizedRecordedAt = recordedAt ? new Date(recordedAt) : new Date();
     const normalizedCustomerName =
       customerName.trim() || buildUntitledMeetingName(normalizedRecordedAt);
 
@@ -171,29 +178,15 @@ export default function MeetingUploadPage() {
         memo: memo.trim(),
         status,
         audioFile: inputMode === "audio" ? selectedFile : null,
-        audioDurationSec: inputMode === "audio" ? detectedDurationSec : null,
+        audioDurationSec: inputMode === "audio" ? detectedDurationSec : transcriptDurationSec,
         transcriptText: inputMode === "transcript" ? normalizedTranscriptText : null,
         audioRetentionLimit,
         onUploadProgress: setUploadProgress,
       });
 
-      const pastedTranscriptInsights =
-        inputMode === "transcript"
-          ? await generatePastedTranscriptInsights({
-              meetingId,
-              transcriptText: normalizedTranscriptText,
-              companyId: profile.companyId,
-              userId: profile.uid,
-              productName: productType,
-              meetingPurpose,
-            })
-          : null;
-
       setSuccessMessage(
         inputMode === "transcript"
-          ? pastedTranscriptInsights?.summaryCompleted
-            ? `文字起こしテキストを保存し、AI要約を生成しました。ID: ${meetingId}`
-            : `文字起こしテキストを保存しました。AI要約は詳細画面で再確認してください。ID: ${meetingId}`
+          ? `文字起こしテキストを保存しました。ID: ${meetingId}`
           : `アップロード完了しました。処理状況は一覧で確認できます。ID: ${meetingId}`,
       );
       router.push(`/meetings?category=${salesDomain}`);
@@ -211,7 +204,7 @@ export default function MeetingUploadPage() {
   }
 
   return (
-    <main className="min-h-screen bg-[#f7f7f8] px-5 py-6 md:px-8 md:py-7">
+    <main className="overflow-x-hidden bg-transparent px-5 pb-6 pt-5 md:px-8 md:pb-8 md:pt-6">
       {!canAccessDomain ? (
         <div className="mx-auto max-w-[860px] rounded-[24px] border border-[#f2d6d6] bg-white px-6 py-10 text-center">
           <h1 className="text-[28px] font-black tracking-[-0.04em] text-[#171717]">この機能は利用できません</h1>
@@ -231,14 +224,13 @@ export default function MeetingUploadPage() {
       <>
       <header className="mb-6 flex flex-col gap-5 xl:flex-row xl:items-start xl:justify-between">
         <div>
-          <div className="mb-2 text-[13px] font-medium text-[#8a909b]">
-            〈 打ち合わせ一覧へ戻る
-          </div>
           <h1 className="text-[34px] font-bold tracking-[-0.04em] text-[#171717]">
-            商談を追加
+            {salesDomain === "teleapo" ? "架電ログを追加" : "商談を追加"}
           </h1>
           <p className="mt-2 text-[16px] text-[#7a808c]">
-            音声ファイル、または既存の文字起こしテキストから商談分析を始められます。
+            {salesDomain === "teleapo"
+              ? "音声ファイル、または既存の文字起こしテキストから架電分析を始められます。"
+              : "音声ファイル、または既存の文字起こしテキストから商談分析を始められます。"}
           </p>
         </div>
 
@@ -252,19 +244,19 @@ export default function MeetingUploadPage() {
 
       <section className="grid gap-5 xl:grid-cols-[1.02fr_0.98fr]">
         <section className="rounded-[24px] border border-[#eceef4] bg-white p-5 shadow-[0_10px_28px_rgba(17,24,39,0.05)]">
-          <div className="mb-5 flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+          <div className="mb-5 grid gap-4 lg:grid-cols-[minmax(0,1fr)_320px] lg:items-center">
             <div className="flex items-center gap-3">
-            <div className="flex h-10 w-10 items-center justify-center rounded-full bg-[#fff8e4] text-[#f0b400]">
-              <UploadGlyph />
-            </div>
-            <div>
-              <h2 className="text-[24px] font-bold tracking-[-0.03em] text-[#171717]">
-                入力方法
-              </h2>
-              <p className="text-[14px] text-[#7a808c]">
-                音声アップロード、または文字起こし貼り付け
-              </p>
-            </div>
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[#fff8e4] text-[#f0b400]">
+                <UploadGlyph />
+              </div>
+              <div className="min-w-0">
+                <h2 className="text-[22px] font-bold tracking-[-0.03em] text-[#171717]">
+                  入力方法
+                </h2>
+                <p className="mt-1 text-[13px] leading-5 text-[#7a808c]">
+                  音声アップロード、または文字起こし貼り付け
+                </p>
+              </div>
             </div>
             <Segmented
               options={[
@@ -445,12 +437,9 @@ export default function MeetingUploadPage() {
               <InfoIcon />
             </div>
             <div>
-              <h2 className="text-[24px] font-bold tracking-[-0.03em] text-[#171717]">
+              <h2 className="text-[22px] font-bold tracking-[-0.03em] text-[#171717]">
                 打ち合わせ情報
               </h2>
-              <p className="text-[14px] text-[#7a808c]">
-                詳細画面であとから編集できるので、まずは最低限でも大丈夫です
-              </p>
             </div>
           </div>
 
@@ -476,6 +465,17 @@ export default function MeetingUploadPage() {
                 onChange={(event) => setRecordedAt(event.target.value)}
               />
             </Field>
+
+            {inputMode === "transcript" ? (
+              <Field label="終了時間" required>
+                <input
+                  type="time"
+                  className={inputClassName}
+                  value={transcriptEndedAtTime}
+                  onChange={(event) => setTranscriptEndedAtTime(event.target.value)}
+                />
+              </Field>
+            ) : null}
 
             <Field label="商材タイプ" required>
               <select
@@ -519,7 +519,7 @@ export default function MeetingUploadPage() {
               </select>
             </Field>
 
-            <Field label="商談ステータス" required>
+            <Field label="成約/失注ステータス" required>
               <Segmented
                 options={[
                   { label: "成約", value: "won" },
@@ -541,7 +541,7 @@ export default function MeetingUploadPage() {
               />
             </Field>
 
-            <Field label="メモ">
+            <Field label="営業メモ">
               <textarea
                 className={`${inputClassName} min-h-[112px] resize-y leading-7`}
                 placeholder="商談中に気になったこと、次回確認したいことなど"
@@ -646,7 +646,7 @@ function Segmented({
   onChange: (value: string) => void;
 }) {
   return (
-    <div className="flex flex-wrap gap-2">
+    <div className="grid grid-cols-2 rounded-[16px] border border-[#e6e8ee] bg-[#f7f8fb] p-1">
       {options.map((option) => {
         const isActive = option.value === active;
         return (
@@ -654,10 +654,10 @@ function Segmented({
             key={option.value}
             type="button"
             onClick={() => onChange(option.value)}
-            className={`rounded-[14px] border px-4 py-3 text-[14px] font-medium transition ${
+            className={`h-11 rounded-[13px] px-4 text-[13px] font-bold transition ${
               isActive
-                ? "border-[#171717] bg-[#171717] text-white"
-                : "border-[#e6e8ee] bg-white text-[#303544] hover:bg-[#fafafa]"
+                ? "bg-[#171717] text-white shadow-[0_8px_18px_rgba(17,24,39,0.12)]"
+                : "text-[#596273] hover:bg-white hover:text-[#171717]"
             }`}
           >
             {option.label}
@@ -728,157 +728,6 @@ function normalizePastedTranscript(text: string) {
     .trim();
 }
 
-async function generatePastedTranscriptInsights({
-  meetingId,
-  transcriptText,
-  companyId,
-  userId,
-  productName,
-  meetingPurpose,
-}: {
-  meetingId: string;
-  transcriptText: string;
-  companyId?: string | null;
-  userId: string;
-  productName?: string | null;
-  meetingPurpose?: MeetingPurpose | null;
-}) {
-  const segment = {
-    startSec: 0,
-    endSec: 0,
-    text: transcriptText,
-  };
-  let summaryCompleted = false;
-
-  try {
-    await saveMeetingConversationLogs(meetingId, {
-      status: "running",
-      model: "gpt-4o-mini",
-      logs: [],
-      error: null,
-      processingStatus: "uploaded",
-    });
-
-    const logsResponse = await fetch(`/api/meetings/${meetingId}/conversation-logs`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        companyId,
-        userId,
-        transcriptText,
-        segments: [segment],
-      }),
-    });
-    const logsPayload = (await readJsonResponse(logsResponse)) as {
-      error?: string;
-      detail?: string;
-      model?: string | null;
-      logs?: MeetingConversationLog[];
-    };
-
-    if (!logsResponse.ok) {
-      throw new Error(readApiError(logsPayload, "会話ログ生成に失敗しました。"));
-    }
-
-    await saveMeetingConversationLogs(meetingId, {
-      status: "completed",
-      model: logsPayload.model ?? "gpt-4o-mini",
-      logs: logsPayload.logs ?? [],
-      error: null,
-      processingStatus: "uploaded",
-    });
-  } catch (error) {
-    const message =
-      error instanceof Error ? error.message : "会話ログ生成に失敗しました。";
-    await saveMeetingConversationLogs(meetingId, {
-      status: "failed",
-      model: "gpt-4o-mini",
-      error: message,
-      processingStatus: "uploaded",
-    }).catch(() => undefined);
-  }
-
-  try {
-    await saveMeetingAiSummary(meetingId, {
-      status: "running",
-      model: "gpt-4o-mini",
-      error: null,
-      processingStatus: "uploaded",
-    });
-
-    const summaryResponse = await fetch(`/api/meetings/${meetingId}/summary`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        companyId,
-        userId,
-        productName,
-        meetingPurpose,
-        transcriptText,
-      }),
-    });
-    const summaryPayload = (await readJsonResponse(summaryResponse)) as {
-      error?: string;
-      detail?: string;
-      model?: string | null;
-      summary?: MeetingRecord["aiSummary"];
-    };
-
-    if (!summaryResponse.ok) {
-      throw new Error(readApiError(summaryPayload, "AI要約の生成に失敗しました。"));
-    }
-
-    await saveMeetingAiSummary(meetingId, {
-      status: "completed",
-      model: summaryPayload.model ?? "gpt-4o-mini",
-      summary: summaryPayload.summary ?? null,
-      error: null,
-      processingStatus: "uploaded",
-    });
-    await saveSalesActivityEvent({
-      companyId,
-      userId,
-      type: "ai_analysis_completed",
-      title: "AI分析完了",
-      summary: "貼り付け文字起こしのAI要約を生成しました",
-      detail: summaryPayload.summary?.overview ?? "AI要約を生成しました。",
-      href: `/admin/meetings/${meetingId}`,
-      metadata: {
-        meetingId,
-        source: "pasted_transcript",
-      },
-    }).catch(() => undefined);
-    summaryCompleted = true;
-  } catch (error) {
-    const message =
-      error instanceof Error ? error.message : "AI要約の生成に失敗しました。";
-    await saveMeetingAiSummary(meetingId, {
-      status: "failed",
-      model: "gpt-4o-mini",
-      error: message,
-      processingStatus: "uploaded",
-    }).catch(() => undefined);
-  }
-
-  return { summaryCompleted };
-}
-
-async function readJsonResponse(response: Response) {
-  try {
-    return await response.json();
-  } catch {
-    return {};
-  }
-}
-
-function readApiError(payload: { error?: string; detail?: string }, fallback: string) {
-  return [payload.error, payload.detail].filter(Boolean).join(" / ") || fallback;
-}
-
 function readAudioDuration(file: File) {
   return new Promise<number>((resolve, reject) => {
     const objectUrl = URL.createObjectURL(file);
@@ -921,6 +770,32 @@ function toDatetimeLocalValue(date: Date) {
   const hours = String(date.getHours()).padStart(2, "0");
   const minutes = String(date.getMinutes()).padStart(2, "0");
   return `${year}-${month}-${day}T${hours}:${minutes}`;
+}
+
+function toTimeInputValue(date: Date) {
+  const hours = String(date.getHours()).padStart(2, "0");
+  const minutes = String(date.getMinutes()).padStart(2, "0");
+  return `${hours}:${minutes}`;
+}
+
+function addMinutes(date: Date, minutes: number) {
+  return new Date(date.getTime() + minutes * 60 * 1000);
+}
+
+function calculateTranscriptDurationSec(startedAt: Date, endedAtTime: string) {
+  const [hoursText, minutesText] = endedAtTime.split(":");
+  const hours = Number(hoursText);
+  const minutes = Number(minutesText);
+
+  if (!Number.isInteger(hours) || !Number.isInteger(minutes)) {
+    return null;
+  }
+
+  const endedAt = new Date(startedAt);
+  endedAt.setHours(hours, minutes, 0, 0);
+
+  const durationSec = Math.round((endedAt.getTime() - startedAt.getTime()) / 1000);
+  return durationSec > 0 ? durationSec : null;
 }
 
 function isCurrentMonth(date: Date | null) {

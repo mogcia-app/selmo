@@ -48,6 +48,7 @@ export default function MeetingsPage() {
   const [statusFilter, setStatusFilter] = useState("all");
   const [productFilter, setProductFilter] = useState("all");
   const [dateFilter, setDateFilter] = useState("all");
+  const [selectedInfoMeeting, setSelectedInfoMeeting] = useState<MeetingRecord | null>(null);
 
   useEffect(() => {
     if (isAuthLoading) {
@@ -104,7 +105,7 @@ export default function MeetingsPage() {
       if (meeting.salesDomain !== category) return false;
       const matchesSearch =
         normalizedSearch.length === 0 ||
-        [meeting.customerName, meeting.productType, meeting.location, meeting.audioFileName]
+        [meeting.customerName, meeting.productType, meeting.location, meeting.audioFileName, meeting.memo]
           .filter((value): value is string => typeof value === "string" && value.length > 0)
           .some((value) => value.toLowerCase().includes(normalizedSearch));
 
@@ -118,8 +119,8 @@ export default function MeetingsPage() {
   }, [category, dateFilter, meetings, productFilter, search, statusFilter]);
 
   return (
-    <main className="min-h-screen bg-[#f7f7f8] px-5 py-6 md:px-8 md:py-7">
-      <section className="mb-6 flex flex-col gap-5 xl:flex-row xl:items-start xl:justify-between">
+    <main className="overflow-x-hidden bg-transparent px-5 pb-6 pt-5 md:px-8 md:pb-8 md:pt-6">
+      <section className="mb-4 flex flex-col gap-5 xl:flex-row xl:items-start xl:justify-between">
         <div>
           <h1 className="text-[34px] font-bold tracking-[-0.04em] text-[#171717]">
             {copy.title}
@@ -264,15 +265,20 @@ export default function MeetingsPage() {
                         <StatusBadge value={meeting.status} />
                       </td>
                       <td className="px-5 py-4 align-top">
-                        <ProcessingBadge value={meeting.processingStatus} />
+                        <ProcessingBadge meeting={meeting} />
                       </td>
-                      <td className="px-5 py-4 align-top text-[#7a808c]">集計準備中</td>
+                      <td className="px-5 py-4 align-top">
+                        <AiScoreCell meeting={meeting} />
+                      </td>
                       <td className="px-5 py-4 align-top text-[#7a808c]">
-                        {meeting.memo ? (
-                          <span className="line-clamp-2 max-w-[220px] leading-6">{meeting.memo}</span>
-                        ) : (
+                        <button
+                          type="button"
+                          onClick={() => setSelectedInfoMeeting(meeting)}
+                          className="inline-flex h-9 w-9 items-center justify-center rounded-[12px] border border-[#e4e7ed] bg-white text-[#6b7280] transition hover:border-[#f0c655] hover:bg-[#fffaf0] hover:text-[#8b6a00]"
+                          aria-label="打ち合わせ情報を見る"
+                        >
                           <MemoIcon />
-                        )}
+                        </button>
                       </td>
                       <td className="px-5 py-4 align-top">
                         <Link
@@ -300,6 +306,15 @@ export default function MeetingsPage() {
           </>
         )}
       </section>
+      ) : null}
+
+      {selectedInfoMeeting ? (
+        <MeetingInfoModal
+          meeting={selectedInfoMeeting}
+          ownerName={profile?.name ?? "担当者未設定"}
+          purposeLabel={copy.purposeLabel}
+          onClose={() => setSelectedInfoMeeting(null)}
+        />
       ) : null}
     </main>
   );
@@ -357,6 +372,84 @@ function StatusBadge({ value }: { value: MeetingRecord["status"] }) {
       {current.label}
     </span>
   );
+}
+
+function MeetingInfoModal({
+  meeting,
+  ownerName,
+  purposeLabel,
+  onClose,
+}: {
+  meeting: MeetingRecord;
+  ownerName: string;
+  purposeLabel: string;
+  onClose: () => void;
+}) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/35 px-4 py-6">
+      <div className="w-full max-w-[680px] overflow-hidden rounded-[24px] border border-[#eceef4] bg-white shadow-[0_24px_80px_rgba(15,23,42,0.24)]">
+        <div className="flex items-start justify-between gap-4 border-b border-[#eef1f5] px-6 py-5">
+          <div>
+            <h2 className="text-[20px] font-bold tracking-[-0.03em] text-[#171717]">打ち合わせ情報</h2>
+            <p className="mt-1 text-[13px] text-[#7a808c]">{meeting.customerName || "未設定"}</p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-[#e4e7ed] bg-white text-[20px] leading-none text-[#667085] transition hover:bg-[#f7f7f8]"
+            aria-label="閉じる"
+          >
+            ×
+          </button>
+        </div>
+
+        <div className="max-h-[72vh] overflow-y-auto px-6 py-5">
+          <div className="grid gap-3 md:grid-cols-2">
+            <InfoRow
+              label="日時"
+              value={
+                meeting.recordedAt
+                  ? `${formatDate(meeting.recordedAt)} ${formatTimeRange(meeting.recordedAt, meeting.audioDurationSec)}`
+                  : "日時未設定"
+              }
+            />
+            <InfoRow label="担当者" value={ownerName} />
+            <InfoRow label="会社名 / 顧客名" value={meeting.customerName || "未設定"} />
+            <InfoRow label="商材" value={meeting.productType || "未設定"} />
+            <InfoRow label={purposeLabel} value={getMeetingPurposeLabel(meeting.meetingPurpose)} />
+            <InfoRow label="成約/失注ステータス" value={getMeetingStatusLabel(meeting.status)} />
+            <InfoRow label="場所" value={meeting.location || "未入力"} />
+          </div>
+
+          <div className="mt-4 rounded-[18px] border border-[#eef1f5] bg-[#fcfcfd] px-4 py-4">
+            <div className="text-[12px] font-semibold text-[#8a909b]">営業メモ</div>
+            <div className="mt-2 whitespace-pre-wrap text-[14px] leading-7 text-[#303544]">
+              {meeting.memo.trim() || "未入力"}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function InfoRow({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-[16px] border border-[#eef1f5] bg-white px-4 py-3">
+      <div className="text-[12px] font-semibold text-[#8a909b]">{label}</div>
+      <div className="mt-1 text-[14px] leading-6 text-[#303544]">{value}</div>
+    </div>
+  );
+}
+
+function getMeetingStatusLabel(value: MeetingRecord["status"]) {
+  const map = {
+    won: "成約",
+    considering: "検討中",
+    lost: "失注",
+  } as const;
+
+  return map[value];
 }
 
 function formatDate(date: Date) {
@@ -433,23 +526,24 @@ function UploadIcon() {
   );
 }
 
-function ProcessingBadge({ value }: { value: MeetingRecord["processingStatus"] }) {
+function ProcessingBadge({ meeting }: { meeting: MeetingRecord }) {
+  const status = readMeetingListStatus(meeting);
   const label =
-    value === "uploaded"
-      ? "処理待ち"
-      : value === "processing"
+    status === "uploaded"
+      ? "文字起こし待ち"
+      : status === "processing"
         ? "処理中"
-        : value === "completed"
+        : status === "completed"
           ? "完了"
-          : value === "failed"
+          : status === "failed"
             ? "失敗"
-            : value === "uploading"
+            : status === "uploading"
               ? "アップロード中"
               : "確認中";
   const className =
-    value === "completed"
+    status === "completed"
       ? "bg-[#e9f9ee] text-[#30a65b]"
-      : value === "failed"
+      : status === "failed"
         ? "bg-[#ffe8e8] text-[#ff5d47]"
         : "bg-[#fff4df] text-[#b07c00]";
 
@@ -458,6 +552,51 @@ function ProcessingBadge({ value }: { value: MeetingRecord["processingStatus"] }
       {label}
     </span>
   );
+}
+
+function AiScoreCell({ meeting }: { meeting: MeetingRecord }) {
+  const score = meeting.aiSummary?.manualCompliance?.score;
+
+  if (typeof score === "number") {
+    return <span className="font-semibold text-[#171717]">{score}点</span>;
+  }
+
+  if (meeting.aiSummary || meeting.aiSummaryStatus === "completed") {
+    return <span className="font-semibold text-[#30a65b]">分析済み</span>;
+  }
+
+  return <span className="text-[#7a808c]">集計準備中</span>;
+}
+
+function readMeetingListStatus(meeting: MeetingRecord): MeetingRecord["processingStatus"] {
+  if (meeting.processingStatus === "failed" || meeting.aiSummaryStatus === "failed") {
+    return "failed";
+  }
+
+  if (meeting.processingStatus === "uploading") {
+    return "uploading";
+  }
+
+  if (
+    meeting.processingStatus === "completed" ||
+    meeting.aiSummaryStatus === "completed" ||
+    meeting.conversationLogStatus === "completed" ||
+    meeting.transcriptionProbeStatus === "completed" ||
+    Boolean(meeting.aiSummary)
+  ) {
+    return "completed";
+  }
+
+  if (
+    meeting.processingStatus === "processing" ||
+    meeting.aiSummaryStatus === "running" ||
+    meeting.conversationLogStatus === "running" ||
+    meeting.transcriptionProbeStatus === "running"
+  ) {
+    return "processing";
+  }
+
+  return meeting.processingStatus;
 }
 
 function ChevronDownIcon() {

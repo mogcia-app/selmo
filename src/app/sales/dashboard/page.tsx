@@ -46,9 +46,10 @@ export default function SalesDashboardPage() {
   const [searchTerm, setSearchTerm] = useState("");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [knowledgeError, setKnowledgeError] = useState<string | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
+  const [, setIsLoading] = useState(true);
   const canUseMeeting = !profile || canUseSalesDomain(profile, "meeting");
   const canUseTeleapo = !profile || canUseSalesDomain(profile, "teleapo");
+  const displayName = profile?.name?.trim() || profile?.email?.split("@")[0] || "営業担当";
   const activeDomain: SalesDomain = canUseMeeting ? "meeting" : "teleapo";
   const domainCopy = activeDomain === "teleapo"
     ? {
@@ -174,16 +175,16 @@ export default function SalesDashboardPage() {
                 <div className="text-[12px] font-bold uppercase tracking-[0.18em] text-[#b48600]">
                   AI Sales Coach
                 </div>
-                <h1 className="mt-2 text-[30px] font-bold text-[#171717] md:text-[34px]">
-                  今日やること
+                <h1 className="mt-2 text-[24px] font-bold text-[#171717] md:text-[28px]">
+                  こんにちは、{displayName}さん
                 </h1>
-                <p className="mt-2 max-w-[760px] text-[15px] leading-7 text-[#707783]">
+                <p className="mt-2 max-w-[760px] text-[13px] leading-6 text-[#707783]">
                   {domainCopy.unit}・ナレッジ・ロープレから、今日見るべきことと改善アクションをまとめます。
                 </p>
               </div>
             </div>
 
-            <div className="grid gap-3 sm:grid-cols-3">
+            <div className="grid gap-2.5 sm:grid-cols-3">
               <PrimaryLink href={`/meetings/upload?category=${activeDomain}`} label={domainCopy.addLabel} icon={<UploadIcon />} />
               {canUseMeeting ? <PrimaryLink href="/sales/knowledge/search" label="ナレッジ検索" icon={<SearchIcon />} /> : null}
               {canUseTeleapo ? <PrimaryLink href={`/sales/roleplay/scenarios?category=${activeDomain}`} label="ロープレ開始" icon={<RoleplayIcon />} /> : null}
@@ -203,9 +204,6 @@ export default function SalesDashboardPage() {
               <p className="text-[12px] font-bold uppercase tracking-[0.18em] text-[#b48600]">OODA Cycle</p>
               <h2 className="mt-1 text-[24px] font-bold text-[#171717]">OODAサイクル</h2>
             </div>
-            <span className="rounded-full bg-[#f7f7f8] px-3 py-1.5 text-[12px] font-bold text-[#7a808c]">
-              {isLoading ? "読み込み中" : "今日見るべき状態"}
-            </span>
           </div>
 
           <div className="mt-5 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
@@ -297,45 +295,45 @@ export default function SalesDashboardPage() {
                 </div>
               )}
             </article>
+
+            <section className="rounded-[24px] border border-[#e7e9ef] bg-white p-5 shadow-[0_12px_30px_rgba(17,24,39,0.05)] md:p-6">
+              <div className="flex flex-wrap items-end justify-between gap-4">
+                <div>
+                  <p className="text-[12px] font-bold uppercase tracking-[0.18em] text-[#b48600]">Growth Log</p>
+                  <h2 className="mt-1 text-[22px] font-bold text-[#171717]">成長記録</h2>
+                </div>
+                <span className="text-[13px] font-semibold text-[#8d94a1]">スコアより、行動量を見る場所</span>
+              </div>
+
+              <div className="mt-5 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+                <GrowthCard label="商談件数" value={`${monthlyMeetings.length}件`} caption="今月アップロードされた商談" />
+                <GrowthCard label="ロープレ回数" value={`${monthlyRoleplayResults.length}回`} caption="今月保存された練習結果" />
+                <GrowthCard label="ナレッジ閲覧数" value={`${knowledgeItems.length}件`} caption="確認できるナレッジ数" />
+                <GrowthCard
+                  label="AI活用回数"
+                  value={`${monthlyMeetings.length + monthlyRoleplayResults.length}回`}
+                  caption="商談分析とロープレの合計"
+                />
+              </div>
+
+              <div className="mt-5 border-t border-[#eef0f4] pt-5">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <h3 className="text-[16px] font-bold text-[#171717]">今月のOODA進捗</h3>
+                  <span className="text-[12px] font-semibold text-[#9aa1ac]">行動の裏側にある確認メモ</span>
+                </div>
+                <div className="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                  {oodaProgress.map((item) => (
+                    <OodaProgressCard key={item.label} item={item} />
+                  ))}
+                </div>
+              </div>
+            </section>
           </div>
 
           <aside className="space-y-5">
             <RecommendedRoleplayCard scenario={recommendedScenario} actionMeetings={actionMeetings} />
             <RecommendedKnowledgeCard item={recommendedKnowledge} knowledgeError={knowledgeError} />
           </aside>
-        </section>
-
-        <section className="rounded-[24px] border border-[#e7e9ef] bg-white p-5 shadow-[0_12px_30px_rgba(17,24,39,0.05)] md:p-6">
-          <div className="flex flex-wrap items-end justify-between gap-4">
-            <div>
-              <p className="text-[12px] font-bold uppercase tracking-[0.18em] text-[#b48600]">Growth Log</p>
-              <h2 className="mt-1 text-[22px] font-bold text-[#171717]">成長記録</h2>
-            </div>
-            <span className="text-[13px] font-semibold text-[#8d94a1]">スコアより、行動量を見る場所</span>
-          </div>
-
-          <div className="mt-5 grid gap-4 md:grid-cols-4">
-            <GrowthCard label="商談件数" value={`${monthlyMeetings.length}件`} caption="今月アップロードされた商談" />
-            <GrowthCard label="ロープレ回数" value={`${monthlyRoleplayResults.length}回`} caption="今月保存された練習結果" />
-            <GrowthCard label="ナレッジ閲覧数" value={`${knowledgeItems.length}件`} caption="確認できるナレッジ数" />
-            <GrowthCard
-              label="AI活用回数"
-              value={`${monthlyMeetings.length + monthlyRoleplayResults.length}回`}
-              caption="商談分析とロープレの合計"
-            />
-          </div>
-
-          <div className="mt-5 border-t border-[#eef0f4] pt-5">
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <h3 className="text-[16px] font-bold text-[#171717]">今月のOODA進捗</h3>
-              <span className="text-[12px] font-semibold text-[#9aa1ac]">行動の裏側にある確認メモ</span>
-            </div>
-            <div className="mt-3 grid gap-3 md:grid-cols-4">
-              {oodaProgress.map((item) => (
-                <OodaProgressCard key={item.label} item={item} />
-              ))}
-            </div>
-          </div>
         </section>
       </div>
     </main>
@@ -675,7 +673,7 @@ function PrimaryLink({ href, label, icon }: { href: string; label: string; icon:
   return (
     <Link
       href={href}
-      className="inline-flex h-12 items-center justify-center gap-2 rounded-[16px] border border-[#f0d46b] bg-[#fffaf0] px-4 text-[14px] font-bold text-[#171717] transition hover:bg-[#fff3c4]"
+      className="inline-flex h-10 items-center justify-center gap-2 rounded-[14px] border border-[#f0d46b] bg-[#fffaf0] px-3.5 text-[12px] font-bold text-[#171717] transition hover:bg-[#fff3c4]"
     >
       {icon}
       {label}

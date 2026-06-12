@@ -24,7 +24,7 @@ export default function AdminKnowledgePage() {
   const [eventError, setEventError] = useState<string | null>(null);
   const [productId, setProductId] = useState("");
   const [categoryId, setCategoryId] = useState("");
-  const sharedItems = knowledgeItems.filter((item) => item.scope === "shared");
+  const sharedItems = knowledgeItems.filter((item) => item.scope === "shared" || item.visibleToAdmin);
   const searchEvents = events.filter((event) => event.type === "knowledge_searched");
   const filteredItems = sharedItems.filter((item) => {
     if (productId && item.productId !== productId) return false;
@@ -63,7 +63,7 @@ export default function AdminKnowledgePage() {
 
         <section className="mt-8 grid gap-5 md:grid-cols-4">
           <KpiCard label="公式/共有ナレッジ" value={`${sharedItems.length}件`} note="全営業向け" />
-          <KpiCard label="商品数" value={`${products.length}件`} note="商品別ナレッジ入口" />
+          <KpiCard label="商材数" value={`${products.length}件`} note="商材別ナレッジ入口" />
           <KpiCard label="検索回数" value={`${searchEvents.length}回`} note="ナレッジ検索ログ" />
           <KpiCard label="検索ヒット数" value={`${totalSearchHits}件`} note="検索結果件数の合計" />
         </section>
@@ -72,7 +72,7 @@ export default function AdminKnowledgePage() {
           <Panel title="公式ナレッジ一覧">
             <div className="mb-4 grid gap-3 md:grid-cols-2">
               <select value={productId} onChange={(event) => setProductId(event.target.value)} className="h-11 rounded-[14px] border border-[#e4e8ef] bg-white px-3 text-[13px] font-bold outline-none">
-                <option value="">商品すべて</option>
+                <option value="">商材すべて</option>
                 {products.map((product) => <option key={product.id} value={product.id}>{product.name}</option>)}
               </select>
               <select value={categoryId} onChange={(event) => setCategoryId(event.target.value)} className="h-11 rounded-[14px] border border-[#e4e8ef] bg-white px-3 text-[13px] font-bold outline-none">

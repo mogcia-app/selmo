@@ -111,7 +111,7 @@ export default function SalesAnalysisPage() {
   const lostCount = meetings.filter((meeting) => meeting.status === "lost").length;
 
   return (
-    <main className="min-h-screen bg-[#f7f7f8] px-5 py-6 md:px-8 md:py-7">
+    <main className="overflow-x-hidden bg-transparent px-5 pb-6 pt-5 md:px-8 md:pb-8 md:pt-6">
       <section className="mb-6 flex flex-col gap-5 xl:flex-row xl:items-start xl:justify-between">
         <div>
           <div className="text-[12px] font-black uppercase tracking-[0.22em] text-[#b58a00]">
