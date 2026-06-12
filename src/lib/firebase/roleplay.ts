@@ -21,6 +21,7 @@ import { assertFirebaseClient } from "@/lib/firebase/client";
 import { saveSalesActivityEvent } from "@/lib/firebase/activity";
 
 export type RoleplayDifficulty = "easy" | "normal" | "hard";
+export type RoleplayScenarioVisibility = "draft" | "all";
 
 export type RoleplayScenario = {
   id: string;
@@ -37,6 +38,7 @@ export type RoleplayScenario = {
   objections: string[];
   evaluationCriteria: string[];
   difficulty: RoleplayDifficulty;
+  visibility: RoleplayScenarioVisibility;
   createdBy: string | null;
   createdAt: Date | null;
   updatedAt: Date | null;
@@ -94,6 +96,7 @@ export type CreateRoleplayScenarioInput = {
   objections: string[];
   evaluationCriteria: string[];
   difficulty: RoleplayDifficulty;
+  visibility?: RoleplayScenarioVisibility;
   createdBy: string;
 };
 
@@ -220,6 +223,7 @@ export async function createRoleplayScenario(input: CreateRoleplayScenarioInput)
     objections: input.objections,
     evaluationCriteria: input.evaluationCriteria,
     difficulty: input.difficulty,
+    visibility: input.visibility ?? "all",
     createdBy: input.createdBy,
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
@@ -243,7 +247,20 @@ export async function updateRoleplayScenario(id: string, input: CreateRoleplaySc
     objections: input.objections,
     evaluationCriteria: input.evaluationCriteria,
     difficulty: input.difficulty,
+    visibility: input.visibility ?? "all",
     createdBy: input.createdBy,
+    updatedAt: serverTimestamp(),
+  });
+}
+
+export async function updateRoleplayScenarioVisibility(
+  id: string,
+  visibility: RoleplayScenarioVisibility,
+) {
+  const { firestore } = assertFirebaseClient();
+
+  await updateDoc(doc(firestore, "roleplayScenarios", id), {
+    visibility,
     updatedAt: serverTimestamp(),
   });
 }
@@ -343,6 +360,7 @@ function mapRoleplayScenario(snapshot: QueryDocumentSnapshot<DocumentData>): Rol
     objections: readStringArray(data.objections),
     evaluationCriteria: readStringArray(data.evaluationCriteria),
     difficulty,
+    visibility: data.visibility === "draft" ? "draft" : "all",
     createdBy: readNullableString(data.createdBy),
     createdAt: readDate(data.createdAt),
     updatedAt: readDate(data.updatedAt),

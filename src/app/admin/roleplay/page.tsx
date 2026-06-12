@@ -19,6 +19,7 @@ import {
   createRoleplayAssignment,
   createRoleplayScenario,
   subscribeToRoleplayAssignments,
+  updateRoleplayScenarioVisibility,
   updateRoleplayScenario,
   type RoleplayDifficulty,
   type RoleplayAssignment,
@@ -39,6 +40,7 @@ export default function AdminRoleplayPage() {
   const [editingScenario, setEditingScenario] = useState<RoleplayScenario | null>(null);
   const [viewingResultId, setViewingResultId] = useState<string | null>(null);
   const [isAssigning, setIsAssigning] = useState(false);
+  const [isPublishingScenarioId, setIsPublishingScenarioId] = useState<string | null>(null);
   const completedUserIds = new Set(roleplayResults.map((result) => result.userId));
   const inactiveMembers = memberRows.filter((member) => !completedUserIds.has(member.id));
   const averageScore = roleplayResults.length > 0 ? Math.round(roleplayResults.reduce((sum, result) => sum + result.score, 0) / roleplayResults.length) : null;
@@ -81,13 +83,26 @@ export default function AdminRoleplayPage() {
           }),
         ),
       );
-      setAssignmentMessage(`${selectedMembers.length}人に課題を割り当てました。`);
+      setAssignmentMessage(`${selectedMembers.length}人にシナリオを表示しました。`);
       setSelectedUserIds([]);
       setAssignmentReason("");
     } catch (nextError) {
       setAssignmentMessage(nextError instanceof Error ? nextError.message : "割り当てに失敗しました。");
     } finally {
       setIsAssigning(false);
+    }
+  }
+
+  async function handlePublishToAll(scenario: RoleplayScenario) {
+    setIsPublishingScenarioId(scenario.id);
+    setScenarioMessage(null);
+    try {
+      await updateRoleplayScenarioVisibility(scenario.id, "all");
+      setScenarioMessage("このシナリオをsales全員に表示しました。");
+    } catch (nextError) {
+      setScenarioMessage(nextError instanceof Error ? nextError.message : "全員表示に失敗しました。");
+    } finally {
+      setIsPublishingScenarioId(null);
     }
   }
 
@@ -136,7 +151,7 @@ export default function AdminRoleplayPage() {
                   const product = products.find((item) => item.id === scenario.productId);
                   const creator = users.find((user) => user.uid === scenario.createdBy);
                   return (
-                    <div key={scenario.id} className="grid gap-3 rounded-[16px] border border-[#eef1f5] bg-[#fcfcfd] px-4 py-4 md:grid-cols-[minmax(0,1fr)_120px_120px_120px_72px]">
+                    <div key={scenario.id} className="grid gap-3 rounded-[16px] border border-[#eef1f5] bg-[#fcfcfd] px-4 py-4 md:grid-cols-[minmax(0,1fr)_110px_110px_120px_260px]">
                       <div className="min-w-0">
                         <div className="truncate text-[14px] font-black text-[#171717]">{scenario.title}</div>
                         <div className="mt-1 truncate text-[12px] text-[#7a808c]">
@@ -146,17 +161,43 @@ export default function AdminRoleplayPage() {
                       </div>
                       <span className="text-[13px] font-bold text-[#596273]">{formatDifficulty(scenario.difficulty)}</span>
                       <span className="text-[13px] font-bold text-[#596273]">{results.length}回実施</span>
-                      <span className="text-[13px] font-bold text-[#596273]">{score === null ? "結果なし" : `${score}点`}</span>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setScenarioMessage(null);
-                          setEditingScenario(scenario);
-                        }}
-                        className="rounded-[12px] border border-[#e4e8ef] bg-white px-3 py-2 text-[12px] font-bold text-[#343b48]"
-                      >
-                        編集
-                      </button>
+                      <div className="space-y-1">
+                        <div className="text-[13px] font-bold text-[#596273]">{score === null ? "結果なし" : `${score}点`}</div>
+                        <StatusBadge tone={scenario.visibility === "all" ? "good" : "normal"} label={scenario.visibility === "all" ? "全員表示" : "未表示"} />
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setScenarioMessage(null);
+                            setSelectedScenarioId(scenario.id);
+                            setAssignmentMessage("表示する営業メンバーを選択してください。");
+                          }}
+                          className="rounded-[12px] border border-[#e4e8ef] bg-white px-3 py-2 text-[12px] font-bold text-[#343b48]"
+                        >
+                          対象者に表示
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            void handlePublishToAll(scenario);
+                          }}
+                          disabled={isPublishingScenarioId === scenario.id || scenario.visibility === "all"}
+                          className="rounded-[12px] border border-[#f0c655] bg-[#fff5d8] px-3 py-2 text-[12px] font-black text-[#8a6500] disabled:opacity-50"
+                        >
+                          {isPublishingScenarioId === scenario.id ? "表示中" : "全員に表示"}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setScenarioMessage(null);
+                            setEditingScenario(scenario);
+                          }}
+                          className="rounded-[12px] border border-[#e4e8ef] bg-white px-3 py-2 text-[12px] font-bold text-[#343b48]"
+                        >
+                          編集
+                        </button>
+                      </div>
                     </div>
                   );
                 })}
@@ -182,7 +223,7 @@ export default function AdminRoleplayPage() {
               )}
             </Panel>
 
-            <Panel title="ロープレ課題を割り当て">
+            <Panel title="シナリオをsalesに表示">
               <form onSubmit={handleAssign} className="space-y-3">
                 <div className="rounded-[14px] border border-[#e4e8ef] bg-white px-3 py-3">
                   <div className="flex items-center justify-between gap-3">
@@ -226,14 +267,14 @@ export default function AdminRoleplayPage() {
                   value={assignmentReason}
                   onChange={(event) => setAssignmentReason(event.target.value)}
                   className="min-h-[96px] w-full resize-y rounded-[14px] border border-[#e4e8ef] bg-white px-3 py-3 text-[13px] leading-6 text-[#343b48] outline-none focus:border-[#e0bd4b]"
-                  placeholder="割り当て理由。例：価格説明の改善が必要なため"
+                  placeholder="表示理由。例：価格説明の改善が必要なため"
                 />
                 <button
                   type="submit"
                   disabled={isAssigning}
                   className="inline-flex h-11 w-full items-center justify-center rounded-[14px] border border-[#f0c655] bg-[#ffd84d] text-[13px] font-black text-[#171717] disabled:opacity-60"
                 >
-                  {isAssigning ? "割り当て中" : "課題を割り当てる"}
+                  {isAssigning ? "表示中" : "選択したsalesに表示"}
                 </button>
                 {assignmentMessage ? (
                   <p className="rounded-[12px] bg-[#fcfcfd] px-3 py-2 text-[12px] leading-5 text-[#596273]">
@@ -301,7 +342,7 @@ export default function AdminRoleplayPage() {
           onClose={() => setIsScenarioDialogOpen(false)}
           onCreated={() => {
             setIsScenarioDialogOpen(false);
-            setScenarioMessage("シナリオを作成しました。sales側のロープレにも表示されます。");
+            setScenarioMessage("シナリオ一覧に登録しました。sales側へ表示するには、一覧から対象者を選んでください。");
           }}
           onError={setScenarioMessage}
         />
@@ -417,6 +458,7 @@ function ScenarioCreateDialog({
         objections: splitLines(objections),
         evaluationCriteria: splitLines(criteria),
         difficulty,
+        visibility: scenario?.visibility ?? "draft",
         createdBy: userId,
       };
       if (scenario) {
@@ -504,7 +546,7 @@ function ScenarioCreateDialog({
             キャンセル
           </button>
           <button type="submit" disabled={isSaving} className="inline-flex h-11 items-center justify-center rounded-[14px] border border-[#f0c655] bg-[#ffd84d] px-6 text-[14px] font-black text-[#171717] disabled:opacity-60">
-            {isSaving ? "保存中" : scenario ? "更新する" : "作成してsalesに表示"}
+            {isSaving ? "保存中" : scenario ? "更新する" : "シナリオ一覧に登録"}
           </button>
         </div>
       </form>

@@ -119,8 +119,11 @@ export default function SalesDashboardPage() {
   const actionMeetings = useMemo(() => buildActionMeetings(meetings), [meetings]);
   const recentMeetings = useMemo(() => meetings.slice(0, 5), [meetings]);
   const recommendedScenario = useMemo(
-    () => selectRecommendedScenario(roleplayScenarios, roleplayResults),
-    [roleplayResults, roleplayScenarios],
+    () => selectRecommendedScenario(
+      roleplayScenarios.filter((scenario) => scenario.visibility === "all" || scenario.createdBy === profile?.uid),
+      roleplayResults,
+    ),
+    [profile?.uid, roleplayResults, roleplayScenarios],
   );
   const recommendedKnowledge = useMemo(
     () => selectRecommendedKnowledge(knowledgeItems, actionMeetings),

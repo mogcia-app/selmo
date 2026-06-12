@@ -28,9 +28,23 @@ export default function SalesRoleplayScenariosPage() {
   const [editingScenario, setEditingScenario] = useState<RoleplayScenario | null>(null);
   const [activeScenarioId, setActiveScenarioId] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const activeAssignmentScenarioIds = useMemo(
+    () => new Set(assignments.filter((assignment) => assignment.status === "assigned").map((assignment) => assignment.scenarioId)),
+    [assignments],
+  );
+  const visibleScenarios = useMemo(
+    () =>
+      scenarios.filter(
+        (scenario) =>
+          scenario.visibility === "all" ||
+          scenario.createdBy === userId ||
+          activeAssignmentScenarioIds.has(scenario.id),
+      ),
+    [activeAssignmentScenarioIds, scenarios, userId],
+  );
   const activeScenario = useMemo(
-    () => scenarios.find((scenario) => scenario.id === activeScenarioId) ?? scenarios[0] ?? null,
-    [activeScenarioId, scenarios],
+    () => visibleScenarios.find((scenario) => scenario.id === activeScenarioId) ?? visibleScenarios[0] ?? null,
+    [activeScenarioId, visibleScenarios],
   );
 
   useEffect(() => {
@@ -61,8 +75,8 @@ export default function SalesRoleplayScenariosPage() {
     [assignments],
   );
   const recommendedScenarios = useMemo(
-    () => buildRecommendedScenarios(meetings, scenarios),
-    [meetings, scenarios],
+    () => buildRecommendedScenarios(meetings, visibleScenarios),
+    [meetings, visibleScenarios],
   );
 
   return (
@@ -127,9 +141,9 @@ export default function SalesRoleplayScenariosPage() {
               </section>
             ) : null}
 
-            {scenarios.length > 0 ? (
+            {visibleScenarios.length > 0 ? (
               <div className="mt-6 grid gap-3 md:grid-cols-2">
-                {scenarios.map((scenario) => (
+                {visibleScenarios.map((scenario) => (
                   <button
                     key={scenario.id}
                     type="button"
@@ -327,6 +341,7 @@ function ScenarioCreateDialog({
         objections: splitLines(objections),
         evaluationCriteria: splitLines(criteria),
         difficulty,
+        visibility: scenario?.visibility ?? "all",
         createdBy: userId,
       };
       if (scenario) {

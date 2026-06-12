@@ -9,7 +9,9 @@ import { FormEvent, useEffect, useMemo, useState } from "react";
 import { useAuth } from "@/features/auth/auth-provider";
 import {
   saveRoleplayResult,
+  subscribeToRoleplayAssignments,
   subscribeToRoleplayScenarios,
+  type RoleplayAssignment,
   type RoleplayMessage,
   type RoleplayScenario,
 } from "@/lib/firebase/roleplay";
@@ -24,25 +26,44 @@ export default function SalesRoleplayPage() {
   const userId = profile?.uid;
   const companyId = profile?.companyId;
   const [scenarios, setScenarios] = useState<RoleplayScenario[]>([]);
+  const [assignments, setAssignments] = useState<RoleplayAssignment[]>([]);
   const [messages, setMessages] = useState<RoleplayMessage[]>([]);
   const [input, setInput] = useState("");
   const [isThinking, setIsThinking] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const scenarioId = searchParams.get("scenarioId") ?? "";
+  const activeAssignmentScenarioIds = useMemo(
+    () => new Set(assignments.filter((assignment) => assignment.status === "assigned").map((assignment) => assignment.scenarioId)),
+    [assignments],
+  );
+  const visibleScenarios = useMemo(
+    () =>
+      scenarios.filter(
+        (item) =>
+          item.visibility === "all" ||
+          item.createdBy === userId ||
+          activeAssignmentScenarioIds.has(item.id),
+      ),
+    [activeAssignmentScenarioIds, scenarios, userId],
+  );
   const scenario = useMemo(
-    () => scenarios.find((item) => item.id === scenarioId) ?? null,
-    [scenarioId, scenarios],
+    () => visibleScenarios.find((item) => item.id === scenarioId) ?? null,
+    [scenarioId, visibleScenarios],
   );
 
   useEffect(() => {
     if (!companyId) return;
-    return subscribeToRoleplayScenarios(
-      companyId,
-      setScenarios,
-      (nextError: FirebaseError) => setError(nextError.message),
-    );
-  }, [companyId]);
+    const handleError = (nextError: FirebaseError) => setError(nextError.message);
+    const unsubscribers = [
+      subscribeToRoleplayScenarios(companyId, setScenarios, handleError),
+      subscribeToRoleplayAssignments({ companyId, userId, isAdmin: false }, setAssignments, handleError),
+    ];
+
+    return () => {
+      unsubscribers.forEach((unsubscribe) => unsubscribe());
+    };
+  }, [companyId, userId]);
 
   useEffect(() => {
     if (!scenario) return;
