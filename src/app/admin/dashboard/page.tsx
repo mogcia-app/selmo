@@ -148,77 +148,74 @@ export default function AdminDashboardPage() {
 
         {viewMode === "overview" ? (
           <>
-            <section className="mt-8 grid gap-5 md:grid-cols-2 xl:grid-cols-5">
-                <KpiCard icon={<UsersIcon />} label="営業マン数" value={`${salesUsers.length}人`} note={`アクティブ: ${activeSalesUsers.length}人`} />
-                <KpiCard icon={<MeetingIcon />} label="商談件数" value={`${meetings.length}件`} note={meetings.length > 0 ? "登録済み商談" : "商談データ待ち"} />
-                <KpiCard icon={<TargetIcon />} label="成約率" value={winRate === null ? "-" : `${winRate}%`} note={winRate === null ? "商談なし" : `成約 ${wonMeetings}件`} />
-                <KpiCard icon={<SparkIcon />} label="分析済み商談" value={`${analyzedMeetingCount}件`} note={meetings.length > 0 ? `${Math.round((analyzedMeetingCount / meetings.length) * 100)}% 分析済み` : "商談データ待ち"} />
-                <KpiCard icon={<BookIcon />} label="共有ナレッジ" value={`${sharedKnowledgeCount}件`} note={`商品: ${products.length}件 / 全体: ${knowledgeItems.length}件`} />
+            <section className="mt-8 overflow-hidden rounded-[28px] border border-[#eceef4] bg-white shadow-[0_14px_34px_rgba(17,24,39,0.06)]">
+              <div className="grid gap-5 border-b border-[#eef1f5] bg-[#fffdf7] px-5 py-5 lg:grid-cols-[minmax(0,1fr)_280px] lg:px-6">
+                <div>
+                  <p className="text-[12px] font-black uppercase tracking-[0.16em] text-[#8a6500]">Overview</p>
+                  <h2 className="mt-1 text-[26px] font-black tracking-[-0.05em] text-[#171717]">営業全体の健康状態</h2>
+                  <p className="mt-2 max-w-[720px] text-[13px] leading-6 text-[#596273]">
+                    指導が必要なメンバー、商談の分析状況、ナレッジ整備状況をまとめて確認します。
+                  </p>
+                </div>
+                <div className="rounded-[20px] border border-[#f0e3c1] bg-white px-4 py-4">
+                  <div className="text-[12px] font-bold text-[#8a909b]">最優先で見ること</div>
+                  <div className="mt-1 text-[18px] font-black text-[#171717]">
+                    {attentionRows.length > 0 ? `${attentionRows[0].name}の${attentionRows[0].coachingReasons[0] ?? "商談状況"}` : "要対応なし"}
+                  </div>
+                  <div className="mt-3 text-[12px] font-bold text-[#8a6500]">
+                    指導必要 {attentionRows.length}人
+                  </div>
+                </div>
+              </div>
+
+              <div className="grid md:grid-cols-2 xl:grid-cols-5">
+                <OverviewMetric icon={<UsersIcon />} label="営業マン数" value={`${salesUsers.length}人`} note={`アクティブ ${activeSalesUsers.length}人`} />
+                <OverviewMetric icon={<MeetingIcon />} label="商談件数" value={`${meetings.length}件`} note="登録済み商談" />
+                <OverviewMetric icon={<TargetIcon />} label="成約率" value={winRate === null ? "-" : `${winRate}%`} note={winRate === null ? "商談なし" : `成約 ${wonMeetings}件`} tone={winRate !== null && winRate >= 30 ? "good" : "normal"} />
+                <OverviewMetric icon={<SparkIcon />} label="分析済み商談" value={`${analyzedMeetingCount}件`} note={meetings.length > 0 ? `${Math.round((analyzedMeetingCount / meetings.length) * 100)}% 分析済み` : "商談データ待ち"} />
+                <OverviewMetric icon={<BookIcon />} label="共有ナレッジ" value={`${sharedKnowledgeCount}件`} note={`商品 ${products.length}件`} />
+              </div>
             </section>
 
-            <section className="mt-6 grid gap-6 xl:grid-cols-[minmax(0,1.35fr)_minmax(420px,0.95fr)_minmax(320px,0.7fr)]">
-              <Panel title="指導必要ユーザー" actionLabel="営業マン一覧へ" href="/admin/members">
-                {attentionRows.length > 0 ? (
-                  <div className="overflow-x-auto">
-                    <table className="w-full min-w-[760px] text-left">
-                      <thead>
-                        <tr className="border-b border-[#eef1f5] text-[12px] text-[#7a808c]">
-                          <th className="px-3 py-3 font-bold">メンバー</th>
-                          <th className="px-3 py-3 font-bold">状態</th>
-                          <th className="px-3 py-3 font-bold">主な理由</th>
-                          <th className="px-3 py-3 font-bold">直近指標</th>
-                          <th className="px-3 py-3 font-bold">最終商談</th>
-                          <th className="px-3 py-3 font-bold"></th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                    {attentionRows.map((row) => (
-                      <tr key={row.id} className="border-b border-[#f0f2f6] last:border-b-0">
-                        <td className="px-3 py-3">
-                          <div className="flex min-w-0 items-center gap-3">
-                            <MemberAvatar name={row.name} avatarUrl={row.avatarUrl} size="sm" />
-                            <div className="min-w-0">
-                              <div className="truncate text-[13px] font-black text-[#171717]">{row.name}</div>
-                              <div className="truncate text-[11px] text-[#8a909b]">{row.workExperienceLabel}</div>
-                            </div>
-                          </div>
-                        </td>
-                        <td className="px-3 py-3"><PriorityBadge priority={row.coachingPriority} /></td>
-                        <td className="px-3 py-3 text-[12px] font-bold text-[#343b48]">{row.coachingReasons[0] ?? row.nextAction}</td>
-                        <td className="px-3 py-3 text-[12px] font-bold text-[#343b48]">成率 {row.winRate === null ? "-" : `${row.winRate}%`}</td>
-                        <td className="px-3 py-3 text-[12px] font-bold text-[#596273]">{row.latestActivity}</td>
-                        <td className="px-3 py-3">
-                          <Link href={`/admin/members/${row.id}`} className="text-[13px] font-black text-[#8a6500]">›</Link>
-                        </td>
-                      </tr>
-                    ))}
-                      </tbody>
-                    </table>
-                  </div>
-                ) : (
-                  <EmptyState title="指導が必要なユーザーはいません" body="失注・未分析・低スコアのロープレが見つかると、ここに優先表示されます。" />
-                )}
-              </Panel>
+            <section className="mt-6 grid gap-6 xl:grid-cols-[minmax(0,1.1fr)_minmax(420px,0.9fr)]">
+              <div className="space-y-6">
+                <Panel title="指導必要ユーザー" actionLabel="営業マン一覧へ" href="/admin/members">
+                  {attentionRows.length > 0 ? (
+                    <CoachingList rows={attentionRows} />
+                  ) : (
+                    <EmptyState title="指導が必要なユーザーはいません" body="失注・未分析・低スコアのロープレが見つかると、ここに優先表示されます。" />
+                  )}
+                </Panel>
 
-              <Panel title="営業パフォーマンス分布">
-                {repRows.length > 0 ? <PerformanceMap rows={repRows} /> : <EmptyState title="分布データはまだありません" body="営業メンバーと商談結果が蓄積されると表示します。" />}
-              </Panel>
+                <section className="grid gap-6 lg:grid-cols-2">
+                  <Panel title="商材別 成約率" actionLabel="商品を見る" href="/admin/products">
+                    {productRows.length > 0 ? (
+                      <ProductWinList rows={productRows} meetings={meetings} />
+                    ) : (
+                      <EmptyState title="商品はまだありません" body="商品別ナレッジを追加すると、商材別の状況が表示されます。" />
+                    )}
+                  </Panel>
+
+                  <Panel title="よく出るワード TOP5" actionLabel="商談一覧" href="/admin/meetings">
+                    <KeywordList meetings={meetings} />
+                  </Panel>
+                </section>
+              </div>
 
               <div className="space-y-6">
-                <Panel title="今週のアラート">
-                  <div className="space-y-3">
-                    {alertRows.map((row) => (
-                      <div key={row.label} className="flex items-center justify-between gap-3 rounded-[14px] border border-[#eef1f5] bg-[#fcfcfd] px-3 py-3">
-                        <span className="text-[13px] font-black text-[#343b48]">{row.label}</span>
-                        <span className="text-[22px] font-black tracking-[-0.04em] text-[#171717]">{row.value}</span>
-                      </div>
-                    ))}
-                  </div>
+                <Panel title="営業パフォーマンス分布">
+                  {repRows.length > 0 ? <PerformanceMap rows={repRows} /> : <EmptyState title="分布データはまだありません" body="営業メンバーと商談結果が蓄積されると表示します。" />}
                 </Panel>
 
-                <Panel title="営業ランキング">
-                  <RankingList rows={rankingRows} />
-                </Panel>
+                <section className="grid gap-6 lg:grid-cols-2 xl:grid-cols-1">
+                  <Panel title="今週のアラート">
+                    <AlertList rows={alertRows} />
+                  </Panel>
+
+                  <Panel title="営業ランキング">
+                    <RankingList rows={rankingRows} />
+                  </Panel>
+                </section>
               </div>
             </section>
           </>
@@ -226,46 +223,62 @@ export default function AdminDashboardPage() {
           <section className="mt-8">
             {selectedRep ? (
               <>
-                <div className="grid gap-5 xl:grid-cols-[300px_minmax(0,1fr)]">
-                  <article className="rounded-[24px] border border-[#eceef4] bg-white px-5 py-5 shadow-[0_10px_28px_rgba(17,24,39,0.05)]">
-                    <select
-                      value={selectedRep.id}
-                      onChange={(event) => setSelectedMemberId(event.target.value)}
-                      className="mb-5 h-11 w-full rounded-[14px] border border-[#e4e8ef] bg-white px-3 text-[13px] font-black text-[#343b48] outline-none focus:border-[#e0bd4b]"
-                    >
-                      {repRows.map((row) => <option key={row.id} value={row.id}>{row.name}</option>)}
-                    </select>
-                    <div className="flex items-center gap-4">
-                      <MemberAvatar name={selectedRep.name} avatarUrl={selectedRep.avatarUrl} size="lg" />
-                      <div className="min-w-0">
-                        <div className="truncate text-[24px] font-black tracking-[-0.04em] text-[#171717]">{selectedRep.name}</div>
-                        <div className="mt-1 text-[13px] font-bold text-[#596273]">{selectedRep.workExperienceLabel}</div>
-                        <div className="mt-1 truncate text-[12px] text-[#8a909b]">{selectedRep.email}</div>
+                <section className="overflow-hidden rounded-[28px] border border-[#eceef4] bg-white shadow-[0_14px_34px_rgba(17,24,39,0.06)]">
+                  <div className="grid gap-6 border-b border-[#eef1f5] bg-[#fffdf7] px-5 py-5 lg:grid-cols-[minmax(0,1fr)_280px] lg:px-6">
+                    <div className="flex min-w-0 flex-col gap-5 md:flex-row md:items-center">
+                      <MemberAvatar name={selectedRep.name} avatarUrl={selectedRep.avatarUrl} size="xl" />
+                      <div className="min-w-0 flex-1">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <h2 className="truncate text-[30px] font-black tracking-[-0.05em] text-[#171717]">{selectedRep.name}</h2>
+                          <StatusBadge tone={selectedRep.tone} label={selectedRep.status} />
+                          <PriorityBadge priority={selectedRep.coachingPriority} />
+                        </div>
+                        <p className="mt-2 text-[13px] font-bold text-[#596273]">
+                          {selectedRep.workExperienceLabel} ・ {selectedRep.email || "メール未登録"}
+                        </p>
+                        <div className="mt-4 rounded-[18px] border border-[#f0e3c1] bg-white px-4 py-3">
+                          <div className="text-[12px] font-bold text-[#8a909b]">次に見ること</div>
+                          <div className="mt-1 text-[16px] font-black text-[#171717]">{selectedRep.nextAction}</div>
+                        </div>
                       </div>
                     </div>
-                    <div className="mt-5">
-                      <StatusBadge tone={selectedRep.tone} label={selectedRep.status} />
+                    <div className="flex flex-col justify-between gap-3">
+                      <label className="text-[12px] font-black text-[#8a909b]">営業マンを切り替え</label>
+                      <select
+                        value={selectedRep.id}
+                        onChange={(event) => setSelectedMemberId(event.target.value)}
+                        className="h-12 w-full rounded-[16px] border border-[#e4e8ef] bg-white px-3 text-[13px] font-black text-[#343b48] outline-none focus:border-[#e0bd4b]"
+                      >
+                        {repRows.map((row) => <option key={row.id} value={row.id}>{row.name}</option>)}
+                      </select>
+                      <Link href={`/admin/members/${selectedRep.id}`} className="flex h-12 items-center justify-center rounded-[16px] bg-[#171717] px-4 text-[13px] font-black text-white">
+                        詳細ページを見る
+                      </Link>
                     </div>
-                  </article>
-
-                  <div className="grid gap-4 md:grid-cols-3 xl:grid-cols-6">
-                    <KpiCard icon={<TargetIcon />} label="成約率" value={selectedRep.winRate === null ? "-" : `${selectedRep.winRate}%`} note="本人の商談結果" />
-                    <KpiCard icon={<MeetingIcon />} label="商談数" value={`${selectedRep.meetingCount}件`} note={`分析済み ${selectedRep.analyzedCount}件`} />
-                    <KpiCard icon={<RiskIcon />} label="失注率" value={selectedRep.meetingCount === 0 ? "-" : `${Math.round((selectedRep.lostCount / selectedRep.meetingCount) * 1000) / 10}%`} note={`失注 ${selectedRep.lostCount}件`} />
-                    <KpiCard icon={<ClockIcon />} label="平均商談時間" value={selectedRep.avgDurationMin === null ? "-" : `${selectedRep.avgDurationMin}分`} note="音声データのみ" />
-                    <KpiCard icon={<PlayIcon />} label="ロープレ" value={`${selectedRep.roleplayCount}回`} note={`低スコア ${selectedRep.lowRoleplayCount}件`} />
-                    <KpiCard icon={<SparkIcon />} label="AI評価" value={selectedRep.averageScore === null ? "-" : `${selectedRep.averageScore}点`} note="ロープレ平均" />
                   </div>
-                </div>
 
-                <section className="mt-6 grid gap-6 xl:grid-cols-[minmax(0,1fr)_minmax(420px,0.9fr)_minmax(320px,0.7fr)]">
-                  <Panel title="成約率の推移">
-                    <TrendBars rows={buildMonthlyTrend(selectedMeetings)} />
-                  </Panel>
+                  <div className="grid gap-0 md:grid-cols-3 xl:grid-cols-6">
+                    <IndividualMetric icon={<TargetIcon />} label="成約率" value={selectedRep.winRate === null ? "-" : `${selectedRep.winRate}%`} note="商談結果" tone={selectedRep.tone} />
+                    <IndividualMetric icon={<MeetingIcon />} label="商談数" value={`${selectedRep.meetingCount}件`} note={`分析済み ${selectedRep.analyzedCount}件`} />
+                    <IndividualMetric icon={<RiskIcon />} label="失注率" value={selectedRep.meetingCount === 0 ? "-" : `${Math.round((selectedRep.lostCount / selectedRep.meetingCount) * 1000) / 10}%`} note={`失注 ${selectedRep.lostCount}件`} tone={selectedRep.lostCount > 0 ? "risk" : "normal"} />
+                    <IndividualMetric icon={<ClockIcon />} label="平均商談時間" value={selectedRep.avgDurationMin === null ? "-" : `${selectedRep.avgDurationMin}分`} note="音声のみ" />
+                    <IndividualMetric icon={<PlayIcon />} label="ロープレ" value={`${selectedRep.roleplayCount}回`} note={`低スコア ${selectedRep.lowRoleplayCount}件`} tone={selectedRep.lowRoleplayCount > 0 ? "risk" : "normal"} />
+                    <IndividualMetric icon={<SparkIcon />} label="AI評価" value={selectedRep.averageScore === null ? "-" : `${selectedRep.averageScore}点`} note="ロープレ平均" tone={selectedRep.averageScore !== null && selectedRep.averageScore >= 80 ? "good" : "normal"} />
+                  </div>
+                </section>
 
-                  <Panel title="改善が必要なポイント">
-                    <ImprovementList row={selectedRep} />
-                  </Panel>
+                <section className="mt-6 grid gap-6 xl:grid-cols-[minmax(0,1.15fr)_minmax(390px,0.85fr)]">
+                  <div className="space-y-6">
+                    <Panel title="改善が必要なポイント">
+                      <ImprovementList row={selectedRep} />
+                    </Panel>
+                    <Panel title="成約率の推移">
+                      <TrendBars rows={buildMonthlyTrend(selectedMeetings)} />
+                    </Panel>
+                    <Panel title="直近の商談">
+                      <LatestMeetingTable rows={buildLatestReviews(selectedMeetings, [selectedRep])} />
+                    </Panel>
+                  </div>
 
                   <div className="space-y-6">
                     <Panel title="管理者アクション">
@@ -274,19 +287,15 @@ export default function AdminDashboardPage() {
                     <Panel title="次にやるべきアクション">
                       <NextActionList row={selectedRep} />
                     </Panel>
+                    <div className="grid gap-6 sm:grid-cols-2 xl:grid-cols-1">
+                      <Panel title="失注理由">
+                        <LossSummary meetings={selectedMeetings} />
+                      </Panel>
+                      <Panel title="ロープレスコア">
+                        <RoleplayScoreCard results={selectedResults} />
+                      </Panel>
+                    </div>
                   </div>
-                </section>
-
-                <section className="mt-6 grid gap-6 xl:grid-cols-[minmax(0,0.8fr)_minmax(0,0.8fr)_minmax(0,1fr)]">
-                  <Panel title="失注理由">
-                    <LossSummary meetings={selectedMeetings} />
-                  </Panel>
-                  <Panel title="ロープレスコア">
-                    <RoleplayScoreCard results={selectedResults} />
-                  </Panel>
-                  <Panel title="直近の商談">
-                    <LatestMeetingTable rows={buildLatestReviews(selectedMeetings, [selectedRep])} />
-                  </Panel>
                 </section>
               </>
             ) : (
@@ -295,115 +304,8 @@ export default function AdminDashboardPage() {
           </section>
         )}
 
-        {viewMode === "members" ? (
-        <section className="mt-8">
-          <Panel title="営業マン別サマリー" actionLabel="一覧を見る" href="/admin/reps">
-            {repRows.length > 0 ? (
-              <div className="overflow-x-auto">
-                <table className="w-full min-w-[1320px] text-left">
-                  <thead>
-                    <tr className="border-b border-[#eef1f5] text-[12px] text-[#7a808c]">
-                      <th className="px-4 py-3 font-bold">営業マン</th>
-                      <th className="px-4 py-3 font-bold">商談</th>
-                      <th className="px-4 py-3 font-bold">失注</th>
-                      <th className="px-4 py-3 font-bold">分析済み</th>
-                      <th className="px-4 py-3 font-bold">平均商談時間</th>
-                      <th className="px-4 py-3 font-bold">成約率</th>
-                      <th className="px-4 py-3 font-bold">ロープレ</th>
-                      <th className="px-4 py-3 font-bold">平均スコア</th>
-                      <th className="px-4 py-3 font-bold">指導理由</th>
-                      <th className="px-4 py-3 font-bold">最終活動</th>
-                      <th className="px-4 py-3 font-bold">次回対応</th>
-                      <th className="px-4 py-3 font-bold">状態</th>
-                      <th className="px-4 py-3 font-bold">詳細</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {repRows.map((row) => (
-                      <tr key={row.id} className="border-b border-[#f0f2f6] last:border-b-0">
-                        <td className="px-4 py-4">
-                          <div className="flex items-center gap-3">
-                            <MemberAvatar name={row.name} avatarUrl={row.avatarUrl} size="md" />
-                            <div>
-                              <div className="text-[14px] font-black text-[#171717]">{row.name}</div>
-                              <div className="mt-0.5 text-[12px] text-[#8a909b]">{row.email}</div>
-                            </div>
-                          </div>
-                        </td>
-                        <td className="px-4 py-4 text-[13px] font-bold text-[#343b48]">{row.meetingCount}件</td>
-                        <td className="px-4 py-4 text-[13px] font-bold text-[#343b48]">{row.lostCount}件</td>
-                        <td className="px-4 py-4 text-[13px] font-bold text-[#343b48]">{row.analyzedCount}件</td>
-                        <td className="px-4 py-4 text-[13px] font-bold text-[#343b48]">{row.avgDurationMin === null ? "-" : `${row.avgDurationMin}分`}</td>
-                        <td className="px-4 py-4">
-                          <Progress value={row.winRate ?? 0} tone={row.tone} label={row.winRate === null ? "-" : `${row.winRate}%`} />
-                        </td>
-                        <td className="px-4 py-4 text-[13px] font-bold text-[#343b48]">{row.roleplayCount}回</td>
-                        <td className="px-4 py-4 text-[13px] font-bold text-[#343b48]">{row.averageScore === null ? "-" : `${row.averageScore}点`}</td>
-                        <td className="px-4 py-4">
-                          {row.coachingReasons.length > 0 ? (
-                            <div className="flex max-w-[280px] flex-wrap gap-1.5">
-                              {row.coachingReasons.map((reason) => (
-                                <span key={reason} className="rounded-full bg-[#fffaf0] px-2.5 py-1 text-[11px] font-black text-[#8a6500]">
-                                  {reason}
-                                </span>
-                              ))}
-                            </div>
-                          ) : (
-                            <span className="text-[13px] font-bold text-[#8a909b]">なし</span>
-                          )}
-                        </td>
-                        <td className="px-4 py-4 text-[13px] font-bold text-[#596273]">{row.latestActivity}</td>
-                        <td className="px-4 py-4 text-[13px] font-bold text-[#343b48]">{row.nextAction}</td>
-                        <td className="px-4 py-4"><StatusBadge tone={row.tone} label={row.status} /></td>
-                        <td className="px-4 py-4">
-                          <Link href={`/admin/members/${row.id}`} className="text-[13px] font-bold text-[#2672d9]">
-                            個別確認
-                          </Link>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            ) : (
-              <EmptyState title="営業ユーザーはまだいません" body="営業メンバーが追加されると、営業マン別の状況が表示されます。" />
-            )}
-          </Panel>
-
-        </section>
-        ) : null}
-
         {viewMode === "overview" ? (
-        <>
-        <section className="mt-8 grid gap-6 xl:grid-cols-[minmax(0,1fr)_minmax(360px,0.7fr)]">
-          <Panel title="商材別 成約率" actionLabel="商品を見る" href="/admin/products">
-            {productRows.length > 0 ? (
-              <div className="space-y-3">
-                {productRows.map((row) => {
-                  const productMeetings = meetings.filter((meeting) => meeting.productType === row.name);
-                  const productWinRate = calcWinRate(productMeetings);
-                  return (
-                    <div key={row.id} className="flex items-center justify-between gap-4 rounded-[16px] border border-[#eef1f5] bg-[#fcfcfd] px-4 py-3">
-                      <div className="min-w-0">
-                        <div className="truncate text-[14px] font-black text-[#171717]">{row.name}</div>
-                        <div className="mt-1 text-[12px] text-[#8a909b]">ナレッジ {row.knowledgeCount}件</div>
-                      </div>
-                      <span className="text-[13px] font-bold text-[#8a6500]">{productWinRate === null ? "商談なし" : `${productWinRate}%`}</span>
-                    </div>
-                  );
-                })}
-              </div>
-            ) : (
-              <EmptyState title="商品はまだありません" body="商品別ナレッジを追加すると、商材別の状況が表示されます。" />
-            )}
-          </Panel>
-
-          <Panel title="よく出るワード TOP5" actionLabel="商談一覧" href="/admin/meetings">
-            <KeywordList meetings={meetings} />
-          </Panel>
-        </section>
-
-        <section className="mt-8 grid gap-6 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(360px,0.85fr)]">
+        <section className="mt-6 grid gap-6 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(360px,0.85fr)]">
           <Panel title="成約率の推移">
             {monthlyTrend.length > 0 ? (
               <TrendBars rows={monthlyTrend} />
@@ -433,7 +335,6 @@ export default function AdminDashboardPage() {
             </div>
           </Panel>
         </section>
-        </>
         ) : null}
 
       </div>
@@ -441,17 +342,72 @@ export default function AdminDashboardPage() {
   );
 }
 
-function KpiCard({ icon, label, value, note }: { icon: React.ReactNode; label: string; value: string; note: string }) {
+function OverviewMetric({
+  icon,
+  label,
+  value,
+  note,
+  tone = "normal",
+}: {
+  icon: React.ReactNode;
+  label: string;
+  value: string;
+  note: string;
+  tone?: "good" | "normal" | "risk";
+}) {
+  const iconClass =
+    tone === "good"
+      ? "bg-[#eaf8ef] text-[#16834f]"
+      : tone === "risk"
+        ? "bg-[#fff0ed] text-[#d63c2f]"
+        : "bg-[#fff3cf] text-[#f0b400]";
+
   return (
-    <article className="rounded-[22px] border border-[#eceef4] bg-white px-5 py-5 shadow-[0_10px_28px_rgba(17,24,39,0.05)]">
-      <div className="flex items-center gap-4">
-        <span className="inline-flex h-12 w-12 items-center justify-center rounded-full bg-[#fff3cf] text-[#f0b400]">
+    <article className="border-b border-[#eef1f5] px-5 py-5 md:border-r md:last:border-r-0 xl:border-b-0">
+      <div className="flex items-start gap-3">
+        <span className={`inline-flex h-12 w-12 shrink-0 items-center justify-center rounded-full ${iconClass}`}>
           {icon}
         </span>
-        <div>
-          <div className="text-[13px] font-bold text-[#343b48]">{label}</div>
-          <div className="mt-1 text-[30px] font-black tracking-[-0.04em] text-[#171717]">{value}</div>
-          <div className="mt-1 text-[12px] text-[#7a808c]">{note}</div>
+        <div className="min-w-0">
+          <div className="text-[12px] font-black text-[#596273]">{label}</div>
+          <div className="mt-1 text-[30px] font-black tracking-[-0.05em] text-[#171717]">{value}</div>
+          <div className="mt-1 text-[11px] font-bold text-[#8a909b]">{note}</div>
+        </div>
+      </div>
+    </article>
+  );
+}
+
+function IndividualMetric({
+  icon,
+  label,
+  value,
+  note,
+  tone = "normal",
+}: {
+  icon: React.ReactNode;
+  label: string;
+  value: string;
+  note: string;
+  tone?: "good" | "normal" | "risk";
+}) {
+  const iconClass =
+    tone === "good"
+      ? "bg-[#eaf8ef] text-[#16834f]"
+      : tone === "risk"
+        ? "bg-[#fff0ed] text-[#d63c2f]"
+        : "bg-[#fff3cf] text-[#f0b400]";
+
+  return (
+    <article className="border-b border-[#eef1f5] px-5 py-5 md:border-r md:last:border-r-0 xl:border-b-0">
+      <div className="flex items-start gap-3">
+        <span className={`inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full ${iconClass}`}>
+          {icon}
+        </span>
+        <div className="min-w-0">
+          <div className="text-[12px] font-black text-[#596273]">{label}</div>
+          <div className="mt-1 text-[27px] font-black tracking-[-0.05em] text-[#171717]">{value}</div>
+          <div className="mt-1 text-[11px] font-bold text-[#8a909b]">{note}</div>
         </div>
       </div>
     </article>
@@ -474,14 +430,71 @@ function Panel({ title, actionLabel, href, children }: { title: string; actionLa
   );
 }
 
-function Progress({ value, label, tone }: { value: number; label: string; tone: "good" | "normal" | "risk" }) {
-  const color = tone === "good" ? "bg-[#20a66a]" : tone === "risk" ? "bg-[#f24d4d]" : "bg-[#f5b400]";
+function CoachingList({ rows }: { rows: ReturnType<typeof buildRepRows> }) {
   return (
-    <div className="flex items-center gap-3">
-      <span className="w-12 text-[13px] font-bold text-[#343b48]">{label}</span>
-      <div className="h-2 w-28 rounded-full bg-[#edf0f5]">
-        <div className={`h-full rounded-full ${color}`} style={{ width: `${Math.min(value, 100)}%` }} />
-      </div>
+    <div className="space-y-3">
+      {rows.map((row) => (
+        <Link
+          key={row.id}
+          href={`/admin/members/${row.id}`}
+          className="grid gap-3 rounded-[18px] border border-[#eef1f5] bg-[#fcfcfd] px-4 py-4 transition hover:border-[#ead8a8] hover:bg-[#fffdf7] md:grid-cols-[minmax(0,1fr)_150px_130px_28px]"
+        >
+          <div className="flex min-w-0 items-center gap-3">
+            <MemberAvatar name={row.name} avatarUrl={row.avatarUrl} size="md" />
+            <div className="min-w-0">
+              <div className="truncate text-[14px] font-black text-[#171717]">{row.name}</div>
+              <div className="mt-0.5 truncate text-[12px] font-bold text-[#8a909b]">{row.workExperienceLabel} ・ {row.latestActivity}</div>
+            </div>
+          </div>
+          <div className="flex items-center md:justify-center">
+            <PriorityBadge priority={row.coachingPriority} />
+          </div>
+          <div className="text-[12px] font-bold text-[#343b48]">
+            <div>{row.coachingReasons[0] ?? row.nextAction}</div>
+            <div className="mt-1 text-[#8a909b]">成約率 {row.winRate === null ? "-" : `${row.winRate}%`}</div>
+          </div>
+          <div className="flex items-center justify-end text-[20px] font-black text-[#8a6500]">›</div>
+        </Link>
+      ))}
+    </div>
+  );
+}
+
+function ProductWinList({ rows, meetings }: { rows: ReturnType<typeof buildProductRows>; meetings: MeetingRecord[] }) {
+  return (
+    <div className="space-y-3">
+      {rows.map((row) => {
+        const productMeetings = meetings.filter((meeting) => meeting.productType === row.name);
+        const productWinRate = calcWinRate(productMeetings);
+        const barValue = productWinRate ?? 0;
+        return (
+          <div key={row.id} className="rounded-[16px] border border-[#eef1f5] bg-[#fcfcfd] px-4 py-3">
+            <div className="flex items-center justify-between gap-4">
+              <div className="min-w-0">
+                <div className="truncate text-[14px] font-black text-[#171717]">{row.name}</div>
+                <div className="mt-1 text-[12px] font-bold text-[#8a909b]">商談 {productMeetings.length}件 / ナレッジ {row.knowledgeCount}件</div>
+              </div>
+              <span className="shrink-0 text-[14px] font-black text-[#8a6500]">{productWinRate === null ? "-" : `${productWinRate}%`}</span>
+            </div>
+            <div className="mt-3 h-2 rounded-full bg-[#edf0f5]">
+              <div className="h-full rounded-full bg-[#ffd84d]" style={{ width: `${Math.min(barValue, 100)}%` }} />
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function AlertList({ rows }: { rows: ReturnType<typeof buildAlertRows> }) {
+  return (
+    <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-1">
+      {rows.map((row) => (
+        <div key={row.label} className="rounded-[16px] border border-[#eef1f5] bg-[#fcfcfd] px-4 py-4">
+          <div className="text-[12px] font-black text-[#596273]">{row.label}</div>
+          <div className="mt-2 text-[28px] font-black tracking-[-0.05em] text-[#171717]">{row.value}</div>
+        </div>
+      ))}
     </div>
   );
 }
@@ -496,16 +509,18 @@ function StatusBadge({ tone, label }: { tone: "good" | "normal" | "risk"; label:
   return <span className={`rounded-full px-3 py-1 text-[12px] font-black ${className}`}>{label}</span>;
 }
 
-function MemberAvatar({ name, avatarUrl, size }: { name: string; avatarUrl: string | null; size: "sm" | "md" | "lg" }) {
+function MemberAvatar({ name, avatarUrl, size }: { name: string; avatarUrl: string | null; size: "sm" | "md" | "lg" | "xl" }) {
   const className =
-    size === "lg"
+    size === "xl"
+      ? "h-24 w-24 text-[34px]"
+      : size === "lg"
       ? "h-20 w-20 text-[28px]"
       : size === "md"
         ? "h-10 w-10 text-[14px]"
         : "h-9 w-9 text-[13px]";
 
   if (avatarUrl) {
-    const sizePx = size === "lg" ? 80 : size === "md" ? 40 : 36;
+    const sizePx = size === "xl" ? 96 : size === "lg" ? 80 : size === "md" ? 40 : 36;
     return <Image src={avatarUrl} alt="" width={sizePx} height={sizePx} className={`${className} shrink-0 rounded-full object-cover`} />;
   }
 
@@ -567,22 +582,66 @@ function AnalyticsPlaceholder({ title, body }: { title: string; body: string }) 
 }
 
 function TrendBars({ rows }: { rows: Array<{ label: string; meetingCount: number; winRate: number }> }) {
+  if (rows.length === 0) {
+    return <AnalyticsPlaceholder title="推移データはまだありません" body="商談結果が蓄積されると、成約率の推移を表示します。" />;
+  }
+
+  const chartWidth = 560;
+  const chartHeight = 210;
+  const padding = { top: 18, right: 18, bottom: 34, left: 42 };
+  const plotWidth = chartWidth - padding.left - padding.right;
+  const plotHeight = chartHeight - padding.top - padding.bottom;
+  const points = rows.map((row, index) => {
+    const x = padding.left + (rows.length === 1 ? plotWidth / 2 : (plotWidth / (rows.length - 1)) * index);
+    const y = padding.top + plotHeight - (Math.min(Math.max(row.winRate, 0), 100) / 100) * plotHeight;
+    return { ...row, x, y };
+  });
+  const path = points.map((point, index) => `${index === 0 ? "M" : "L"} ${point.x} ${point.y}`).join(" ");
+  const latest = points[points.length - 1];
+
   return (
-    <div className="space-y-3">
-      {rows.map((row) => (
-        <div key={row.label} className="rounded-[16px] border border-[#eef1f5] bg-[#fcfcfd] px-4 py-3">
-          <div className="flex items-center justify-between gap-3">
-            <div>
-              <div className="text-[13px] font-black text-[#171717]">{row.label}</div>
-              <div className="mt-1 text-[12px] text-[#8a909b]">{row.meetingCount}件</div>
-            </div>
-            <span className="text-[13px] font-black text-[#8a6500]">{row.winRate}%</span>
-          </div>
-          <div className="mt-3 h-2 rounded-full bg-[#edf0f5]">
-            <div className="h-full rounded-full bg-[#ffd84d]" style={{ width: `${Math.min(row.winRate, 100)}%` }} />
+    <div className="rounded-[20px] border border-[#eef1f5] bg-[#fcfcfd] p-4">
+      <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <div className="text-[12px] font-bold text-[#8a909b]">成約率</div>
+          <div className="mt-1 text-[26px] font-black tracking-[-0.05em] text-[#171717]">
+            {latest ? `${latest.winRate}%` : "-"}
           </div>
         </div>
-      ))}
+        <div className="flex items-center gap-3 text-[12px] font-bold text-[#8a909b]">
+          <span className="inline-flex items-center gap-1.5"><span className="h-2 w-5 rounded-full bg-[#ffd84d]" /> 今期</span>
+          <span>{rows.reduce((sum, row) => sum + row.meetingCount, 0)}件</span>
+        </div>
+      </div>
+
+      <div className="overflow-x-auto">
+        <svg viewBox={`0 0 ${chartWidth} ${chartHeight}`} role="img" aria-label="成約率の推移" className="min-w-[520px]">
+          {[0, 25, 50, 75, 100].map((value) => {
+            const y = padding.top + plotHeight - (value / 100) * plotHeight;
+            return (
+              <g key={value}>
+                <line x1={padding.left} x2={chartWidth - padding.right} y1={y} y2={y} stroke="#e8ebf0" strokeDasharray={value === 0 ? "0" : "4 6"} />
+                <text x={padding.left - 12} y={y + 4} textAnchor="end" className="fill-[#8a909b] text-[11px] font-bold">{value}%</text>
+              </g>
+            );
+          })}
+          <path d={path} fill="none" stroke="#ffd12f" strokeWidth="5" strokeLinecap="round" strokeLinejoin="round" />
+          <path d={`${path} L ${points[points.length - 1]?.x ?? padding.left} ${padding.top + plotHeight} L ${padding.left} ${padding.top + plotHeight} Z`} fill="url(#trendFill)" opacity="0.55" />
+          <defs>
+            <linearGradient id="trendFill" x1="0" x2="0" y1="0" y2="1">
+              <stop offset="0%" stopColor="#ffe58a" />
+              <stop offset="100%" stopColor="#fffaf0" />
+            </linearGradient>
+          </defs>
+          {points.map((point) => (
+            <g key={point.label}>
+              <circle cx={point.x} cy={point.y} r="7" fill="#fff" stroke="#ffd12f" strokeWidth="4" />
+              <text x={point.x} y={chartHeight - 10} textAnchor="middle" className="fill-[#596273] text-[11px] font-bold">{point.label.slice(5)}</text>
+              <text x={point.x} y={point.y - 13} textAnchor="middle" className="fill-[#171717] text-[11px] font-black">{point.winRate}%</text>
+            </g>
+          ))}
+        </svg>
+      </div>
     </div>
   );
 }
@@ -597,29 +656,59 @@ function MiniMetric({ label, value }: { label: string; value: string }) {
 }
 
 function PerformanceMap({ rows }: { rows: ReturnType<typeof buildRepRows> }) {
+  const maxMeetings = Math.max(...rows.map((item) => item.meetingCount), 1);
+  const featured = [...rows].sort((left, right) => {
+    if (left.coachingPriority !== right.coachingPriority) {
+      const weight = { high: 0, medium: 1, low: 2 } as const;
+      return weight[left.coachingPriority] - weight[right.coachingPriority];
+    }
+    return right.meetingCount - left.meetingCount;
+  }).slice(0, 3);
+
   return (
-    <div className="relative h-[300px] rounded-[18px] border border-[#eef1f5] bg-[#fffdf7] px-4 py-4">
-      <div className="absolute left-1/2 top-4 bottom-10 w-px bg-[#ead8a8]" />
-      <div className="absolute left-10 right-4 top-1/2 h-px bg-[#ead8a8]" />
-      <span className="absolute left-4 top-4 text-[11px] font-bold text-[#8a909b]">成約率</span>
-      <span className="absolute bottom-3 right-4 text-[11px] font-bold text-[#8a909b]">商談数</span>
-      {rows.map((row) => {
-        const x = Math.min((row.meetingCount / Math.max(...rows.map((item) => item.meetingCount), 1)) * 82 + 10, 92);
-        const y = 88 - Math.min(row.winRate ?? 0, 100) * 0.72;
-        const color = row.tone === "risk" ? "bg-[#ef6658]" : row.tone === "good" ? "bg-[#23a96d]" : "bg-[#f5b400]";
-        return (
-          <Link
-            key={row.id}
-            href={`/admin/members/${row.id}`}
-            className={`absolute h-3.5 w-3.5 rounded-full ${color} ring-4 ring-white transition hover:scale-125`}
-            style={{ left: `${x}%`, top: `${y}%` }}
-            title={`${row.name} 成約率 ${row.winRate ?? "-"}% / 商談 ${row.meetingCount}件`}
-          />
-        );
-      })}
-      <div className="absolute left-4 top-8 rounded-full bg-white/90 px-3 py-1 text-[11px] font-bold text-[#596273]">成約率は高いが商談数が少ない</div>
-      <div className="absolute bottom-8 left-4 rounded-full bg-white/90 px-3 py-1 text-[11px] font-bold text-[#d63c2f]">改善が必要</div>
-      <div className="absolute right-4 top-8 rounded-full bg-white/90 px-3 py-1 text-[11px] font-bold text-[#16834f]">高パフォーマンス</div>
+    <div className="space-y-4">
+      <div className="relative h-[340px] overflow-hidden rounded-[22px] border border-[#eef1f5] bg-[#fffdf7] px-4 py-4">
+        <div className="absolute inset-x-10 top-1/2 h-px bg-[#ead8a8]" />
+        <div className="absolute bottom-12 top-8 left-1/2 w-px bg-[#ead8a8]" />
+        <div className="absolute left-4 top-4 text-[11px] font-black text-[#8a909b]">成約率</div>
+        <div className="absolute bottom-4 right-5 text-[11px] font-black text-[#8a909b]">商談数</div>
+        <div className="absolute left-5 top-10 rounded-full bg-white/90 px-3 py-1 text-[11px] font-bold text-[#596273] shadow-sm">成約率は高い / 商談数は少ない</div>
+        <div className="absolute right-5 top-10 rounded-full bg-white/90 px-3 py-1 text-[11px] font-bold text-[#16834f] shadow-sm">高パフォーマンス</div>
+        <div className="absolute bottom-12 left-5 rounded-full bg-white/90 px-3 py-1 text-[11px] font-bold text-[#d63c2f] shadow-sm">改善が必要</div>
+        <div className="absolute bottom-12 right-5 rounded-full bg-white/90 px-3 py-1 text-[11px] font-bold text-[#2672d9] shadow-sm">商談数は多い / 成約率は低い</div>
+        {[25, 50, 75].map((value) => (
+          <div key={value} className="absolute left-10 right-8 h-px bg-[#f0e3c1]/70" style={{ top: `${92 - value * 0.72}%` }} />
+        ))}
+        {rows.map((row) => {
+          const x = Math.min((row.meetingCount / maxMeetings) * 76 + 12, 90);
+          const y = 88 - Math.min(row.winRate ?? 0, 100) * 0.72;
+          const color = row.tone === "risk" ? "bg-[#ef6658]" : row.tone === "good" ? "bg-[#23a96d]" : "bg-[#f5b400]";
+          const size = row.meetingCount >= maxMeetings * 0.75 ? "h-4 w-4" : "h-3.5 w-3.5";
+          return (
+            <Link
+              key={row.id}
+              href={`/admin/members/${row.id}`}
+              className={`absolute ${size} rounded-full ${color} ring-4 ring-white transition hover:z-10 hover:scale-150`}
+              style={{ left: `${x}%`, top: `${y}%` }}
+              title={`${row.name} 成約率 ${row.winRate ?? "-"}% / 商談 ${row.meetingCount}件`}
+            />
+          );
+        })}
+      </div>
+
+      <div className="grid gap-3 md:grid-cols-3">
+        {featured.map((row) => (
+          <Link key={row.id} href={`/admin/members/${row.id}`} className="rounded-[16px] border border-[#eef1f5] bg-[#fcfcfd] px-4 py-3 transition hover:border-[#f0c655] hover:bg-white">
+            <div className="flex items-center justify-between gap-2">
+              <div className="min-w-0">
+                <div className="truncate text-[13px] font-black text-[#171717]">{row.name}</div>
+                <div className="mt-1 text-[12px] font-bold text-[#8a909b]">{row.meetingCount}件 / 成約率 {row.winRate ?? "-"}%</div>
+              </div>
+              <PriorityBadge priority={row.coachingPriority} />
+            </div>
+          </Link>
+        ))}
+      </div>
     </div>
   );
 }
@@ -669,7 +758,7 @@ function ActionList({ row }: { row: ReturnType<typeof buildRepRows>[number] }) {
       {actions.map((action, index) => (
         <Link
           key={action}
-          href={index === 2 ? `/admin/members/${row.id}` : index === 3 ? "/admin/knowledge" : "/admin/roleplay"}
+          href={index === 0 || index === 2 ? `/admin/members/${row.id}` : index === 3 ? "/admin/knowledge" : "/admin/roleplay"}
           className={`block rounded-[14px] border px-4 py-3 text-[13px] font-black ${index === 0 ? "border-[#f0c655] bg-[#ffd84d] text-[#171717]" : "border-[#eef1f5] bg-white text-[#343b48]"}`}
         >
           {action}
@@ -721,15 +810,66 @@ function LossSummary({ meetings }: { meetings: MeetingRecord[] }) {
 }
 
 function RoleplayScoreCard({ results }: { results: RoleplayResult[] }) {
-  const latest = results[0] ?? null;
+  const latest = [...results].sort((left, right) => (right.createdAt?.getTime() ?? 0) - (left.createdAt?.getTime() ?? 0))[0] ?? null;
   const average = results.length > 0 ? Math.round(results.reduce((sum, result) => sum + result.score, 0) / results.length) : null;
+  const scenarioScores = buildRoleplayScenarioScores(results).slice(0, 5);
   return (
-    <div className="rounded-[18px] border border-[#eef1f5] bg-[#fcfcfd] px-5 py-5">
-      <div className="text-[13px] font-bold text-[#8a909b]">平均スコア</div>
-      <div className="mt-2 text-[36px] font-black tracking-[-0.04em] text-[#171717]">{average === null ? "-" : average}</div>
-      <div className="mt-3 text-[13px] font-bold text-[#596273]">直近: {latest ? `${latest.scenarioTitle} / ${latest.score}点` : "未実施"}</div>
+    <div className="rounded-[20px] border border-[#eef1f5] bg-[#fcfcfd] p-5">
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <div className="text-[13px] font-bold text-[#8a909b]">平均スコア</div>
+          <div className="mt-2 text-[40px] font-black tracking-[-0.05em] text-[#171717]">{average === null ? "-" : average}</div>
+        </div>
+        <div className="rounded-[16px] border border-[#f0e3c1] bg-white px-3 py-2 text-right">
+          <div className="text-[11px] font-bold text-[#8a909b]">実施</div>
+          <div className="mt-1 text-[18px] font-black text-[#8a6500]">{results.length}回</div>
+        </div>
+      </div>
+
+      <div className="mt-4 space-y-3">
+        {scenarioScores.length > 0 ? (
+          scenarioScores.map((row) => (
+            <div key={row.title}>
+              <div className="flex items-center justify-between gap-3 text-[12px] font-bold">
+                <span className="min-w-0 truncate text-[#343b48]">{row.title}</span>
+                <span className={row.score < 70 ? "text-[#d63c2f]" : "text-[#16834f]"}>{row.score}点</span>
+              </div>
+              <div className="mt-2 h-2 rounded-full bg-[#edf0f5]">
+                <div className={`h-full rounded-full ${row.score < 70 ? "bg-[#ef6658]" : "bg-[#ffd84d]"}`} style={{ width: `${Math.min(row.score, 100)}%` }} />
+              </div>
+            </div>
+          ))
+        ) : (
+          <div className="rounded-[16px] border border-dashed border-[#dfe4ec] bg-white px-4 py-5 text-center text-[13px] font-bold text-[#8a909b]">ロープレ未実施</div>
+        )}
+      </div>
+
+      <div className="mt-4 rounded-[16px] bg-white px-4 py-3 text-[13px] font-bold leading-6 text-[#596273]">
+        直近: {latest ? `${latest.scenarioTitle} / ${latest.score}点` : "未実施"}
+      </div>
     </div>
   );
+}
+
+function buildRoleplayScenarioScores(results: RoleplayResult[]) {
+  const grouped = new Map<string, RoleplayResult[]>();
+  results.forEach((result) => {
+    grouped.set(result.scenarioTitle, [...(grouped.get(result.scenarioTitle) ?? []), result]);
+  });
+
+  return Array.from(grouped.entries())
+    .map(([title, scenarioResults]) => ({
+      title,
+      count: scenarioResults.length,
+      score: Math.round(scenarioResults.reduce((sum, result) => sum + result.score, 0) / scenarioResults.length),
+      latestAt: scenarioResults
+        .map((result) => result.createdAt?.getTime() ?? 0)
+        .sort((left, right) => right - left)[0] ?? 0,
+    }))
+    .sort((left, right) => {
+      if (left.score !== right.score) return left.score - right.score;
+      return right.latestAt - left.latestAt;
+    });
 }
 
 function LatestMeetingTable({ rows }: { rows: ReturnType<typeof buildLatestReviews> }) {

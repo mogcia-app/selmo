@@ -44,7 +44,7 @@ export default function SalesRoleplayScenariosPage() {
       ),
       subscribeToMeetings(
         { role: profile.role, userId: profile.uid, companyId: profile.companyId },
-        setMeetings,
+        (nextMeetings) => setMeetings(nextMeetings.filter((meeting) => meeting.salesDomain === "teleapo")),
         handleError,
       ),
       subscribeToKnowledgeProducts(profile.companyId, setProducts, handleError),

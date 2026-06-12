@@ -15,6 +15,10 @@ type UserDocument = {
   companyName?: string;
   role: "admin" | "sales";
   status: "active" | "inactive";
+  enabledSalesDomains?: {
+    meeting?: boolean; // 未設定時は true 扱い
+    teleapo?: boolean; // 未設定時は true 扱い
+  };
   teamId?: string;
   createdAt: Timestamp;
   updatedAt: Timestamp;
@@ -41,6 +45,7 @@ type MeetingDocument = {
   companyId?: string;
   userId: string;
   uploadedBy: string;
+  salesDomain?: "meeting" | "teleapo"; // 未設定時は meeting 扱い
   customerName: string;
   companyName?: string;
   productType: string;

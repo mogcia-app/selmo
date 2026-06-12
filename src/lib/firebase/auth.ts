@@ -25,6 +25,7 @@ import {
 import { getDownloadURL, ref, uploadBytes } from "firebase/storage";
 
 import { assertFirebaseClient } from "@/lib/firebase/client";
+import { readEnabledSalesDomains, type EnabledSalesDomains } from "@/lib/sales-domains";
 import type { UserRole } from "@/types/domain";
 
 export type CompanyPlan = "standard" | "pro" | "enterprise";
@@ -48,6 +49,7 @@ export type AppUserProfile = {
   workExperienceYears: number | null;
   workExperienceMonths: number | null;
   workExperienceLocked: boolean;
+  enabledSalesDomains: EnabledSalesDomains;
 };
 
 type RegisterUserInput = {
@@ -166,6 +168,7 @@ export async function fetchUserProfile(uid: string): Promise<AppUserProfile | nu
     workExperienceYears?: unknown;
     workExperienceMonths?: unknown;
     workExperienceLocked?: unknown;
+    enabledSalesDomains?: unknown;
   };
 
   if (!data.role) {
@@ -190,6 +193,7 @@ export async function fetchUserProfile(uid: string): Promise<AppUserProfile | nu
     workExperienceYears: readWorkExperienceValue(data.workExperienceYears),
     workExperienceMonths: readWorkExperienceValue(data.workExperienceMonths),
     workExperienceLocked: data.workExperienceLocked === true,
+    enabledSalesDomains: readEnabledSalesDomains(data.enabledSalesDomains),
   };
 }
 
@@ -226,6 +230,7 @@ export function subscribeToUserProfiles(
               workExperienceYears?: unknown;
               workExperienceMonths?: unknown;
               workExperienceLocked?: unknown;
+              enabledSalesDomains?: unknown;
             };
 
             if (!data.role) return null;
@@ -246,6 +251,7 @@ export function subscribeToUserProfiles(
               workExperienceYears: readWorkExperienceValue(data.workExperienceYears),
               workExperienceMonths: readWorkExperienceValue(data.workExperienceMonths),
               workExperienceLocked: data.workExperienceLocked === true,
+              enabledSalesDomains: readEnabledSalesDomains(data.enabledSalesDomains),
             };
           })
           .filter((profile): profile is AppUserProfile => Boolean(profile)),

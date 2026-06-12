@@ -1,10 +1,12 @@
 "use client";
 
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 
 import { useAuth } from "@/features/auth/auth-provider";
 import { subscribeToMeetings, type MeetingRecord } from "@/lib/firebase/meetings";
+import { canUseSalesDomain } from "@/lib/sales-domains";
 
 const productIconMap: Record<string, React.ReactNode> = {
   "SaaSプランA": <CloudIcon color="#60a5fa" bg="#eef5ff" />,
@@ -14,7 +16,31 @@ const productIconMap: Record<string, React.ReactNode> = {
 };
 
 export default function MeetingsPage() {
+  const searchParams = useSearchParams();
+  const category = searchParams.get("category") === "teleapo" ? "teleapo" : "meeting";
+  const copy = category === "teleapo"
+    ? {
+        title: "架電一覧",
+        description: "過去のテレアポ・架電ログを検索し、文字起こしや詳細を確認できます。",
+        loading: "架電一覧を読み込み中です。",
+        empty: "条件に一致する架電ログがありません。検索条件を変更してください。",
+        uploadLabel: "架電ログをアップロード",
+        searchPlaceholder: "会社名・担当者名・商材で検索",
+        purposeLabel: "架電目的",
+        backLabel: "ダッシュボードへ戻る",
+      }
+    : {
+        title: "打ち合わせ一覧",
+        description: "過去の商談・打ち合わせデータを検索し、文字起こしや詳細を確認できます。",
+        loading: "打ち合わせ一覧を読み込み中です。",
+        empty: "条件に一致する打ち合わせがありません。検索条件を変更してください。",
+        uploadLabel: "音声をアップロード",
+        searchPlaceholder: "会社名・担当者名・商材で検索",
+        purposeLabel: "目的",
+        backLabel: "ダッシュボードへ戻る",
+      };
   const { isLoading: isAuthLoading, profile } = useAuth();
+  const canAccessDomain = isAuthLoading || canUseSalesDomain(profile, category);
   const [meetings, setMeetings] = useState<MeetingRecord[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -29,7 +55,7 @@ export default function MeetingsPage() {
       return;
     }
 
-    if (!profile?.uid || !profile.role || !profile.companyId) {
+    if (!profile?.uid || !profile.role || !profile.companyId || !canAccessDomain) {
       setMeetings([]);
       setIsLoading(false);
       return;
@@ -59,7 +85,7 @@ export default function MeetingsPage() {
     );
 
     return unsubscribe;
-  }, [isAuthLoading, profile?.companyId, profile?.role, profile?.uid]);
+  }, [canAccessDomain, isAuthLoading, profile?.companyId, profile?.role, profile?.uid]);
 
   const productOptions = useMemo(() => {
     const options = new Set<string>();
@@ -75,6 +101,7 @@ export default function MeetingsPage() {
     const normalizedSearch = search.trim().toLowerCase();
 
     return meetings.filter((meeting) => {
+      if (meeting.salesDomain !== category) return false;
       const matchesSearch =
         normalizedSearch.length === 0 ||
         [meeting.customerName, meeting.productType, meeting.location, meeting.audioFileName]
@@ -88,27 +115,27 @@ export default function MeetingsPage() {
 
       return matchesSearch && matchesStatus && matchesProduct && matchesDate;
     });
-  }, [dateFilter, meetings, productFilter, search, statusFilter]);
+  }, [category, dateFilter, meetings, productFilter, search, statusFilter]);
 
   return (
     <main className="min-h-screen bg-[#f7f7f8] px-5 py-6 md:px-8 md:py-7">
       <section className="mb-6 flex flex-col gap-5 xl:flex-row xl:items-start xl:justify-between">
         <div>
           <h1 className="text-[34px] font-bold tracking-[-0.04em] text-[#171717]">
-            打ち合わせ一覧
+            {copy.title}
           </h1>
           <p className="mt-2 text-[16px] text-[#7a808c]">
-            自分がアップロードした商談・通話の処理状況と分析結果を確認できます。
+            {copy.description}
           </p>
         </div>
 
         <div className="flex items-start gap-3 self-start">
           <Link
-            href="/meetings/upload"
+            href={`/meetings/upload?category=${category}`}
             className="flex items-center gap-3 rounded-[14px] border border-[#f0c655] bg-white px-4 py-3 text-[14px] font-semibold text-[#303544] shadow-[0_6px_20px_rgba(17,24,39,0.04)]"
           >
             <UploadIcon />
-            <span>音声をアップロード</span>
+            <span>{copy.uploadLabel}</span>
           </Link>
         </div>
       </section>
@@ -119,6 +146,16 @@ export default function MeetingsPage() {
         </div>
       ) : null}
 
+      {!canAccessDomain ? (
+        <div className="rounded-[24px] border border-[#f2d6d6] bg-white px-6 py-12 text-center shadow-[0_10px_28px_rgba(17,24,39,0.05)]">
+          <h2 className="text-[26px] font-black tracking-[-0.04em] text-[#171717]">この一覧は利用できません</h2>
+          <p className="mt-3 text-[15px] leading-7 text-[#596273]">
+            {category === "teleapo" ? "テレアポ" : "商談"}の利用権限がありません。必要な場合は管理者に依頼してください。
+          </p>
+        </div>
+      ) : null}
+
+      {canAccessDomain ? (
       <section className="rounded-[24px] border border-[#eceef4] bg-white p-4 shadow-[0_10px_28px_rgba(17,24,39,0.05)]">
         <div className="mb-4 grid gap-3 xl:grid-cols-[1.35fr_0.68fr_0.68fr_0.68fr]">
           <label className="relative">
@@ -128,7 +165,7 @@ export default function MeetingsPage() {
             <input
               value={search}
               onChange={(event) => setSearch(event.target.value)}
-              placeholder="会社名・担当者名・目的で検索"
+              placeholder={copy.searchPlaceholder}
               className="w-full rounded-[14px] border border-[#e6e8ee] bg-white py-3 pl-12 pr-4 text-[14px] text-[#171717] outline-none transition placeholder:text-[#96a0ad] focus:border-[#d7dae2] focus:shadow-[0_0_0_3px_rgba(255,196,0,0.12)]"
             />
           </label>
@@ -167,11 +204,11 @@ export default function MeetingsPage() {
 
         {isLoading ? (
           <div className="px-3 py-8 text-[14px] text-[#7a808c]">
-            打ち合わせ一覧を読み込み中です。
+            {copy.loading}
           </div>
         ) : filteredMeetings.length === 0 ? (
           <div className="px-3 py-8 text-[14px] text-[#7a808c]">
-            条件に一致する打ち合わせがありません。検索条件を変更してください。
+            {copy.empty}
           </div>
         ) : (
           <>
@@ -182,7 +219,7 @@ export default function MeetingsPage() {
                     <th className="px-5 py-5">日時</th>
                     <th className="px-5 py-5">会社名 / 担当者</th>
                     <th className="px-5 py-5">商材</th>
-                    <th className="px-5 py-5">目的</th>
+                    <th className="px-5 py-5">{copy.purposeLabel}</th>
                     <th className="px-5 py-5">成約/失注</th>
                     <th className="px-5 py-5">処理状況</th>
                     <th className="px-5 py-5">AIスコア</th>
@@ -257,12 +294,13 @@ export default function MeetingsPage() {
                 全 {filteredMeetings.length} 件を表示
               </div>
               <Link href="/sales/dashboard" className="text-[14px] font-semibold text-[#8b6a00]">
-                ダッシュボードへ戻る
+                {copy.backLabel}
               </Link>
             </div>
           </>
         )}
       </section>
+      ) : null}
     </main>
   );
 }

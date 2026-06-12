@@ -2,15 +2,17 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useSearchParams } from "next/navigation";
 import { useEffect, useState } from "react";
 
 import { useAuth } from "@/features/auth/auth-provider";
+import type { AppUserProfile } from "@/lib/firebase/auth";
 import {
   markAppNotificationRead,
   subscribeToAppNotifications,
   type AppNotification,
 } from "@/lib/firebase/notifications";
+import { canUseSalesDomain } from "@/lib/sales-domains";
 
 type DashboardShellProps = {
   children: React.ReactNode;
@@ -29,50 +31,81 @@ const adminSections: Array<{ label: string; items: NavItem[] }> = [
     items: [
       { href: "/admin/dashboard", label: "ダッシュボード", num: "01" },
       { href: "/admin/members", label: "営業メンバー", num: "02" },
-      { href: "/admin/meetings", label: "商談レビュー", num: "03" },
-      { href: "/admin/activity", label: "活動ログ", num: "04" },
+      { href: "/admin/analysis?category=meeting", label: "商談分析", num: "03" },
+      { href: "/admin/analysis?category=teleapo", label: "テレアポ分析", num: "04" },
+      { href: "/admin/meetings?category=meeting", label: "商談一覧 / レビュー", num: "05" },
+      { href: "/admin/meetings?category=teleapo", label: "テレアポ一覧 / レビュー", num: "06" },
+      { href: "/admin/activity", label: "活動ログ", num: "07" },
     ],
   },
   {
     label: "02 — Enablement",
     items: [
-      { href: "/admin/knowledge", label: "ナレッジ管理", num: "05" },
-      { href: "/admin/roleplay", label: "ロープレ管理", num: "06" },
-      { href: "/admin/products", label: "商材管理", num: "07" },
-      { href: "/admin/manuals", label: "マニュアル", num: "08" },
+      { href: "/admin/knowledge", label: "ナレッジ管理", num: "08" },
+      { href: "/admin/roleplay", label: "ロープレ管理", num: "09" },
+      { href: "/admin/products", label: "商材管理", num: "10" },
+      { href: "/admin/manuals", label: "マニュアル", num: "11" },
     ],
   },
   {
     label: "03 — System",
     items: [
-      { href: "/admin/users", label: "ユーザー管理", num: "09" },
+      { href: "/admin/users", label: "ユーザー管理", num: "12" },
     ],
   },
 ];
 
 const salesSections: Array<{ label: string; items: NavItem[] }> = [
   {
-    label: "01 — Dashboard",
+    label: "01 — Home",
     items: [
       { href: "/sales/dashboard", label: "ダッシュボード", num: "01" },
-      { href: "/meetings", label: "打ち合わせ一覧", num: "02" },
-      { href: "/meetings/upload", label: "アップロード", num: "03" },
-      { href: "/sales/knowledge", label: "ナレッジ", num: "04" },
-      { href: "/sales/roleplay", label: "AIロープレ", num: "05" },
+    ],
+  },
+  {
+    label: "02 — 商談",
+    items: [
+      { href: "/meetings/upload?category=meeting", label: "アップロード", num: "02" },
+      { href: "/sales/analysis?category=meeting", label: "商談分析", num: "03" },
+      { href: "/meetings?category=meeting", label: "打ち合わせ一覧", num: "04" },
+      { href: "/sales/roleplay/scenarios?category=meeting", label: "ロープレ", num: "05" },
+    ],
+  },
+  {
+    label: "03 — テレアポ",
+    items: [
+      { href: "/meetings/upload?category=teleapo", label: "アップロード", num: "06" },
+      { href: "/sales/analysis?category=teleapo", label: "テレアポ分析", num: "07" },
+      { href: "/meetings?category=teleapo", label: "架電一覧", num: "08" },
+      { href: "/sales/roleplay/scenarios?category=teleapo", label: "ロープレ", num: "09" },
+    ],
+  },
+  {
+    label: "04 — Knowledge",
+    items: [
+      { href: "/sales/knowledge", label: "ナレッジ", num: "10" },
+      { href: "/sales/knowledge/search", label: "ナレッジ検索", num: "11" },
     ],
   },
 ];
 
 export function DashboardShell({ children, variant }: DashboardShellProps) {
   const pathname = usePathname();
+  const searchParams = useSearchParams();
   const { profile } = useAuth();
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
-  const sections = variant === "admin" ? adminSections : salesSections;
+  const sections = variant === "admin" ? adminSections : filterSalesSections(salesSections, profile);
+  const defaultUploadCategory = profile && !canUseSalesDomain(profile, "meeting") && canUseSalesDomain(profile, "teleapo") ? "teleapo" : "meeting";
   const initials = (profile?.name ?? profile?.email ?? "S").slice(0, 1);
   const currentLabel =
+    pathname === "/admin/account"
+      ? "アカウント設定"
+      : pathname === "/sales/account"
+        ? "アカウント設定"
+        :
     sections
       .flatMap((section) => section.items)
-      .find((item) => isNavItemActive(pathname, item.href))?.label ?? "ダッシュボード";
+      .find((item) => isNavItemActive(pathname, item.href, searchParams))?.label ?? "ダッシュボード";
   const nowLabel = new Intl.DateTimeFormat("ja-JP", {
     year: "numeric",
     month: "2-digit",
@@ -99,7 +132,7 @@ export function DashboardShell({ children, variant }: DashboardShellProps) {
   return (
     <div
       className={`mx-auto grid min-h-screen max-w-[1680px] ${
-        variant === "sales" ? "bg-[#f5f5f6] md:grid-cols-[228px_1fr]" : "md:grid-cols-[240px_1fr]"
+        variant === "sales" ? "bg-[#f5f5f6] md:grid-cols-[260px_1fr]" : "md:grid-cols-[240px_1fr]"
       }`}
     >
       {variant === "sales" ? (
@@ -122,46 +155,49 @@ export function DashboardShell({ children, variant }: DashboardShellProps) {
               />
             </div>
 
-            <nav className="mt-7">
-              <div className="mb-3 px-2 text-[11px] font-semibold uppercase tracking-[0.22em] text-[#a3aab5]">
-                Navigation
-              </div>
-              <div className="space-y-2">
-                {sections[0].items.map((item, index) => {
-                  const isActive = isNavItemActive(pathname, item.href);
-                  const Icon = salesIconMap[index] ?? MenuDotIcon;
+            <nav className="mt-7 space-y-6">
+              {sections.map((section) => (
+                <div key={section.label}>
+                  <div className="mb-3 px-2 text-[11px] font-semibold uppercase tracking-[0.22em] text-[#a3aab5]">
+                    {section.label}
+                  </div>
+                  <div className="space-y-2">
+                    {section.items.map((item) => {
+                      const isActive = isNavItemActive(pathname, item.href, searchParams);
 
-                  return (
-                    <Link
-                      key={item.href}
-                      href={item.href}
-                      className={`group flex items-center gap-3 rounded-[18px] px-4 py-3.5 text-[15px] font-medium transition ${
-                        isActive
-                          ? "bg-[linear-gradient(180deg,#fff2c8_0%,#ffe7a0_100%)] text-[#171717] shadow-[0_8px_18px_rgba(245,189,7,0.18)]"
-                          : "text-[#616875] hover:bg-[#f7f7fa] hover:text-[#171717]"
-                      }`}
-                    >
-                      <span
-                        className={`transition ${
-                          isActive
-                            ? "text-[#f0b400]"
-                            : "text-[#8d94a1] group-hover:text-[#171717]"
-                        }`}
-                      >
-                        <Icon />
-                      </span>
-                      <span className="flex-1">{item.label}</span>
-                      <span
-                        className={`text-[12px] transition ${
-                          isActive ? "text-[#d79d00]" : "text-[#c6ccd5] group-hover:text-[#8d94a1]"
-                        }`}
-                      >
-                        ›
-                      </span>
-                    </Link>
-                  );
-                })}
-              </div>
+                      return (
+                        <Link
+                          key={item.href}
+                          href={item.href}
+                          className={`group flex items-center gap-3 rounded-[18px] px-4 py-3.5 text-[15px] font-medium transition ${
+                            isActive
+                              ? "bg-[linear-gradient(180deg,#fff2c8_0%,#ffe7a0_100%)] text-[#171717] shadow-[0_8px_18px_rgba(245,189,7,0.18)]"
+                              : "text-[#616875] hover:bg-[#f7f7fa] hover:text-[#171717]"
+                          }`}
+                        >
+                          <span
+                            className={`inline-flex h-7 w-7 items-center justify-center rounded-full text-[11px] font-black transition ${
+                              isActive
+                                ? "bg-white text-[#d79d00]"
+                                : "bg-[#f1f2f5] text-[#8d94a1] group-hover:text-[#171717]"
+                            }`}
+                          >
+                            {item.num}
+                          </span>
+                          <span className="flex-1">{item.label}</span>
+                          <span
+                            className={`text-[12px] transition ${
+                              isActive ? "text-[#d79d00]" : "text-[#c6ccd5] group-hover:text-[#8d94a1]"
+                            }`}
+                          >
+                            ›
+                          </span>
+                        </Link>
+                      );
+                    })}
+                  </div>
+                </div>
+              ))}
             </nav>
 
             {notifications.length > 0 ? (
@@ -187,7 +223,7 @@ export function DashboardShell({ children, variant }: DashboardShellProps) {
 
             <Link
               href="/sales/account"
-              className={`mt-8 block rounded-[20px] border px-4 py-3.5 shadow-[0_8px_22px_rgba(17,24,39,0.04)] transition md:absolute md:bottom-6 md:left-5 md:right-5 md:mt-0 ${
+              className={`mt-8 block rounded-[20px] border px-4 py-3.5 shadow-[0_8px_22px_rgba(17,24,39,0.04)] transition ${
                 pathname === "/sales/account"
                   ? "border-[#f0c655] bg-[#fff8e4]"
                   : "border-[#e8ebf0] bg-white hover:border-[#f0c655] hover:bg-[#fffdf7]"
@@ -244,7 +280,7 @@ export function DashboardShell({ children, variant }: DashboardShellProps) {
               </div>
               <div className="space-y-2">
                 {section.items.map((item) => {
-                  const isActive = isNavItemActive(pathname, item.href);
+                  const isActive = isNavItemActive(pathname, item.href, searchParams);
 
                   return (
                     <Link
@@ -282,8 +318,10 @@ export function DashboardShell({ children, variant }: DashboardShellProps) {
         </nav>
 
         <Link
-          href="/sales/account"
-          className="mt-8 block rounded-[20px] border border-[#e8ebf0] bg-white px-4 py-3.5 shadow-[0_8px_22px_rgba(17,24,39,0.04)] transition hover:border-[#f0c655] hover:bg-[#fffdf7] md:absolute md:bottom-6 md:left-5 md:right-5 md:mt-0"
+          href="/admin/account"
+          className={`mt-8 block rounded-[20px] border px-4 py-3.5 shadow-[0_8px_22px_rgba(17,24,39,0.04)] transition hover:border-[#f0c655] hover:bg-[#fffdf7] md:absolute md:bottom-6 md:left-5 md:right-5 md:mt-0 ${
+            pathname === "/admin/account" ? "border-[#f0c655] bg-[#fff8e4]" : "border-[#e8ebf0] bg-white"
+          }`}
         >
           <div className="flex items-center gap-3">
           <div className="flex h-11 w-11 items-center justify-center rounded-full bg-[#fff1bf] text-[14px] font-black text-[#8a6500]">
@@ -323,7 +361,7 @@ export function DashboardShell({ children, variant }: DashboardShellProps) {
               </button>
             ) : (
               <Link
-                href="/meetings/upload"
+                href={`/meetings/upload?category=${defaultUploadCategory}`}
                 className="rounded-[14px] border border-[#171717] bg-[#171717] px-4 py-2.5 text-[13px] font-black text-white transition hover:bg-[#343b48]"
               >
                 ＋ 打ち合わせアップロード
@@ -340,7 +378,22 @@ export function DashboardShell({ children, variant }: DashboardShellProps) {
   );
 }
 
-function isNavItemActive(pathname: string, href: string) {
+function isNavItemActive(pathname: string, href: string, searchParams: { get: (name: string) => string | null }) {
+  const target = new URL(href, "https://selmo.local");
+  const hasQuery = target.searchParams.size > 0;
+
+  if (hasQuery) {
+    if (pathname !== target.pathname) return false;
+
+    const targetCategory = target.searchParams.get("category");
+    const targetView = target.searchParams.get("view") ?? "";
+    const currentCategory = searchParams.get("category") ?? getDefaultSalesCategory(pathname);
+    const currentView = searchParams.get("view") ?? "";
+
+    if (targetCategory && currentCategory !== targetCategory) return false;
+    return targetView === currentView;
+  }
+
   if (href === "/meetings") {
     return pathname === href;
   }
@@ -360,67 +413,38 @@ function isNavItemActive(pathname: string, href: string) {
   return pathname === href;
 }
 
-const salesIconMap = [
-  HomeIcon,
-  ListIcon,
-  UploadIcon,
-  ManualIcon,
-  RoleplayIcon,
-];
+function filterSalesSections(
+  sections: Array<{ label: string; items: NavItem[] }>,
+  profile: AppUserProfile | null,
+) {
+  if (!profile) return sections;
 
-function HomeIcon() {
-  return (
-    <svg viewBox="0 0 24 24" aria-hidden="true" className="h-5 w-5 fill-none stroke-current stroke-[1.8]">
-      <path d="M4 10.5 12 4l8 6.5" />
-      <path d="M6.5 9.5v9h11v-9" />
-      <path d="M10 18.5v-5h4v5" />
-    </svg>
-  );
+  const canUseMeeting = canUseSalesDomain(profile, "meeting");
+  const canUseTeleapo = canUseSalesDomain(profile, "teleapo");
+
+  return sections
+    .map((section) => {
+      if (section.label.includes("商談") && !canUseMeeting) return null;
+      if (section.label.includes("テレアポ") && !canUseTeleapo) return null;
+      if (section.label.includes("Knowledge") && !canUseMeeting) return null;
+      return {
+        ...section,
+        items: section.items.filter((item) => !item.href.startsWith("/sales/roleplay") || canUseTeleapo),
+      };
+    })
+    .filter((section): section is Array<{ label: string; items: NavItem[] }>[number] => Boolean(section));
 }
 
-function ListIcon() {
-  return (
-    <svg viewBox="0 0 24 24" aria-hidden="true" className="h-5 w-5 fill-none stroke-current stroke-[1.8]">
-      <path d="M8 7h11M8 12h11M8 17h11" />
-      <circle cx="4.5" cy="7" r="1" fill="currentColor" stroke="none" />
-      <circle cx="4.5" cy="12" r="1" fill="currentColor" stroke="none" />
-      <circle cx="4.5" cy="17" r="1" fill="currentColor" stroke="none" />
-    </svg>
-  );
-}
+function getDefaultSalesCategory(pathname: string) {
+  if (
+    pathname === "/meetings" ||
+    pathname === "/meetings/upload" ||
+    pathname === "/sales/roleplay" ||
+    pathname === "/sales/roleplay/scenarios" ||
+    pathname === "/sales/roleplay/results"
+  ) {
+    return "meeting";
+  }
 
-function UploadIcon() {
-  return (
-    <svg viewBox="0 0 24 24" aria-hidden="true" className="h-5 w-5 fill-none stroke-current stroke-[1.8]">
-      <path d="M12 16V6" />
-      <path d="m8 10 4-4 4 4" />
-      <path d="M5 18.5h14" />
-    </svg>
-  );
-}
-
-function ManualIcon() {
-  return (
-    <svg viewBox="0 0 24 24" aria-hidden="true" className="h-5 w-5 fill-none stroke-current stroke-[1.8]">
-      <path d="M5 5.5A2.5 2.5 0 0 1 7.5 3H19v16.5H7.8A2.8 2.8 0 0 0 5 22Z" />
-      <path d="M5 5.5V22" />
-      <path d="M8.5 8h7M8.5 12h7M8.5 16h4.5" />
-    </svg>
-  );
-}
-
-function RoleplayIcon() {
-  return (
-    <svg viewBox="0 0 24 24" aria-hidden="true" className="h-5 w-5 fill-none stroke-current stroke-[1.8]">
-      <path d="M7.5 12.5a4 4 0 1 1 8 0" />
-      <path d="M5 19c.8-2.3 3.1-3.5 6.5-3.5S17.2 16.7 18 19" />
-      <path d="M18.5 8.5h1.2a1.8 1.8 0 0 1 1.8 1.8v2.2a1.8 1.8 0 0 1-1.8 1.8h-1.2" />
-      <path d="M5.5 8.5H4.3a1.8 1.8 0 0 0-1.8 1.8v2.2a1.8 1.8 0 0 0 1.8 1.8h1.2" />
-      <path d="M12 3.5v2" />
-    </svg>
-  );
-}
-
-function MenuDotIcon() {
-  return <span className="block h-2 w-2 rounded-full bg-current" />;
+  return "";
 }

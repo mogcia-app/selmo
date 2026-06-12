@@ -16,6 +16,7 @@ import {
   type MeetingRecord,
 } from "@/lib/firebase/meetings";
 import { updateAudioProcessingJob } from "@/lib/firebase/operations";
+import { canUseSalesDomain } from "@/lib/sales-domains";
 
 const transcriptionRequestTimeoutMs = 10 * 60 * 1000;
 const transientBannerDurationMs = 5 * 1000;
@@ -108,9 +109,14 @@ export function MeetingDetailScreen({
       return;
     }
 
+    if (!canUseSalesDomain(profile, meeting.salesDomain)) {
+      setErrorMessage(meeting.salesDomain === "teleapo" ? "この架電データを閲覧する権限がありません。" : "この商談データを閲覧する権限がありません。");
+      return;
+    }
+
     setDraftStatus(meeting.status);
     setDraftMemo(meeting.memo ?? "");
-  }, [meeting]);
+  }, [meeting, profile]);
 
   useEffect(() => {
     if (meeting?.transcriptionProbeStatus === "completed" || meeting?.transcriptionProbeStatus === "failed") {
@@ -709,6 +715,16 @@ export function MeetingDetailScreen({
       <main className="min-h-screen bg-[#f7f7f8] px-5 py-6 md:px-8 md:py-7">
         <div className="rounded-[22px] border border-[#ffd8cc] bg-[#fff4ef] p-8 text-[14px] text-[#cf4b39] shadow-[0_10px_28px_rgba(17,24,39,0.05)]">
           打ち合わせデータが見つかりませんでした。
+        </div>
+      </main>
+    );
+  }
+
+  if (!canUseSalesDomain(profile, meeting.salesDomain)) {
+    return (
+      <main className="min-h-screen bg-[#f7f7f8] px-5 py-6 md:px-8 md:py-7">
+        <div className="rounded-[22px] border border-[#ffd8cc] bg-[#fff4ef] p-8 text-[14px] text-[#cf4b39] shadow-[0_10px_28px_rgba(17,24,39,0.05)]">
+          {meeting.salesDomain === "teleapo" ? "この架電データを閲覧する権限がありません。" : "この商談データを閲覧する権限がありません。"}
         </div>
       </main>
     );

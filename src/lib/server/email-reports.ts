@@ -28,6 +28,7 @@ type CompanyRecord = {
   plan: "standard" | "pro" | "enterprise";
   monthlyTranscriptionQuota: number | null;
   monthlyRoleplayQuota: number | null;
+  notificationEmails: string[];
 };
 
 type MeetingRecord = {
@@ -60,6 +61,12 @@ type AiUsageRecord = {
   createdAt: Date | null;
 };
 
+type EmailRecipient = {
+  id: string;
+  email: string;
+  name: string;
+};
+
 export async function sendWeeklyAdminReports() {
   const context = await loadReportContext();
   const { start, end, key } = getPreviousWeekRange();
@@ -68,15 +75,10 @@ export async function sendWeeklyAdminReports() {
   let failed = 0;
 
   for (const company of context.companies) {
-    const admins = context.users.filter(
-      (user) =>
-        user.companyId === company.id &&
-        user.role === "admin" &&
-        user.status !== "inactive" &&
-        Boolean(user.email),
-    );
+    const admins = context.users.filter((user) => user.companyId === company.id && user.role === "admin" && user.status !== "inactive");
+    const recipients = buildAdminEmailRecipients(company, admins);
 
-    if (admins.length === 0) {
+    if (recipients.length === 0) {
       skipped += 1;
       continue;
     }
@@ -92,13 +94,8 @@ export async function sendWeeklyAdminReports() {
     );
     const analyzedMeetings = meetings.filter((meeting) => meeting.aiSummaryOverview);
 
-    for (const admin of admins) {
-      if (!admin.email) {
-        skipped += 1;
-        continue;
-      }
-
-      const eventId = safeEventId(`weekly_admin_report_${company.id}_${admin.id}_${key}`);
+    for (const recipient of recipients) {
+      const eventId = safeEventId(`weekly_admin_report_${company.id}_${recipient.id}_${key}`);
       if (await hasSentEmailEvent(eventId)) {
         skipped += 1;
         continue;
@@ -106,10 +103,10 @@ export async function sendWeeklyAdminReports() {
 
       try {
         const result = await sendEmail({
-          to: admin.email,
+          to: recipient.email,
           subject: "今週の営業レポートを確認しませんか？",
           html: buildWeeklyAdminHtml({
-            admin,
+            recipient,
             company,
             meetings,
             roleplays,
@@ -119,7 +116,7 @@ export async function sendWeeklyAdminReports() {
             end,
           }),
           text: [
-            `${admin.name}さん`,
+            `${recipient.name}さん`,
             "先週の営業活動レポートがまとまりました。",
             `商談: ${meetings.length}件`,
             `ロープレ: ${roleplays.length}回`,
@@ -131,8 +128,8 @@ export async function sendWeeklyAdminReports() {
 
         await saveEmailEvent(eventId, {
           companyId: company.id,
-          userId: admin.id,
-          recipientEmail: admin.email,
+          userId: recipient.id,
+          recipientEmail: recipient.email,
           kind: "weekly_admin_report",
           status: "sent",
           providerMessageId: result.providerMessageId,
@@ -148,8 +145,8 @@ export async function sendWeeklyAdminReports() {
         failed += 1;
         await saveEmailEvent(eventId, {
           companyId: company.id,
-          userId: admin.id,
-          recipientEmail: admin.email,
+          userId: recipient.id,
+          recipientEmail: recipient.email,
           kind: "weekly_admin_report",
           status: "failed",
           errorMessage: error instanceof Error ? error.message : "メール送信に失敗しました。",
@@ -177,9 +174,8 @@ export async function sendAiUsageWarningEmails() {
       continue;
     }
 
-    const admins = context.users.filter(
-      (user) => user.companyId === company.id && user.role === "admin" && user.status !== "inactive" && user.email,
-    );
+    const admins = context.users.filter((user) => user.companyId === company.id && user.role === "admin" && user.status !== "inactive");
+    const adminRecipients = buildAdminEmailRecipients(company, admins);
     const salesUsers = context.users.filter(
       (user) => user.companyId === company.id && user.role === "sales" && user.status !== "inactive" && user.email,
     );
@@ -210,9 +206,9 @@ export async function sendAiUsageWarningEmails() {
 
       const recipients = [
         { user: salesUser, email: salesUser.email },
-        ...admins
-          .filter((admin) => admin.email && admin.email !== salesUser.email)
-          .map((admin) => ({ user: admin, email: admin.email as string })),
+        ...adminRecipients
+          .filter((recipient) => recipient.email !== salesUser.email)
+          .map((recipient) => ({ user: recipient, email: recipient.email })),
       ];
 
       for (const recipient of recipients) {
@@ -322,7 +318,7 @@ async function loadReportContext() {
 }
 
 function buildWeeklyAdminHtml(input: {
-  admin: UserRecord;
+  recipient: EmailRecipient;
   company: CompanyRecord;
   meetings: MeetingRecord[];
   roleplays: RoleplayRecord[];
@@ -337,7 +333,7 @@ function buildWeeklyAdminHtml(input: {
     preheader: "先週の営業活動レポートがまとまりました。",
     title: "今週の営業レポートを確認しませんか？",
     body: `
-      <p>${escapeHtml(input.admin.name)}さん、先週の営業活動レポートがまとまりました。</p>
+      <p>${escapeHtml(input.recipient.name)}さん、先週の営業活動レポートがまとまりました。</p>
       <p class="muted">${escapeHtml(formatDate(input.start))} - ${escapeHtml(formatDate(input.end))}</p>
       <div class="metrics">
         <div><strong>${input.meetings.length}</strong><span>商談</span></div>
@@ -447,6 +443,7 @@ function mapCompany(id: string, data: DocumentData): CompanyRecord {
     plan,
     monthlyTranscriptionQuota: readQuota(data.monthlyTranscriptionQuota, plan),
     monthlyRoleplayQuota: readQuota(data.monthlyRoleplayQuota, plan),
+    notificationEmails: readEmailArray(data.notificationEmails).slice(0, 3),
   };
 }
 
@@ -500,6 +497,39 @@ function mapAiUsage(id: string, data: DocumentData): AiUsageRecord {
   };
 }
 
+function buildAdminEmailRecipients(company: CompanyRecord, admins: UserRecord[]): EmailRecipient[] {
+  if (company.notificationEmails.length > 0) {
+    return uniqueRecipients(
+      company.notificationEmails.map((email, index) => ({
+        id: `notification_${index}_${email}`,
+        email,
+        name: `管理者${index + 1}`,
+      })),
+    );
+  }
+
+  return uniqueRecipients(
+    admins
+      .filter((admin) => admin.email)
+      .map((admin) => ({
+        id: admin.id,
+        email: admin.email as string,
+        name: admin.name,
+      })),
+  );
+}
+
+function uniqueRecipients(recipients: EmailRecipient[]) {
+  const seen = new Set<string>();
+  return recipients.filter((recipient) => {
+    const email = recipient.email.trim().toLowerCase();
+    if (!email || seen.has(email)) return false;
+    seen.add(email);
+    recipient.email = email;
+    return true;
+  });
+}
+
 function readSharedQuota(company: CompanyRecord) {
   if (company.monthlyTranscriptionQuota === null || company.monthlyRoleplayQuota === null) {
     return null;
@@ -538,6 +568,14 @@ function readString(value: unknown, fallback = "") {
 
 function readNullableString(value: unknown) {
   return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function readEmailArray(value: unknown) {
+  if (!Array.isArray(value)) return [];
+  return value
+    .filter((item): item is string => typeof item === "string")
+    .map((item) => item.trim().toLowerCase())
+    .filter((item) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(item));
 }
 
 function readDate(value: unknown) {

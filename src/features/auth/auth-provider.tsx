@@ -18,6 +18,7 @@ import {
   type CompanyPlan,
   type AppUserProfile,
 } from "@/lib/firebase/auth";
+import { readEnabledSalesDomains } from "@/lib/sales-domains";
 import type { UserRole } from "@/types/domain";
 import {
   getFirebaseConfigErrorMessage,
@@ -212,6 +213,7 @@ function readCachedProfile() {
       workExperienceYears: readWorkExperienceValue(parsed.workExperienceYears),
       workExperienceMonths: readWorkExperienceValue(parsed.workExperienceMonths),
       workExperienceLocked: parsed.workExperienceLocked === true,
+      enabledSalesDomains: readEnabledSalesDomains(parsed.enabledSalesDomains),
     };
   } catch {
     return null;

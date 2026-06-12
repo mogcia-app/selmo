@@ -18,6 +18,7 @@ import {
   type RoleplayScenario,
 } from "@/lib/firebase/roleplay";
 import type { CompanyPlan } from "@/lib/firebase/auth";
+import { canUseSalesDomain, type SalesDomain } from "@/lib/sales-domains";
 
 type OodaCycleCard = {
   label: "Observe" | "Orient" | "Decide" | "Act";
@@ -46,6 +47,26 @@ export default function SalesDashboardPage() {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [knowledgeError, setKnowledgeError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const canUseMeeting = !profile || canUseSalesDomain(profile, "meeting");
+  const canUseTeleapo = !profile || canUseSalesDomain(profile, "teleapo");
+  const activeDomain: SalesDomain = canUseMeeting ? "meeting" : "teleapo";
+  const domainCopy = activeDomain === "teleapo"
+    ? {
+        unit: "架電",
+        addLabel: "架電を追加",
+        actionTitle: "要対応架電",
+        recentTitle: "最近の架電",
+        emptyActionTitle: "要対応の架電はありません",
+        emptyRecentTitle: "最近の架電はありません",
+      }
+    : {
+        unit: "商談",
+        addLabel: "商談を追加",
+        actionTitle: "要対応商談",
+        recentTitle: "最近の商談",
+        emptyActionTitle: "要対応の商談はありません",
+        emptyRecentTitle: "最近の商談はありません",
+      };
 
   useEffect(() => {
     if (!profile?.uid || !profile.role || !profile.companyId) {
@@ -56,7 +77,7 @@ export default function SalesDashboardPage() {
       subscribeToMeetings(
         { role: profile.role, userId: profile.uid, companyId: profile.companyId },
         (nextMeetings) => {
-          setMeetings(nextMeetings);
+          setMeetings(nextMeetings.filter((meeting) => meeting.salesDomain === activeDomain));
           setIsLoading(false);
         },
         () => {
@@ -85,7 +106,7 @@ export default function SalesDashboardPage() {
     ];
 
     return () => unsubscribers.forEach((unsubscribe) => unsubscribe());
-  }, [profile?.companyId, profile?.role, profile?.uid]);
+  }, [activeDomain, profile?.companyId, profile?.role, profile?.uid]);
 
   const monthlyMeetings = useMemo(
     () => meetings.filter((meeting) => isCurrentMonth(meeting.recordedAt)),
@@ -111,8 +132,9 @@ export default function SalesDashboardPage() {
         meetings,
         actionMeetings,
         recommendedScenario,
+        salesDomain: activeDomain,
       }),
-    [actionMeetings, meetings, recommendedScenario],
+    [actionMeetings, activeDomain, meetings, recommendedScenario],
   );
   const oodaProgress = useMemo(
     () =>
@@ -153,15 +175,15 @@ export default function SalesDashboardPage() {
                   今日やること
                 </h1>
                 <p className="mt-2 max-w-[760px] text-[15px] leading-7 text-[#707783]">
-                  商談・ナレッジ・ロープレから、今日見るべきことと改善アクションをまとめます。
+                  {domainCopy.unit}・ナレッジ・ロープレから、今日見るべきことと改善アクションをまとめます。
                 </p>
               </div>
             </div>
 
             <div className="grid gap-3 sm:grid-cols-3">
-              <PrimaryLink href="/meetings/upload" label="商談を追加" icon={<UploadIcon />} />
-              <PrimaryLink href="/sales/knowledge/search" label="ナレッジ検索" icon={<SearchIcon />} />
-              <PrimaryLink href="/sales/roleplay/scenarios" label="ロープレ開始" icon={<RoleplayIcon />} />
+              <PrimaryLink href={`/meetings/upload?category=${activeDomain}`} label={domainCopy.addLabel} icon={<UploadIcon />} />
+              {canUseMeeting ? <PrimaryLink href="/sales/knowledge/search" label="ナレッジ検索" icon={<SearchIcon />} /> : null}
+              {canUseTeleapo ? <PrimaryLink href={`/sales/roleplay/scenarios?category=${activeDomain}`} label="ロープレ開始" icon={<RoleplayIcon />} /> : null}
             </div>
           </div>
         </section>
@@ -238,13 +260,13 @@ export default function SalesDashboardPage() {
         <section className="grid gap-5 xl:grid-cols-[minmax(0,1.35fr)_minmax(360px,0.75fr)]">
           <div className="space-y-5">
             <article className="rounded-[24px] border border-[#e7e9ef] bg-white p-5 shadow-[0_12px_30px_rgba(17,24,39,0.05)]">
-              <SectionHeader title="要対応商談" href="/meetings" />
+              <SectionHeader title={domainCopy.actionTitle} href={`/meetings?category=${activeDomain}`} />
               {actionMeetings.length === 0 ? (
                 <EmptyState
-                  title="要対応の商談はありません"
+                  title={domainCopy.emptyActionTitle}
                   body="新しい商談を追加すると、AI分析状態や商談結果に応じて次回アクションを提示します。"
-                  href="/meetings/upload"
-                  action="商談を追加"
+                  href={`/meetings/upload?category=${activeDomain}`}
+                  action={domainCopy.addLabel}
                 />
               ) : (
                 <div className="mt-4 space-y-3">
@@ -256,13 +278,13 @@ export default function SalesDashboardPage() {
             </article>
 
             <article className="rounded-[24px] border border-[#e7e9ef] bg-white p-5 shadow-[0_12px_30px_rgba(17,24,39,0.05)]">
-              <SectionHeader title="最近の商談" href="/meetings" />
+              <SectionHeader title={domainCopy.recentTitle} href={`/meetings?category=${activeDomain}`} />
               {recentMeetings.length === 0 ? (
                 <EmptyState
-                  title="最近の商談はありません"
+                  title={domainCopy.emptyRecentTitle}
                   body="商談音声をアップロードすると、ここから履歴と次回アクションを確認できます。"
-                  href="/meetings/upload"
-                  action="商談を追加"
+                  href={`/meetings/upload?category=${activeDomain}`}
+                  action={domainCopy.addLabel}
                 />
               ) : (
                 <div className="mt-4 divide-y divide-[#eef0f4]">
@@ -761,19 +783,22 @@ function buildOodaCycleCards(input: {
   meetings: MeetingRecord[];
   actionMeetings: MeetingRecord[];
   recommendedScenario: RoleplayScenario | null;
+  salesDomain: SalesDomain;
 }): OodaCycleCard[] {
   const unprocessedCount = input.meetings.filter((meeting) => meeting.processingStatus !== "completed").length;
   const completedCount = input.meetings.filter((meeting) => meeting.processingStatus === "completed").length;
   const actionCount = input.actionMeetings.length;
+  const unitLabel = input.salesDomain === "teleapo" ? "架電" : "商談";
+  const listHref = `/meetings?category=${input.salesDomain}`;
 
   return [
     {
       label: "Observe",
-      title: "未分析の商談",
+      title: `未分析の${unitLabel}`,
       count: unprocessedCount,
       unit: "件",
-      caption: "AI分析待ち、処理中、処理失敗の商談",
-      href: "/meetings",
+      caption: `AI分析待ち、処理中、処理失敗の${unitLabel}`,
+      href: listHref,
       tone: "observe",
     },
     {
@@ -781,8 +806,8 @@ function buildOodaCycleCards(input: {
       title: "分析完了",
       count: completedCount,
       unit: "件",
-      caption: "要約や会話ログを確認できる商談",
-      href: "/meetings",
+      caption: `要約や会話ログを確認できる${unitLabel}`,
+      href: listHref,
       tone: "orient",
     },
     {
@@ -790,8 +815,8 @@ function buildOodaCycleCards(input: {
       title: "要アクション",
       count: actionCount,
       unit: "件",
-      caption: "次回接触や失注要因確認が必要な商談",
-      href: input.actionMeetings[0] ? `/meetings/${input.actionMeetings[0].id}` : "/meetings",
+      caption: `次回接触や失注要因確認が必要な${unitLabel}`,
+      href: input.actionMeetings[0] ? `/meetings/${input.actionMeetings[0].id}` : listHref,
       tone: "decide",
     },
     {
@@ -799,8 +824,8 @@ function buildOodaCycleCards(input: {
       title: "ロープレ推奨",
       count: input.recommendedScenario ? 1 : 0,
       unit: "件",
-      caption: "次の商談前に練習したいシナリオ",
-      href: input.recommendedScenario ? `/sales/roleplay?scenarioId=${input.recommendedScenario.id}` : "/sales/roleplay/scenarios",
+      caption: `次の${unitLabel}前に練習したいシナリオ`,
+      href: input.recommendedScenario ? `/sales/roleplay?scenarioId=${input.recommendedScenario.id}` : `/sales/roleplay/scenarios?category=${input.salesDomain}`,
       tone: "act",
     },
   ];

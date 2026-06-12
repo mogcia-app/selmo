@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  addDoc,
   collection,
   doc,
   onSnapshot,
@@ -69,6 +70,33 @@ export async function markAppNotificationRead(notificationId: string) {
   await updateDoc(doc(firestore, "appNotifications", notificationId), {
     read: true,
     readAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  });
+}
+
+export async function createAppNotification(input: {
+  companyId: string;
+  userId: string;
+  title: string;
+  body: string;
+  href?: string;
+  type?: string;
+  createdBy?: string | null;
+  metadata?: Record<string, unknown>;
+}) {
+  const { firestore } = assertFirebaseClient();
+
+  await addDoc(collection(firestore, "appNotifications"), {
+    companyId: input.companyId,
+    userId: input.userId,
+    title: input.title,
+    body: input.body,
+    href: input.href ?? "/sales/dashboard",
+    type: input.type ?? "admin_guidance",
+    createdBy: input.createdBy ?? null,
+    metadata: input.metadata ?? {},
+    read: false,
+    createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
   });
 }

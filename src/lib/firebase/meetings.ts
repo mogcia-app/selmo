@@ -26,6 +26,7 @@ import {
 import { assertFirebaseClient } from "@/lib/firebase/client";
 import { resolveCompanyId } from "@/lib/firebase/company";
 import { saveSalesActivityEvent } from "@/lib/firebase/activity";
+import { getMeetingSalesDomain, type SalesDomain } from "@/lib/sales-domains";
 import {
   createAudioProcessingJob,
   saveSystemError,
@@ -79,6 +80,7 @@ export type MeetingRecord = {
   companyId: string;
   userId: string;
   uploadedBy: string;
+  salesDomain: SalesDomain;
   customerName: string;
   productType: string;
   customerType: "new" | "existing";
@@ -126,6 +128,7 @@ export type MeetingRecord = {
 export type CreateMeetingInput = {
   userId: string;
   companyId?: string | null;
+  salesDomain?: SalesDomain;
   customerName: string;
   productType: string;
   customerType: "new" | "existing";
@@ -155,11 +158,13 @@ export async function createMeeting(input: CreateMeetingInput) {
   const meetingRef = doc(collection(firestore, "meetings"));
   const now = serverTimestamp();
   const companyId = resolveCompanyId(input.companyId);
+  const salesDomain = input.salesDomain ?? "meeting";
 
   await setDoc(meetingRef, {
     companyId,
     userId: input.userId,
     uploadedBy: input.userId,
+    salesDomain,
     customerName: input.customerName,
     productType: input.productType,
     customerType: input.customerType,
@@ -210,8 +215,8 @@ export async function createMeeting(input: CreateMeetingInput) {
     companyId,
     userId: input.userId,
     type: input.transcriptText?.trim() ? "transcript_pasted" : "meeting_uploaded",
-    title: input.transcriptText?.trim() ? "文字起こし貼り付け" : "商談アップロード",
-    summary: `${input.customerName || "未設定の商談"}を登録しました`,
+    title: input.transcriptText?.trim() ? "文字起こし貼り付け" : salesDomain === "teleapo" ? "テレアポアップロード" : "商談アップロード",
+    summary: `${input.customerName || (salesDomain === "teleapo" ? "未設定の架電" : "未設定の商談")}を登録しました`,
     detail: [
       `顧客名: ${input.customerName || "未設定"}`,
       `商材: ${input.productType || "未設定"}`,
@@ -224,6 +229,7 @@ export async function createMeeting(input: CreateMeetingInput) {
       customerName: input.customerName,
       productType: input.productType,
       inputMode: input.transcriptText?.trim() ? "transcript" : "audio",
+      salesDomain,
       status: input.status,
     },
   }).catch(() => undefined);
@@ -684,6 +690,7 @@ function mapMeetingRecord(id: string, data: Record<string, unknown>): MeetingRec
     companyId: String(data.companyId ?? "default"),
     userId: String(data.userId ?? ""),
     uploadedBy: String(data.uploadedBy ?? ""),
+    salesDomain: getMeetingSalesDomain(data.salesDomain),
     customerName: String(data.customerName ?? ""),
     productType: String(data.productType ?? ""),
     customerType: (data.customerType as "new" | "existing") ?? "new",

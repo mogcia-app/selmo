@@ -23,6 +23,7 @@ import {
 import { useAuth } from "@/features/auth/auth-provider";
 import { subscribeToSalesActivityEvents, type SalesActivityEvent } from "@/lib/firebase/activity";
 import type { MeetingRecord } from "@/lib/firebase/meetings";
+import { createAppNotification } from "@/lib/firebase/notifications";
 
 export default function AdminMemberDetailPage() {
   const params = useParams<{ userId: string }>();
@@ -30,6 +31,9 @@ export default function AdminMemberDetailPage() {
   const { memberRows, salesUsers, meetings, roleplayResults, knowledgeItems, error } = useAdminInsights();
   const [activityEvents, setActivityEvents] = useState<SalesActivityEvent[]>([]);
   const [activityError, setActivityError] = useState<string | null>(null);
+  const [guidanceComment, setGuidanceComment] = useState("");
+  const [guidanceMessage, setGuidanceMessage] = useState<string | null>(null);
+  const [isSendingGuidance, setIsSendingGuidance] = useState(false);
   const member = memberRows.find((row) => row.id === params.userId);
   const profile = salesUsers.find((user) => user.uid === params.userId);
   const userMeetings = meetings.filter((meeting) => meeting.userId === params.userId);
@@ -55,6 +59,43 @@ export default function AdminMemberDetailPage() {
       (nextError: FirebaseError) => setActivityError(nextError.message),
     );
   }, [adminProfile?.companyId]);
+
+  async function handleSendGuidanceComment() {
+    if (!adminProfile?.uid || !adminProfile.companyId || !member) {
+      setGuidanceMessage("送信先の営業マン情報を取得できませんでした。");
+      return;
+    }
+
+    const comment = guidanceComment.trim();
+    if (!comment) {
+      setGuidanceMessage("指導コメントを入力してください。");
+      return;
+    }
+
+    setIsSendingGuidance(true);
+    setGuidanceMessage(null);
+    try {
+      await createAppNotification({
+        companyId: adminProfile.companyId,
+        userId: member.id,
+        title: "上司から指導コメントが届きました",
+        body: comment,
+        href: "/sales/dashboard",
+        type: "admin_guidance",
+        createdBy: adminProfile.uid,
+        metadata: {
+          targetUserId: member.id,
+          targetUserName: member.name,
+        },
+      });
+      setGuidanceComment("");
+      setGuidanceMessage("営業マンへ通知しました。");
+    } catch (nextError) {
+      setGuidanceMessage(nextError instanceof Error ? nextError.message : "通知の送信に失敗しました。");
+    } finally {
+      setIsSendingGuidance(false);
+    }
+  }
 
   return (
     <PageShell>
@@ -179,9 +220,27 @@ export default function AdminMemberDetailPage() {
               )}
             </Panel>
 
-            <Panel title="上司メモ">
-              <div className="rounded-[16px] border border-[#eef1f5] bg-[#fcfcfd] px-4 py-4 text-[13px] leading-6 text-[#596273]">
-                指導メモは、商談詳細ページの上司コメントまたはロープレ課題割り当てと合わせて管理してください。
+            <Panel title="指導コメントを送信">
+              <div className="space-y-3">
+                <textarea
+                  value={guidanceComment}
+                  onChange={(event) => setGuidanceComment(event.target.value)}
+                  className="min-h-[120px] w-full resize-y rounded-[16px] border border-[#e4e8ef] bg-white px-4 py-3 text-[13px] leading-6 text-[#343b48] outline-none transition focus:border-[#e0bd4b]"
+                  placeholder="例：価格説明の前に、相手の現状課題をもう一段深掘りしましょう。次回は導入後の効果から話す練習をしてください。"
+                />
+                <button
+                  type="button"
+                  onClick={() => void handleSendGuidanceComment()}
+                  disabled={isSendingGuidance}
+                  className="inline-flex h-11 w-full items-center justify-center rounded-[14px] border border-[#f0c655] bg-[#ffd84d] text-[13px] font-black text-[#171717] disabled:opacity-60"
+                >
+                  {isSendingGuidance ? "送信中" : "営業マンへ通知する"}
+                </button>
+                {guidanceMessage ? (
+                  <div className="rounded-[14px] border border-[#eef1f5] bg-[#fcfcfd] px-4 py-3 text-[12px] font-bold leading-5 text-[#596273]">
+                    {guidanceMessage}
+                  </div>
+                ) : null}
               </div>
             </Panel>
 

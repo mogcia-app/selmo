@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { useMemo, useState } from "react";
 
 import {
@@ -19,6 +20,48 @@ import {
 import type { MeetingRecord } from "@/lib/firebase/meetings";
 
 type DateRangeFilter = "all" | "today" | "7d" | "30d" | "thisMonth";
+type ReviewMode = "meeting" | "teleapo";
+
+const modeCopy: Record<ReviewMode, {
+  eyebrow: string;
+  title: string;
+  description: string;
+  panelTitle: string;
+  emptyTitle: string;
+  emptyBody: string;
+  searchPlaceholder: string;
+  successLabel: string;
+  pendingLabel: string;
+  lostLabel: string;
+  reviewLabel: string;
+}> = {
+  meeting: {
+    eyebrow: "MEETING REVIEW",
+    title: "商談一覧 / レビュー",
+    description: "全営業マンの過去商談を探し、文字起こし・要約・salesの分析結果を確認します。",
+    panelTitle: "商談一覧",
+    emptyTitle: "商談はまだありません",
+    emptyBody: "sales側でアップロードや商談登録を行うと、ここに表示されます。",
+    searchPlaceholder: "顧客・営業マンで検索",
+    successLabel: "成約",
+    pendingLabel: "検討中",
+    lostLabel: "失注",
+    reviewLabel: "レビュー",
+  },
+  teleapo: {
+    eyebrow: "TELEAPO REVIEW",
+    title: "テレアポ一覧 / レビュー",
+    description: "全営業マンの過去架電ログを探し、文字起こし・要約・テレアポ分析結果を確認します。",
+    panelTitle: "架電一覧",
+    emptyTitle: "架電ログはまだありません",
+    emptyBody: "sales側でテレアポの音声や文字起こしを登録すると、ここに表示されます。",
+    searchPlaceholder: "架電先・営業マンで検索",
+    successLabel: "アポ獲得",
+    pendingLabel: "追客中",
+    lostLabel: "未獲得",
+    reviewLabel: "レビュー",
+  },
+};
 
 const dateRangeOptions: Array<[DateRangeFilter, string]> = [
   ["all", "期間すべて"],
@@ -29,6 +72,9 @@ const dateRangeOptions: Array<[DateRangeFilter, string]> = [
 ];
 
 export default function AdminMeetingsPage() {
+  const searchParams = useSearchParams();
+  const mode: ReviewMode = searchParams.get("category") === "teleapo" ? "teleapo" : "meeting";
+  const copy = modeCopy[mode];
   const { meetings, memberRows, error } = useAdminInsights();
   const [memberId, setMemberId] = useState("");
   const [product, setProduct] = useState("");
@@ -39,6 +85,7 @@ export default function AdminMeetingsPage() {
   const products = useMemo(() => Array.from(new Set(meetings.map((meeting) => meeting.productType).filter(Boolean))), [meetings]);
   const filteredMeetings = useMemo(() => {
     const rows = meetings.filter((meeting) => {
+      if (meeting.salesDomain !== mode) return false;
       const member = memberRows.find((row) => row.id === meeting.userId);
       const searchText = [
         meeting.customerName,
@@ -59,12 +106,12 @@ export default function AdminMeetingsPage() {
       return [...rows].sort((left, right) => String(getMeetingScore(right)).localeCompare(String(getMeetingScore(left))));
     }
     return rows;
-  }, [dateRange, keyword, meetings, memberId, memberRows, outcome, product, sort]);
+  }, [dateRange, keyword, meetings, memberId, memberRows, mode, outcome, product, sort]);
 
   const activeFilterLabels = [
     memberId ? memberRows.find((member) => member.id === memberId)?.name ?? "営業マン指定" : null,
     product || null,
-    outcome ? getMeetingOutcomeLabel(outcome) : null,
+    outcome ? getOutcomeLabel(outcome, copy) : null,
     getDateRangeLabel(dateRange),
     keyword.trim() ? `検索: ${keyword.trim()}` : null,
   ].filter(Boolean);
@@ -72,7 +119,7 @@ export default function AdminMeetingsPage() {
   return (
     <PageShell>
       <div className="mx-auto max-w-[1480px]">
-        <PageHeader eyebrow="MEETING REVIEW" title="商談レビュー" description="全営業マンの商談・通話を確認し、要確認の商談を見つけます。" />
+        <PageHeader eyebrow={copy.eyebrow} title={copy.title} description={copy.description} />
         {error ? <ErrorBox message={error} /> : null}
 
         <div className="mt-8">
@@ -80,13 +127,13 @@ export default function AdminMeetingsPage() {
             <div className="grid gap-3 md:grid-cols-6">
             <Select value={memberId} onChange={setMemberId} options={[["", "営業マンすべて"], ...memberRows.map((member) => [member.id, member.name] as [string, string])]} />
             <Select value={product} onChange={setProduct} options={[["", "商材すべて"], ...products.map((item) => [item, item] as [string, string])]} />
-            <Select value={outcome} onChange={setOutcome} options={[["", "結果すべて"], ["won", "成約"], ["lost", "失注"], ["considering", "検討中"]]} />
+            <Select value={outcome} onChange={setOutcome} options={[["", "結果すべて"], ["won", copy.successLabel], ["lost", copy.lostLabel], ["considering", copy.pendingLabel]]} />
             <Select value={dateRange} onChange={(value) => setDateRange(value as DateRangeFilter)} options={dateRangeOptions} />
             <Select value={sort} onChange={setSort} options={[["date", "新しい順"], ["score", "スコア順"]]} />
             <input
               value={keyword}
               onChange={(event) => setKeyword(event.target.value)}
-              placeholder="顧客・営業マンで検索"
+              placeholder={copy.searchPlaceholder}
               className="h-11 rounded-[14px] border border-[#e4e8ef] bg-white px-3 text-[13px] font-bold text-[#343b48] outline-none focus:border-[#e0bd4b]"
             />
             </div>
@@ -102,7 +149,7 @@ export default function AdminMeetingsPage() {
         </div>
 
         <div className="mt-8">
-          <Panel title="商談一覧">
+          <Panel title={copy.panelTitle}>
             {filteredMeetings.length > 0 ? (
               <div className="overflow-x-auto">
               <table className="w-full min-w-[980px] text-left">
@@ -141,12 +188,12 @@ export default function AdminMeetingsPage() {
                           </div>
                         </td>
                         <td className="px-4 py-4 text-[13px] text-[#596273]">{meeting.productType || "未設定"}</td>
-                        <td className="px-4 py-4"><StatusBadge tone={getOutcomeTone(meeting.status)} label={getMeetingOutcomeLabel(meeting.status)} /></td>
+                        <td className="px-4 py-4"><StatusBadge tone={getOutcomeTone(meeting.status)} label={getOutcomeLabel(meeting.status, copy)} /></td>
                         <td className="px-4 py-4"><Placeholder>{getMeetingScore(meeting)}</Placeholder></td>
                         <td className="px-4 py-4">{needsReview ? <StatusBadge tone="risk" label="要確認" /> : <StatusBadge tone="normal" label={getAnalysisStatus(meeting)} />}</td>
-                        <td className="px-4 py-4 text-[13px] font-bold text-[#343b48]">{getNextAction(meeting)}</td>
+                        <td className="px-4 py-4 text-[13px] font-bold text-[#343b48]">{getNextAction(meeting, mode)}</td>
                         <td className="px-4 py-4 text-[13px] text-[#596273]">{formatDate(meeting.recordedAt)}</td>
-                        <td className="px-4 py-4"><Link href={`/admin/meetings/${meeting.id}`} className="text-[13px] font-bold text-[#2672d9]">レビュー</Link></td>
+                        <td className="px-4 py-4"><Link href={`/admin/meetings/${meeting.id}`} className="text-[13px] font-bold text-[#2672d9]">{copy.reviewLabel}</Link></td>
                       </tr>
                     );
                   })}
@@ -154,7 +201,7 @@ export default function AdminMeetingsPage() {
               </table>
               </div>
             ) : (
-              <EmptyState title="商談はまだありません" body="音声アップロードや商談登録後、一覧に表示されます。" />
+              <EmptyState title={copy.emptyTitle} body={copy.emptyBody} />
             )}
           </Panel>
         </div>
@@ -209,10 +256,17 @@ function getAnalysisStatus(meeting: MeetingRecord) {
   return "未分析";
 }
 
-function getNextAction(meeting: MeetingRecord) {
-  if (meeting.status === "lost") return "失注要因を確認";
+function getOutcomeLabel(status: string, copy: typeof modeCopy[ReviewMode]) {
+  if (status === "won") return copy.successLabel;
+  if (status === "lost") return copy.lostLabel;
+  if (status === "considering") return copy.pendingLabel;
+  return getMeetingOutcomeLabel(status);
+}
+
+function getNextAction(meeting: MeetingRecord, mode: ReviewMode) {
+  if (meeting.status === "lost") return mode === "teleapo" ? "未獲得理由を確認" : "失注要因を確認";
   if (meeting.processingStatus === "failed") return "処理エラー確認";
-  if (!meeting.aiSummary) return "AI分析結果を確認";
+  if (!meeting.aiSummary) return mode === "teleapo" ? "テレアポ分析を確認" : "商談分析を確認";
   if (typeof meeting.aiSummary.manualCompliance?.score === "number") return "指導用レビュー";
   return "salesの分析結果を確認";
 }

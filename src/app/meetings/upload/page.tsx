@@ -2,7 +2,7 @@
 
 import { FirebaseError } from "firebase/app";
 import Image from "next/image";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { useAuth } from "@/features/auth/auth-provider";
@@ -16,6 +16,7 @@ import {
   type MeetingConversationLog,
   type MeetingRecord,
 } from "@/lib/firebase/meetings";
+import { canUseSalesDomain, type SalesDomain } from "@/lib/sales-domains";
 
 const maxRecommendedDurationSec = 120 * 60;
 const maxOpenAiTranscriptionFileSizeBytes = 25 * 1024 * 1024;
@@ -31,6 +32,7 @@ const supportedAudioTypes = new Set([
 ]);
 export default function MeetingUploadPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const { firebaseError, isFirebaseReady, isLoading, missingEnvKeys, profile } =
     useAuth();
@@ -51,6 +53,8 @@ export default function MeetingUploadPage() {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const salesDomain: SalesDomain = searchParams.get("category") === "teleapo" ? "teleapo" : "meeting";
+  const canAccessDomain = isLoading || canUseSalesDomain(profile, salesDomain);
 
   useEffect(() => {
     if (!isFirebaseReady || !profile?.companyId) {
@@ -114,6 +118,11 @@ export default function MeetingUploadPage() {
       return;
     }
 
+    if (!canAccessDomain) {
+      setErrorMessage(salesDomain === "teleapo" ? "テレアポ機能を利用する権限がありません。" : "商談機能を利用する権限がありません。");
+      return;
+    }
+
     if (inputMode === "audio" && !selectedFile) {
       setErrorMessage("文字起こし検証のため、音声ファイルを選択してください。");
       return;
@@ -138,6 +147,7 @@ export default function MeetingUploadPage() {
       const meetingId = await createMeeting({
         userId: profile.uid,
         companyId: profile.companyId,
+        salesDomain,
         customerName: normalizedCustomerName,
         productType,
         customerType,
@@ -170,7 +180,7 @@ export default function MeetingUploadPage() {
             : `文字起こしテキストを保存しました。AI要約は詳細画面で再確認してください。ID: ${meetingId}`
           : `アップロード完了しました。処理状況は一覧で確認できます。ID: ${meetingId}`,
       );
-      router.push("/meetings");
+      router.push(`/meetings?category=${salesDomain}`);
     } catch (error) {
       if (error instanceof FirebaseError) {
         setErrorMessage(
@@ -186,6 +196,23 @@ export default function MeetingUploadPage() {
 
   return (
     <main className="min-h-screen bg-[#f7f7f8] px-5 py-6 md:px-8 md:py-7">
+      {!canAccessDomain ? (
+        <div className="mx-auto max-w-[860px] rounded-[24px] border border-[#f2d6d6] bg-white px-6 py-10 text-center">
+          <h1 className="text-[28px] font-black tracking-[-0.04em] text-[#171717]">この機能は利用できません</h1>
+          <p className="mt-3 text-[15px] leading-7 text-[#596273]">
+            {salesDomain === "teleapo" ? "テレアポ機能" : "商談機能"}の利用権限がありません。必要な場合は管理者に依頼してください。
+          </p>
+          <button
+            type="button"
+            onClick={() => router.push("/sales/dashboard")}
+            className="mt-6 inline-flex h-12 items-center justify-center rounded-[14px] bg-[#ffd12f] px-6 text-[14px] font-black text-[#171717]"
+          >
+            ダッシュボードへ戻る
+          </button>
+        </div>
+      ) : null}
+      {canAccessDomain ? (
+      <>
       <header className="mb-6 flex flex-col gap-5 xl:flex-row xl:items-start xl:justify-between">
         <div>
           <div className="mb-2 text-[13px] font-medium text-[#8a909b]">
@@ -517,6 +544,8 @@ export default function MeetingUploadPage() {
           </form>
         </section>
       </section>
+      </>
+      ) : null}
     </main>
   );
 }

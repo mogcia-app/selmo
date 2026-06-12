@@ -43,15 +43,6 @@ export default function AdminManualsPage() {
           eyebrow="MANUAL"
           title="マニュアル"
           description="会社の勝ちパターン、必須ヒアリング、反論対応、クロージング基準を登録します。sales側の分析結果はこの基準に沿って表示されます。"
-          action={
-            <button
-              type="button"
-              onClick={() => setCreateOpen(true)}
-              className="rounded-[14px] border border-[#f0c655] bg-[#ffd84d] px-5 py-3 text-[13px] font-black text-[#171717]"
-            >
-              マニュアル追加
-            </button>
-          }
         />
         {error ? <ErrorBox message={error} /> : null}
 
