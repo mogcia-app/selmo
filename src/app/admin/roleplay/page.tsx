@@ -18,29 +18,39 @@ import type { KnowledgeProduct } from "@/lib/firebase/knowledge";
 import {
   createRoleplayAssignment,
   createRoleplayScenario,
+  createRoleplayTalkGuide,
   subscribeToRoleplayAssignments,
+  subscribeToRoleplayTalkGuides,
   updateRoleplayScenarioVisibility,
   updateRoleplayScenario,
+  updateRoleplayTalkGuide,
   type RoleplayDifficulty,
   type RoleplayAssignment,
-  type RoleplayResult,
   type RoleplayScenario,
+  type RoleplayTalkGuide,
 } from "@/lib/firebase/roleplay";
 
 export default function AdminRoleplayPage() {
   const { profile } = useAuth();
   const { roleplayScenarios, roleplayResults, memberRows, products, users, error } = useAdminInsights();
   const [assignments, setAssignments] = useState<RoleplayAssignment[]>([]);
+  const [talkGuides, setTalkGuides] = useState<RoleplayTalkGuide[]>([]);
   const [selectedUserIds, setSelectedUserIds] = useState<string[]>([]);
   const [selectedScenarioId, setSelectedScenarioId] = useState("");
   const [assignmentReason, setAssignmentReason] = useState("");
   const [assignmentMessage, setAssignmentMessage] = useState<string | null>(null);
   const [scenarioMessage, setScenarioMessage] = useState<string | null>(null);
+  const [guideMessage, setGuideMessage] = useState<string | null>(null);
   const [isScenarioDialogOpen, setIsScenarioDialogOpen] = useState(false);
   const [editingScenario, setEditingScenario] = useState<RoleplayScenario | null>(null);
-  const [viewingResultId, setViewingResultId] = useState<string | null>(null);
   const [isAssigning, setIsAssigning] = useState(false);
   const [isPublishingScenarioId, setIsPublishingScenarioId] = useState<string | null>(null);
+  const [guideProductId, setGuideProductId] = useState("");
+  const [guideCategory, setGuideCategory] = useState<"新規" | "既存">("新規");
+  const [guideSteps, setGuideSteps] = useState("");
+  const [guideNotes, setGuideNotes] = useState("");
+  const [editingGuideId, setEditingGuideId] = useState<string | null>(null);
+  const [isSavingGuide, setIsSavingGuide] = useState(false);
   const completedUserIds = new Set(roleplayResults.map((result) => result.userId));
   const inactiveMembers = memberRows.filter((member) => !completedUserIds.has(member.id));
   const averageScore = roleplayResults.length > 0 ? Math.round(roleplayResults.reduce((sum, result) => sum + result.score, 0) / roleplayResults.length) : null;
@@ -48,15 +58,90 @@ export default function AdminRoleplayPage() {
     () => assignments.filter((assignment) => assignment.status === "assigned"),
     [assignments],
   );
+  const managedScenarios = useMemo(
+    () =>
+      roleplayScenarios.filter((scenario) => {
+        const creator = users.find((user) => user.uid === scenario.createdBy);
+        return creator?.role !== "sales";
+      }),
+    [roleplayScenarios, users],
+  );
 
   useEffect(() => {
     if (!profile?.companyId) return;
-    return subscribeToRoleplayAssignments(
-      { companyId: profile.companyId, isAdmin: true },
-      setAssignments,
-      () => undefined,
-    );
+    const unsubscribers = [
+      subscribeToRoleplayAssignments(
+        { companyId: profile.companyId, isAdmin: true },
+        setAssignments,
+        () => undefined,
+      ),
+      subscribeToRoleplayTalkGuides(
+        profile.companyId,
+        setTalkGuides,
+        () => setGuideMessage("進め方テンプレートの読み込みに失敗しました。"),
+      ),
+    ];
+    return () => unsubscribers.forEach((unsubscribe) => unsubscribe());
   }, [profile?.companyId]);
+
+  async function handleSaveTalkGuide(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setGuideMessage(null);
+    const selectedProduct = products.find((product) => product.id === guideProductId);
+    const steps = splitGuideLines(guideSteps);
+
+    if (!profile?.uid || !profile.companyId || !selectedProduct || steps.length === 0) {
+      setGuideMessage("商材を選択し、進め方を1つ以上入力してください。");
+      return;
+    }
+
+    setIsSavingGuide(true);
+    try {
+      const duplicateGuide = talkGuides.find(
+        (guide) =>
+          guide.id !== editingGuideId &&
+          guide.productId === selectedProduct.id &&
+          guide.scenarioCategory === guideCategory,
+      );
+      const payload = {
+        companyId: profile.companyId,
+        productId: selectedProduct.id,
+        productName: selectedProduct.name,
+        scenarioCategory: guideCategory,
+        steps,
+        notes: guideNotes.trim(),
+        createdBy: profile.uid,
+      };
+
+      if (editingGuideId) {
+        await updateRoleplayTalkGuide(editingGuideId, payload);
+      } else if (duplicateGuide) {
+        await updateRoleplayTalkGuide(duplicateGuide.id, payload);
+      } else {
+        await createRoleplayTalkGuide(payload);
+      }
+
+      setGuideMessage(`${selectedProduct.name} / ${guideCategory} の進め方を保存しました。`);
+      setGuideProductId("");
+      setGuideCategory("新規");
+      setGuideSteps("");
+      setGuideNotes("");
+      setEditingGuideId(null);
+    } catch (nextError) {
+      setGuideMessage(nextError instanceof Error ? nextError.message : "進め方の保存に失敗しました。");
+    } finally {
+      setIsSavingGuide(false);
+    }
+  }
+
+  function handleEditTalkGuide(guide: RoleplayTalkGuide) {
+    setGuideProductId(guide.productId);
+    setGuideCategory(guide.scenarioCategory);
+    setGuideSteps(guide.steps.join("\n"));
+    setGuideNotes(guide.notes);
+    setEditingGuideId(guide.id);
+    setGuideMessage("編集内容を入力して保存してください。");
+  }
 
   async function handleAssign(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -133,19 +218,131 @@ export default function AdminRoleplayPage() {
           </div>
         ) : null}
 
-        <section className="mt-8 grid gap-5 md:grid-cols-4">
-          <KpiCard label="シナリオ" value={`${roleplayScenarios.length}件`} note="登録済み" />
+        <section className="mt-8 grid gap-5 md:grid-cols-5">
+          <KpiCard label="シナリオ" value={`${managedScenarios.length}件`} note="admin管理" />
+          <KpiCard label="進め方" value={`${talkGuides.length}件`} note="商材×タイプ" />
           <KpiCard label="実施回数" value={`${roleplayResults.length}回`} note="結果保存済み" />
           <KpiCard label="平均スコア" value={averageScore === null ? "-" : `${averageScore}点`} note={averageScore === null ? "結果なし" : "全体平均"} />
           <KpiCard label="未実施者" value={`${inactiveMembers.length}人`} note="結果未保存の営業メンバー" />
           <KpiCard label="割り当て中" value={`${activeAssignments.length}件`} note="未完了の課題" />
         </section>
 
+        <section className="mt-8 grid gap-6 xl:grid-cols-[minmax(360px,0.7fr)_minmax(0,1.3fr)]">
+          <Panel title="商談の進め方を登録">
+            <form onSubmit={handleSaveTalkGuide} className="space-y-4">
+              <div className="grid gap-3 md:grid-cols-2">
+                <Field label="商材" required>
+                  <select
+                    value={guideProductId}
+                    onChange={(event) => setGuideProductId(event.target.value)}
+                    className="h-11 w-full rounded-[14px] border border-[#e4e8ef] bg-white px-3 text-[13px] font-bold text-[#343b48] outline-none focus:border-[#e0bd4b]"
+                  >
+                    <option value="">商材を選択</option>
+                    {products.map((product) => (
+                      <option key={product.id} value={product.id}>{product.name}</option>
+                    ))}
+                  </select>
+                </Field>
+                <Field label="タイプ" required>
+                  <select
+                    value={guideCategory}
+                    onChange={(event) => setGuideCategory(event.target.value as "新規" | "既存")}
+                    className="h-11 w-full rounded-[14px] border border-[#e4e8ef] bg-white px-3 text-[13px] font-bold text-[#343b48] outline-none focus:border-[#e0bd4b]"
+                  >
+                    <option value="新規">新規</option>
+                    <option value="既存">既存</option>
+                  </select>
+                </Field>
+              </div>
+              <Field label="進め方" required>
+                <textarea
+                  value={guideSteps}
+                  onChange={(event) => setGuideSteps(event.target.value)}
+                  className="min-h-[180px] w-full resize-y rounded-[14px] border border-[#e4e8ef] bg-white px-4 py-3 text-[13px] leading-7 text-[#343b48] outline-none focus:border-[#e0bd4b]"
+                  placeholder={"1行に1つ\n例：最初に自己紹介をする\n例：現状の取り組みを確認する\n例：課題を深掘りする\n例：次回アクションを合意する"}
+                />
+              </Field>
+              <Field label="補足メモ">
+                <textarea
+                  value={guideNotes}
+                  onChange={(event) => setGuideNotes(event.target.value)}
+                  className="min-h-[82px] w-full resize-y rounded-[14px] border border-[#e4e8ef] bg-white px-4 py-3 text-[13px] leading-6 text-[#343b48] outline-none focus:border-[#e0bd4b]"
+                  placeholder="例：初回は説明よりヒアリングを優先する"
+                />
+              </Field>
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                {guideMessage ? (
+                  <p className="rounded-[12px] bg-[#fcfcfd] px-3 py-2 text-[12px] leading-5 text-[#596273]">
+                    {guideMessage}
+                  </p>
+                ) : <span />}
+                <div className="flex gap-2">
+                  {editingGuideId ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setEditingGuideId(null);
+                        setGuideProductId("");
+                        setGuideCategory("新規");
+                        setGuideSteps("");
+                        setGuideNotes("");
+                        setGuideMessage(null);
+                      }}
+                      className="h-11 rounded-[14px] border border-[#e4e8ef] bg-white px-4 text-[13px] font-bold text-[#596273]"
+                    >
+                      解除
+                    </button>
+                  ) : null}
+                  <button
+                    type="submit"
+                    disabled={isSavingGuide}
+                    className="h-11 rounded-[14px] border border-[#f0c655] bg-[#ffd84d] px-5 text-[13px] font-black text-[#171717] disabled:opacity-60"
+                  >
+                    {isSavingGuide ? "保存中" : editingGuideId ? "更新する" : "保存する"}
+                  </button>
+                </div>
+              </div>
+            </form>
+          </Panel>
+
+          <Panel title="登録済みの進め方">
+            {talkGuides.length > 0 ? (
+              <div className="grid gap-3 lg:grid-cols-2">
+                {talkGuides.map((guide) => (
+                  <button
+                    key={guide.id}
+                    type="button"
+                    onClick={() => handleEditTalkGuide(guide)}
+                    className="rounded-[16px] border border-[#eef1f5] bg-[#fcfcfd] px-4 py-4 text-left transition hover:border-[#e0bd4b] hover:bg-white"
+                  >
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="truncate text-[14px] font-black text-[#171717]">{guide.productName || "商材未設定"}</div>
+                        <div className="mt-1 text-[12px] font-bold text-[#8a6500]">{guide.scenarioCategory}</div>
+                      </div>
+                      <StatusBadge tone="normal" label={`${guide.steps.length}項目`} />
+                    </div>
+                    <ol className="mt-3 space-y-1 text-[12px] leading-5 text-[#596273]">
+                      {guide.steps.slice(0, 5).map((step, index) => (
+                        <li key={`${guide.id}-${index}`}>{index + 1}. {step}</li>
+                      ))}
+                      {guide.steps.length > 5 ? <li className="font-bold text-[#8a909b]">+{guide.steps.length - 5}項目</li> : null}
+                    </ol>
+                    {guide.notes ? <p className="mt-3 line-clamp-2 text-[12px] leading-5 text-[#7a808c]">{guide.notes}</p> : null}
+                  </button>
+                ))}
+              </div>
+            ) : (
+              <EmptyState title="進め方はまだありません" body="商材×新規/既存ごとの標準的な打ち合わせの進め方を登録できます。" />
+            )}
+          </Panel>
+        </section>
+
         <section className="mt-8 grid gap-6 xl:grid-cols-[minmax(0,1.3fr)_minmax(360px,0.7fr)]">
           <Panel title="シナリオ一覧">
-            {roleplayScenarios.length > 0 ? (
+            {managedScenarios.length > 0 ? (
               <div className="space-y-3">
-                {roleplayScenarios.map((scenario) => {
+                {managedScenarios.map((scenario) => {
                   const results = roleplayResults.filter((result) => result.scenarioId === scenario.id);
                   const score = results.length > 0 ? Math.round(results.reduce((sum, result) => sum + result.score, 0) / results.length) : null;
                   const product = products.find((item) => item.id === scenario.productId);
@@ -259,7 +456,7 @@ export default function AdminRoleplayPage() {
                   className="h-11 w-full rounded-[14px] border border-[#e4e8ef] bg-white px-3 text-[13px] font-bold text-[#343b48] outline-none focus:border-[#e0bd4b]"
                 >
                   <option value="">シナリオを選択</option>
-                  {roleplayScenarios.map((scenario) => (
+                  {managedScenarios.map((scenario) => (
                     <option key={scenario.id} value={scenario.id}>{scenario.title}</option>
                   ))}
                 </select>
@@ -290,10 +487,9 @@ export default function AdminRoleplayPage() {
                   {roleplayResults.slice(0, 8).map((result) => {
                     const member = memberRows.find((row) => row.id === result.userId);
                     return (
-                      <button
+                      <Link
                         key={result.id}
-                        type="button"
-                        onClick={() => setViewingResultId(result.id)}
+                        href={`/admin/roleplay/results/${result.id}`}
                         className="w-full rounded-[14px] border border-[#eef1f5] bg-[#fcfcfd] px-4 py-3 text-left transition hover:border-[#e0bd4b] hover:bg-white"
                       >
                         <div className="flex items-start justify-between gap-3">
@@ -304,7 +500,7 @@ export default function AdminRoleplayPage() {
                           </div>
                           <span className="shrink-0 rounded-[12px] bg-[#171717] px-3 py-2 text-[12px] font-black text-white">{result.score}点</span>
                         </div>
-                      </button>
+                      </Link>
                     );
                   })}
                 </div>
@@ -359,13 +555,6 @@ export default function AdminRoleplayPage() {
             setScenarioMessage("シナリオを更新しました。");
           }}
           onError={setScenarioMessage}
-        />
-      ) : null}
-      {viewingResultId ? (
-        <RoleplayResultDialog
-          result={roleplayResults.find((result) => result.id === viewingResultId) ?? null}
-          memberName={memberRows.find((member) => member.id === roleplayResults.find((result) => result.id === viewingResultId)?.userId)?.name ?? "未設定"}
-          onClose={() => setViewingResultId(null)}
         />
       ) : null}
     </PageShell>
@@ -555,94 +744,6 @@ function ScenarioCreateDialog({
   );
 }
 
-function RoleplayResultDialog({
-  result,
-  memberName,
-  onClose,
-}: {
-  result: RoleplayResult | null;
-  memberName: string;
-  onClose: () => void;
-}) {
-  if (!result) return null;
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#171717]/24 px-4 py-6">
-      <div className="max-h-[92vh] w-full max-w-[920px] overflow-y-auto rounded-[24px] border border-[#eceef4] bg-white p-6 shadow-[0_24px_70px_rgba(17,24,39,0.18)]">
-        <div className="flex items-start justify-between gap-4">
-          <div className="min-w-0">
-            <p className="text-[12px] font-black text-[#8a6500]">ROLEPLAY RESULT</p>
-            <h2 className="mt-1 truncate text-[24px] font-black tracking-[-0.03em] text-[#171717]">{result.scenarioTitle}</h2>
-            <p className="mt-1 text-[13px] font-bold text-[#7a808c]">
-              {memberName} ・ {result.productName || "商材未設定"} ・ {formatDate(result.createdAt)}
-            </p>
-          </div>
-          <button type="button" onClick={onClose} className="text-[24px] leading-none text-[#9aa1ac]" aria-label="閉じる">×</button>
-        </div>
-
-        <div className="mt-5 grid gap-3 md:grid-cols-[140px_minmax(0,1fr)]">
-          <div className="rounded-[16px] bg-[#171717] px-4 py-4 text-center text-white">
-            <div className="text-[32px] font-black leading-none">{result.score}</div>
-            <div className="mt-1 text-[11px] font-bold text-white/70">score</div>
-          </div>
-          <DetailBlock title="分析サマリー" body={result.summary || "未生成"} />
-        </div>
-
-        <div className="mt-4 grid gap-3 md:grid-cols-2">
-          <ListBlock title="良かった点" items={result.strengths} />
-          <ListBlock title="改善ポイント" items={result.improvements} />
-          <ListBlock title="次回使う改善フレーズ" items={result.improvementPhrases} />
-          <DetailBlock title="実施情報" body={`会話数: ${result.messages.length}件\n実施日: ${formatDate(result.createdAt)}`} />
-        </div>
-
-        <section className="mt-4 rounded-[16px] border border-[#eef1f5] bg-[#fcfcfd] px-4 py-4">
-          <h3 className="text-[14px] font-black text-[#171717]">会話ログ</h3>
-          <div className="mt-3 space-y-3">
-            {result.messages.length > 0 ? (
-              result.messages.map((message, index) => (
-                <div key={`${message.createdAt}-${index}`} className={`rounded-[14px] px-4 py-3 ${message.role === "sales" ? "bg-[#171717] text-white" : "border border-[#e6eaf0] bg-white text-[#343b48]"}`}>
-                  <div className={`text-[11px] font-black ${message.role === "sales" ? "text-white/70" : "text-[#8a909b]"}`}>
-                    {message.role === "sales" ? "営業" : "AI顧客"}
-                  </div>
-                  <p className="mt-1 whitespace-pre-wrap text-[13px] leading-6">{message.content}</p>
-                </div>
-              ))
-            ) : (
-              <p className="text-[13px] font-bold text-[#7a808c]">会話ログはありません。</p>
-            )}
-          </div>
-        </section>
-
-        <div className="mt-6 flex justify-end">
-          <button type="button" onClick={onClose} className="h-11 rounded-[14px] border border-[#e4e8ef] bg-white px-5 text-[14px] font-bold text-[#596273]">閉じる</button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function DetailBlock({ title, body }: { title: string; body: string }) {
-  return (
-    <div className="rounded-[16px] border border-[#eef1f5] bg-[#fcfcfd] px-4 py-3">
-      <h3 className="text-[13px] font-black text-[#171717]">{title}</h3>
-      <p className="mt-2 whitespace-pre-wrap text-[13px] leading-6 text-[#596273]">{body || "未登録"}</p>
-    </div>
-  );
-}
-
-function ListBlock({ title, items }: { title: string; items: string[] }) {
-  return (
-    <div className="rounded-[16px] border border-[#eef1f5] bg-[#fcfcfd] px-4 py-3">
-      <h3 className="text-[13px] font-black text-[#171717]">{title}</h3>
-      <ul className="mt-2 space-y-1 text-[13px] leading-6 text-[#596273]">
-        {(items.length > 0 ? items : ["未登録"]).map((item) => (
-          <li key={item}>・{item}</li>
-        ))}
-      </ul>
-    </div>
-  );
-}
-
 function Field({ label, required = false, className = "", children }: { label: string; required?: boolean; className?: string; children: ReactNode }) {
   return (
     <label className={className}>
@@ -659,6 +760,13 @@ function splitLines(value: string) {
   return value
     .split(/\r?\n|、|,/)
     .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function splitGuideLines(value: string) {
+  return value
+    .split(/\r?\n/)
+    .map((item) => item.replace(/^[-・\d.、)\s]+/, "").trim())
     .filter(Boolean);
 }
 
@@ -712,17 +820,6 @@ function formatDifficulty(value: string) {
   if (value === "easy") return "やさしい";
   if (value === "hard") return "難しい";
   return "標準";
-}
-
-function formatDate(date: Date | null) {
-  if (!date) return "未登録";
-  return new Intl.DateTimeFormat("ja-JP", {
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-  }).format(date);
 }
 
 function ErrorBox({ message }: { message: string }) {

@@ -22,6 +22,7 @@ import { saveSalesActivityEvent } from "@/lib/firebase/activity";
 
 export type RoleplayDifficulty = "easy" | "normal" | "hard";
 export type RoleplayScenarioVisibility = "draft" | "all";
+export type RoleplayScenarioCategory = "新規" | "既存" | "";
 
 export type RoleplayScenario = {
   id: string;
@@ -30,7 +31,7 @@ export type RoleplayScenario = {
   description: string;
   productId: string | null;
   productName: string;
-  scenarioCategory: "新規" | "既存" | "";
+  scenarioCategory: RoleplayScenarioCategory;
   targetSegment: string;
   customerRole: string;
   customerProfile: string;
@@ -66,6 +67,17 @@ export type RoleplayResult = {
   createdAt: Date | null;
 };
 
+export type RoleplayResultComment = {
+  id: string;
+  companyId: string | null;
+  resultId: string;
+  scenarioId: string;
+  userId: string;
+  comment: string;
+  createdBy: string | null;
+  createdAt: Date | null;
+};
+
 export type RoleplayAssignmentStatus = "assigned" | "completed";
 
 export type RoleplayAssignment = {
@@ -82,13 +94,26 @@ export type RoleplayAssignment = {
   completedAt: Date | null;
 };
 
+export type RoleplayTalkGuide = {
+  id: string;
+  companyId: string | null;
+  productId: string;
+  productName: string;
+  scenarioCategory: Exclude<RoleplayScenarioCategory, "">;
+  steps: string[];
+  notes: string;
+  createdBy: string | null;
+  createdAt: Date | null;
+  updatedAt: Date | null;
+};
+
 export type CreateRoleplayScenarioInput = {
   companyId?: string | null;
   title: string;
   description: string;
   productId?: string | null;
   productName?: string;
-  scenarioCategory?: "新規" | "既存" | "";
+  scenarioCategory?: RoleplayScenarioCategory;
   targetSegment?: string;
   customerRole: string;
   customerProfile: string;
@@ -97,6 +122,25 @@ export type CreateRoleplayScenarioInput = {
   evaluationCriteria: string[];
   difficulty: RoleplayDifficulty;
   visibility?: RoleplayScenarioVisibility;
+  createdBy: string;
+};
+
+export type SaveRoleplayTalkGuideInput = {
+  companyId?: string | null;
+  productId: string;
+  productName: string;
+  scenarioCategory: Exclude<RoleplayScenarioCategory, "">;
+  steps: string[];
+  notes?: string;
+  createdBy: string;
+};
+
+export type CreateRoleplayResultCommentInput = {
+  companyId?: string | null;
+  resultId: string;
+  scenarioId: string;
+  userId: string;
+  comment: string;
   createdBy: string;
 };
 
@@ -161,8 +205,7 @@ export function subscribeToRoleplayResults(
       callback(
         snapshot.docs
           .map(mapRoleplayResult)
-          .sort((left, right) => (right.createdAt?.getTime() ?? 0) - (left.createdAt?.getTime() ?? 0))
-          .slice(0, 30),
+          .sort((left, right) => (right.createdAt?.getTime() ?? 0) - (left.createdAt?.getTime() ?? 0)),
       );
     })
     .catch((error: FirestoreError) => {
@@ -201,6 +244,58 @@ export function subscribeToRoleplayAssignments(
         snapshot.docs
           .map(mapRoleplayAssignment)
           .sort((left, right) => (right.createdAt?.getTime() ?? 0) - (left.createdAt?.getTime() ?? 0)),
+      ),
+    onError,
+  );
+}
+
+export function subscribeToRoleplayResultComments(
+  input: { companyId?: string | null; resultId?: string | null },
+  callback: (comments: RoleplayResultComment[]) => void,
+  onError?: (error: FirestoreError) => void,
+): Unsubscribe {
+  const { firestore } = assertFirebaseClient();
+  if (!input.companyId || !input.resultId) {
+    callback([]);
+    return () => undefined;
+  }
+  const commentsQuery = query(
+    collection(firestore, "roleplayResultComments"),
+    where("companyId", "==", input.companyId),
+    where("resultId", "==", input.resultId),
+  );
+
+  return onSnapshot(
+    commentsQuery,
+    (snapshot) =>
+      callback(
+        snapshot.docs
+          .map(mapRoleplayResultComment)
+          .sort((left, right) => (right.createdAt?.getTime() ?? 0) - (left.createdAt?.getTime() ?? 0)),
+      ),
+    onError,
+  );
+}
+
+export function subscribeToRoleplayTalkGuides(
+  companyId: string | null | undefined,
+  callback: (guides: RoleplayTalkGuide[]) => void,
+  onError?: (error: FirestoreError) => void,
+): Unsubscribe {
+  const { firestore } = assertFirebaseClient();
+  if (!companyId) {
+    callback([]);
+    return () => undefined;
+  }
+  const guidesQuery = query(collection(firestore, "roleplayTalkGuides"), where("companyId", "==", companyId));
+
+  return onSnapshot(
+    guidesQuery,
+    (snapshot) =>
+      callback(
+        snapshot.docs
+          .map(mapRoleplayTalkGuide)
+          .sort((left, right) => (right.updatedAt?.getTime() ?? 0) - (left.updatedAt?.getTime() ?? 0)),
       ),
     onError,
   );
@@ -341,6 +436,52 @@ export async function createRoleplayAssignment(input: CreateRoleplayAssignmentIn
   });
 }
 
+export async function createRoleplayResultComment(input: CreateRoleplayResultCommentInput) {
+  const { firestore } = assertFirebaseClient();
+
+  await addDoc(collection(firestore, "roleplayResultComments"), {
+    companyId: input.companyId ?? null,
+    resultId: input.resultId,
+    scenarioId: input.scenarioId,
+    userId: input.userId,
+    comment: input.comment,
+    createdBy: input.createdBy,
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  });
+}
+
+export async function createRoleplayTalkGuide(input: SaveRoleplayTalkGuideInput) {
+  const { firestore } = assertFirebaseClient();
+
+  await addDoc(collection(firestore, "roleplayTalkGuides"), {
+    companyId: input.companyId ?? null,
+    productId: input.productId,
+    productName: input.productName,
+    scenarioCategory: input.scenarioCategory,
+    steps: input.steps,
+    notes: input.notes ?? "",
+    createdBy: input.createdBy,
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  });
+}
+
+export async function updateRoleplayTalkGuide(id: string, input: SaveRoleplayTalkGuideInput) {
+  const { firestore } = assertFirebaseClient();
+
+  await updateDoc(doc(firestore, "roleplayTalkGuides", id), {
+    companyId: input.companyId ?? null,
+    productId: input.productId,
+    productName: input.productName,
+    scenarioCategory: input.scenarioCategory,
+    steps: input.steps,
+    notes: input.notes ?? "",
+    createdBy: input.createdBy,
+    updatedAt: serverTimestamp(),
+  });
+}
+
 function mapRoleplayScenario(snapshot: QueryDocumentSnapshot<DocumentData>): RoleplayScenario {
   const data = snapshot.data();
   const difficulty = data.difficulty === "easy" || data.difficulty === "hard" ? data.difficulty : "normal";
@@ -367,6 +508,24 @@ function mapRoleplayScenario(snapshot: QueryDocumentSnapshot<DocumentData>): Rol
   };
 }
 
+function mapRoleplayTalkGuide(snapshot: QueryDocumentSnapshot<DocumentData>): RoleplayTalkGuide {
+  const data = snapshot.data();
+  const scenarioCategory = data.scenarioCategory === "既存" ? "既存" : "新規";
+
+  return {
+    id: snapshot.id,
+    companyId: readNullableString(data.companyId),
+    productId: readString(data.productId),
+    productName: readString(data.productName),
+    scenarioCategory,
+    steps: readStringArray(data.steps),
+    notes: readString(data.notes),
+    createdBy: readNullableString(data.createdBy),
+    createdAt: readDate(data.createdAt),
+    updatedAt: readDate(data.updatedAt),
+  };
+}
+
 function readScenarioCategory(value: unknown) {
   return value === "新規" || value === "既存" ? value : "";
 }
@@ -387,6 +546,21 @@ function mapRoleplayResult(snapshot: QueryDocumentSnapshot<DocumentData>): Rolep
     improvements: readStringArray(data.improvements),
     improvementPhrases: readStringArray(data.improvementPhrases),
     messages: readMessages(data.messages),
+    createdAt: readDate(data.createdAt),
+  };
+}
+
+function mapRoleplayResultComment(snapshot: QueryDocumentSnapshot<DocumentData>): RoleplayResultComment {
+  const data = snapshot.data();
+
+  return {
+    id: snapshot.id,
+    companyId: readNullableString(data.companyId),
+    resultId: readString(data.resultId),
+    scenarioId: readString(data.scenarioId),
+    userId: readString(data.userId),
+    comment: readString(data.comment),
+    createdBy: readNullableString(data.createdBy),
     createdAt: readDate(data.createdAt),
   };
 }

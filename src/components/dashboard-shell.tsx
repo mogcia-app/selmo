@@ -62,30 +62,31 @@ const salesSections: Array<{ label: string; items: NavItem[] }> = [
     items: [
       { href: "/sales/dashboard", label: "ダッシュボード", num: "01" },
       { href: "/sales/calendar", label: "カレンダー", num: "02" },
+      { href: "/sales/roleplay/results", label: "ロープレ分析", num: "03" },
     ],
   },
   {
     label: "02 — 商談",
     items: [
-      { href: "/meetings/upload?category=meeting", label: "アップロード", num: "03" },
-      { href: "/sales/analysis?category=meeting", label: "商談分析", num: "04" },
-      { href: "/meetings?category=meeting", label: "打ち合わせ一覧", num: "05" },
-      { href: "/sales/roleplay/scenarios?category=meeting", label: "ロープレ", num: "06" },
+      { href: "/meetings/upload?category=meeting", label: "アップロード", num: "04" },
+      { href: "/sales/analysis?category=meeting", label: "商談分析", num: "05" },
+      { href: "/meetings?category=meeting", label: "打ち合わせ一覧", num: "06" },
+      { href: "/sales/roleplay/scenarios?category=meeting", label: "ロープレ", num: "07" },
     ],
   },
   {
     label: "03 — テレアポ",
     items: [
-      { href: "/meetings/upload?category=teleapo", label: "アップロード", num: "07" },
-      { href: "/sales/analysis?category=teleapo", label: "テレアポ分析", num: "08" },
-      { href: "/meetings?category=teleapo", label: "架電一覧", num: "09" },
-      { href: "/sales/roleplay/scenarios?category=teleapo", label: "ロープレ", num: "10" },
+      { href: "/meetings/upload?category=teleapo", label: "アップロード", num: "08" },
+      { href: "/sales/analysis?category=teleapo", label: "テレアポ分析", num: "09" },
+      { href: "/meetings?category=teleapo", label: "架電一覧", num: "10" },
+      { href: "/sales/roleplay/scenarios?category=teleapo", label: "ロープレ", num: "11" },
     ],
   },
   {
     label: "04 — Knowledge",
     items: [
-      { href: "/sales/knowledge", label: "ナレッジ", num: "11" },
+      { href: "/sales/knowledge", label: "ナレッジ", num: "12" },
     ],
   },
 ];
@@ -425,6 +426,7 @@ function resolveCurrentLabel(
   if (pathname.match(/^\/admin\/meetings\/[^/]+$/)) return "レビュー詳細";
   if (pathname.match(/^\/admin\/knowledge\/[^/]+$/)) return "ナレッジ詳細";
   if (pathname.match(/^\/admin\/members\/[^/]+$/)) return "メンバー詳細";
+  if (pathname === "/sales/roleplay" || pathname === "/sales/roleplay/scenarios" || pathname === "/sales/roleplay/results") return "ロープレ";
   if (pathname.match(/^\/sales\/knowledge\/products\/[^/]+$/)) return "商材ナレッジ";
   if (pathname.match(/^\/sales\/knowledge\/categories\/[^/]+\/knowledge\/[^/]+\/edit$/)) return "ナレッジ編集";
   if (pathname.match(/^\/sales\/knowledge\/categories\/[^/]+\/knowledge\/[^/]+$/)) return "ナレッジ詳細";
@@ -482,6 +484,7 @@ function filterSalesSections(
 
   const canUseMeeting = canUseSalesDomain(profile, "meeting");
   const canUseTeleapo = canUseSalesDomain(profile, "teleapo");
+  const canUseRoleplay = canUseMeeting || canUseTeleapo;
 
   return sections
     .map((section) => {
@@ -490,7 +493,7 @@ function filterSalesSections(
       if (section.label.includes("Knowledge") && !canUseMeeting) return null;
       return {
         ...section,
-        items: section.items.filter((item) => !item.href.startsWith("/sales/roleplay") || canUseTeleapo),
+        items: section.items.filter((item) => !item.href.startsWith("/sales/roleplay") || canUseRoleplay),
       };
     })
     .filter((section): section is Array<{ label: string; items: NavItem[] }>[number] => Boolean(section));

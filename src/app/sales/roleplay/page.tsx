@@ -40,7 +40,6 @@ export default function SalesRoleplayPage() {
   const chunksRef = useRef<BlobPart[]>([]);
   const recordingStartedAtRef = useRef<number | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
-  const spokenInitialScenarioIdRef = useRef<string | null>(null);
   const scenarioId = searchParams.get("scenarioId") ?? "";
   const activeAssignmentScenarioIds = useMemo(
     () => new Set(assignments.filter((assignment) => assignment.status === "assigned").map((assignment) => assignment.scenarioId)),
@@ -76,20 +75,9 @@ export default function SalesRoleplayPage() {
 
   useEffect(() => {
     if (!scenario) return;
-    const firstMessage = {
-      role: "customer" as const,
-      content: `本日はよろしくお願いします。${scenario.customerRole}として、${scenario.goal || "導入判断に必要なこと"}を確認したいです。まず御社の提案概要を教えてください。`,
-      createdAt: new Date().toISOString(),
-    };
-    setMessages([
-      firstMessage,
-    ]);
+    setMessages([]);
     setRecordedPreview("");
     setRecordingElapsedSec(0);
-    if (spokenInitialScenarioIdRef.current !== scenario.id) {
-      spokenInitialScenarioIdRef.current = scenario.id;
-      window.setTimeout(() => speakText(firstMessage.content, setIsSpeaking), 450);
-    }
   }, [scenario]);
 
   useEffect(() => {
@@ -295,28 +283,69 @@ export default function SalesRoleplayPage() {
 
         {scenario ? (
           <section className="mt-3 grid gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
-            <article className="flex min-h-[540px] flex-col rounded-[24px] border border-[#e2e6ee] bg-white shadow-[0_8px_24px_rgba(17,24,39,0.04)]">
+            <article className="flex min-h-[540px] flex-col rounded-[24px] border border-[#e2e6ee] bg-white shadow-[0_8px_24px_rgba(17,24,39,0.04)] xl:h-[calc(100vh-150px)] xl:min-h-[560px]">
               <div className="border-b border-[#eef1f5] px-5 py-4">
                 <p className="text-[12px] font-bold text-[#8a6500]">{scenario.productName || "商材未設定"}</p>
                 <h1 className="mt-1 text-[24px] font-black tracking-[-0.03em] text-[#171717]">{scenario.title}</h1>
               </div>
 
-              <div className="border-b border-[#eef1f5] bg-[#fcfcfd] px-5 py-5">
-                <div className="flex flex-col gap-4 rounded-[22px] border border-[#e6eaf0] bg-white px-5 py-5 md:flex-row md:items-center md:justify-between">
+              <div className="border-b border-[#eef1f5] bg-[#fcfcfd] px-5 py-4">
+                <div className="rounded-[22px] border border-[#e6eaf0] bg-white px-5 py-4">
                   <div>
                     <p className="text-[12px] font-black uppercase tracking-[0.16em] text-[#b48600]">Voice Roleplay</p>
                     <h2 className="mt-1 text-[22px] font-black text-[#171717]">マイクでAI顧客に返答</h2>
                     <p className="mt-2 text-[13px] leading-6 text-[#707783]">
-                      録音停止後に文字起こしし、AI顧客が音声で返答します。
+                      下の操作バーからいつでも録音できます。録音停止後に文字起こしし、AI顧客が音声で返答します。
                     </p>
+                  </div>
+                </div>
+                {recordedPreview ? (
+                  <div className="mt-4 rounded-[18px] border border-[#e6eaf0] bg-white px-4 py-3">
+                    <div className="text-[12px] font-black text-[#8a909b]">直前の文字起こし</div>
+                    <p className="mt-1 text-[13px] leading-6 text-[#343b48]">{recordedPreview}</p>
+                  </div>
+                ) : null}
+              </div>
+
+              <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-5 py-5">
+                {messages.length > 0 ? (
+                  messages.map((message, index) => (
+                    <MessageBubble key={`${message.createdAt}-${index}`} message={message} />
+                  ))
+                ) : (
+                  <div className="rounded-[20px] border border-dashed border-[#dfe4ec] bg-[#fcfcfd] px-5 py-8 text-center">
+                    <h3 className="text-[18px] font-black text-[#171717]">営業側から開始</h3>
+                    <p className="mx-auto mt-2 max-w-[520px] text-[13px] leading-6 text-[#7a808c]">
+                      下の録音ボタンを押して、いつもの架電・商談のように最初の挨拶から話してください。AIは顧客役として返答します。
+                    </p>
+                  </div>
+                )}
+                {isTranscribing ? (
+                  <div className="max-w-[76%] rounded-[18px] border border-[#e6eaf0] bg-[#fcfcfd] px-4 py-3 text-[13px] font-semibold text-[#7a808c]">
+                    音声を文字起こししています...
+                  </div>
+                ) : null}
+                {isThinking ? (
+                  <div className="max-w-[76%] rounded-[18px] border border-[#e6eaf0] bg-[#fcfcfd] px-4 py-3 text-[13px] font-semibold text-[#7a808c]">
+                    AI顧客が考えています...
+                  </div>
+                ) : null}
+              </div>
+
+              <div className="sticky bottom-0 z-10 border-t border-[#eef1f5] bg-white/95 px-5 py-4 backdrop-blur">
+                <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                  <div className="grid gap-2 sm:grid-cols-3 lg:min-w-[420px]">
+                    <CompactStatus label="録音" value={isRecording ? formatElapsed(recordingElapsedSec) : "--:--"} active={isRecording} />
+                    <CompactStatus label="状態" value={buildVoiceStatus({ isRecording, isTranscribing, isThinking, isSpeaking })} />
+                    <CompactStatus label="発話" value={`${messages.filter((message) => message.role === "sales").length}回`} />
                   </div>
                   <div className="flex flex-col items-stretch gap-2 sm:flex-row sm:items-center">
                     <button
                       type="button"
                       onClick={isRecording ? handleStopRecording : () => void handleStartRecording()}
                       disabled={isThinking || isTranscribing}
-                      className={`inline-flex h-14 min-w-[180px] items-center justify-center gap-2 rounded-[18px] px-6 text-[14px] font-black transition disabled:cursor-not-allowed disabled:opacity-50 ${
-                        isRecording ? "bg-[#d92d20] text-white" : "bg-[#171717] text-white"
+                      className={`inline-flex h-14 min-w-[190px] items-center justify-center gap-2 rounded-[18px] px-6 text-[14px] font-black transition disabled:cursor-not-allowed disabled:opacity-50 ${
+                        isRecording ? "bg-[#d92d20] text-white shadow-[0_10px_24px_rgba(217,45,32,0.22)]" : "bg-[#171717] text-white shadow-[0_10px_24px_rgba(17,24,39,0.16)]"
                       }`}
                     >
                       <MicIcon active={isRecording} />
@@ -335,38 +364,6 @@ export default function SalesRoleplayPage() {
                     </button>
                   </div>
                 </div>
-
-                <div className="mt-4 grid gap-3 md:grid-cols-3">
-                  <StatusCard label="録音時間" value={isRecording ? formatElapsed(recordingElapsedSec) : "--:--"} tone={isRecording ? "danger" : "default"} />
-                  <StatusCard label="状態" value={buildVoiceStatus({ isRecording, isTranscribing, isThinking, isSpeaking })} tone="default" />
-                  <StatusCard label="営業発話" value={`${messages.filter((message) => message.role === "sales").length}回`} tone="default" />
-                </div>
-                {recordedPreview ? (
-                  <div className="mt-4 rounded-[18px] border border-[#e6eaf0] bg-white px-4 py-3">
-                    <div className="text-[12px] font-black text-[#8a909b]">直前の文字起こし</div>
-                    <p className="mt-1 text-[13px] leading-6 text-[#343b48]">{recordedPreview}</p>
-                  </div>
-                ) : null}
-              </div>
-
-              <div className="flex-1 space-y-4 overflow-y-auto px-5 py-5">
-                {messages.map((message, index) => (
-                  <MessageBubble key={`${message.createdAt}-${index}`} message={message} />
-                ))}
-                {isTranscribing ? (
-                  <div className="max-w-[76%] rounded-[18px] border border-[#e6eaf0] bg-[#fcfcfd] px-4 py-3 text-[13px] font-semibold text-[#7a808c]">
-                    音声を文字起こししています...
-                  </div>
-                ) : null}
-                {isThinking ? (
-                  <div className="max-w-[76%] rounded-[18px] border border-[#e6eaf0] bg-[#fcfcfd] px-4 py-3 text-[13px] font-semibold text-[#7a808c]">
-                    AI顧客が考えています...
-                  </div>
-                ) : null}
-              </div>
-
-              <div className="border-t border-[#eef1f5] px-5 py-4 text-[12px] font-bold text-[#8a909b]">
-                テキスト入力ではなく、録音した音声から会話を進めます。
               </div>
             </article>
 
@@ -428,11 +425,11 @@ function MessageBubble({ message }: { message: RoleplayMessage }) {
   );
 }
 
-function StatusCard({ label, value, tone }: { label: string; value: string; tone: "default" | "danger" }) {
+function CompactStatus({ label, value, active = false }: { label: string; value: string; active?: boolean }) {
   return (
-    <div className={`rounded-[18px] border px-4 py-3 ${tone === "danger" ? "border-[#ffd0cc] bg-[#fff4f2]" : "border-[#e6eaf0] bg-white"}`}>
-      <div className="text-[12px] font-black text-[#8a909b]">{label}</div>
-      <div className={`mt-1 text-[18px] font-black ${tone === "danger" ? "text-[#d92d20]" : "text-[#171717]"}`}>{value}</div>
+    <div className={`rounded-[14px] border px-3 py-2 ${active ? "border-[#ffd0cc] bg-[#fff4f2]" : "border-[#e6eaf0] bg-[#fcfcfd]"}`}>
+      <div className="text-[10px] font-black text-[#8a909b]">{label}</div>
+      <div className={`mt-0.5 truncate text-[12px] font-black ${active ? "text-[#d92d20]" : "text-[#171717]"}`}>{value}</div>
     </div>
   );
 }
@@ -488,24 +485,69 @@ function formatElapsed(seconds: number) {
 }
 
 function evaluateRoleplay(scenario: RoleplayScenario, messages: RoleplayMessage[]) {
-  const salesText = messages.filter((message) => message.role === "sales").map((message) => message.content).join(" ");
-  const criteriaHits = scenario.evaluationCriteria.filter((criterion) => salesText.includes(criterion.slice(0, 4))).length;
+  const salesMessages = messages.filter((message) => message.role === "sales");
+  const salesText = salesMessages.map((message) => message.content).join(" ");
+  const criteriaHits = scenario.evaluationCriteria.filter((criterion) => {
+    const keyword = criterion.replace(/[：:+\-0-9点\s]/g, "").slice(0, 5);
+    return keyword.length >= 3 && salesText.includes(keyword);
+  }).length;
   const questionCount = (salesText.match(/？|\?/g) ?? []).length;
-  const score = Math.min(95, Math.max(55, 62 + criteriaHits * 8 + questionCount * 4 + messages.length * 2));
+  const hasBudget = includesAny(salesText, ["予算", "費用", "金額", "価格", "月額"]);
+  const hasDecision = includesAny(salesText, ["決裁", "上司", "社内", "判断", "稟議"]);
+  const hasTiming = includesAny(salesText, ["時期", "いつ", "導入", "開始", "スケジュール"]);
+  const hasNextAction = includesAny(salesText, ["次回", "日程", "資料", "見積", "送付", "打ち合わせ"]);
+  const hasIssueDepth = includesAny(salesText, ["課題", "困", "悩", "背景", "原因", "現状"]);
+  const hasValueConnection = includesAny(salesText, ["効果", "改善", "成果", "価値", "事例", "解決"]);
+  const fillerCount = (salesText.match(/えー|あの|まあ|そのー|なんか|ちょっと/g) ?? []).length;
+  const baseScore = 42;
+  const rawScore =
+    baseScore +
+    Math.min(questionCount, 4) * 3 +
+    Math.min(salesMessages.length, 4) * 2 +
+    Math.min(criteriaHits, 4) * 5 +
+    (hasIssueDepth ? 8 : 0) +
+    (hasValueConnection ? 8 : 0) +
+    (hasBudget ? 5 : 0) +
+    (hasDecision ? 5 : 0) +
+    (hasTiming ? 5 : 0) +
+    (hasNextAction ? 7 : 0) -
+    Math.min(fillerCount, 6) * 2;
+  const scoreCap = salesMessages.length < 2
+    ? 58
+    : hasBudget && hasDecision && hasTiming && hasNextAction
+      ? 92
+      : hasNextAction && hasIssueDepth
+        ? 84
+        : 76;
+  const score = Math.min(scoreCap, Math.max(35, Math.round(rawScore)));
+
+  const improvements = [
+    ...(!hasIssueDepth ? ["顧客の課題・背景・現状をもう一段深掘りしましょう。"] : []),
+    ...(!hasBudget ? ["予算感や費用対効果の判断基準を確認しましょう。"] : []),
+    ...(!hasDecision ? ["決裁者や社内の意思決定フローを確認しましょう。"] : []),
+    ...(!hasTiming ? ["導入時期や検討スケジュールを確認しましょう。"] : []),
+    ...(!hasNextAction ? ["商談の最後に次回日程・資料送付・見積提出などの次アクションを確定しましょう。"] : []),
+    ...(fillerCount >= 3 ? ["えー、あの、まあ等のフィラー語を減らし、短く言い切る練習をしましょう。"] : []),
+  ];
 
   return {
     score,
-    summary: "ロープレを完了しました。顧客の懸念に対して説明を進められています。",
+    summary: score >= 80
+      ? "ロープレを完了しました。課題確認から次回アクションまで進められています。"
+      : score >= 65
+        ? "ロープレを完了しました。会話は進められていますが、検討条件や次回アクションの確認に改善余地があります。"
+        : "ロープレを完了しました。提案説明だけでなく、課題・予算・決裁・時期を確認する練習が必要です。",
     strengths: [
       questionCount > 0 ? "顧客に確認質問を投げられています。" : "提案内容を最後まで伝えられています。",
-      "会話を継続し、顧客の反応に合わせて回答できています。",
+      hasValueConnection ? "商材価値を顧客の課題に結びつけようとしています。" : "会話を継続し、顧客の反応に合わせて回答できています。",
     ],
-    improvements: [
-      "導入後の具体的な成果や事例をもう少し入れると説得力が上がります。",
-      "次回は顧客の予算感や決裁プロセスも確認してみましょう。",
-    ],
+    improvements: improvements.length > 0 ? improvements : ["反論対応の根拠や成功事例をもう少し具体的に伝えると、さらに説得力が上がります。"],
     improvementPhrases: buildImprovementPhrases(scenario, salesText),
   };
+}
+
+function includesAny(text: string, keywords: string[]) {
+  return keywords.some((keyword) => text.includes(keyword));
 }
 
 function buildImprovementPhrases(scenario: RoleplayScenario, salesText: string) {

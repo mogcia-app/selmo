@@ -303,6 +303,13 @@ service cloud.firestore {
       allow delete: if canAdminCompanyData(resource.data.companyId);
     }
 
+    match /roleplayTalkGuides/{guideId} {
+      allow read: if canReadCompanyData(resource.data.companyId) && canUseRoleplayDomain();
+      allow create: if canAdminCompanyData(request.resource.data.companyId)
+        && request.resource.data.createdBy == request.auth.uid;
+      allow update, delete: if canAdminCompanyData(resource.data.companyId);
+    }
+
     match /roleplayResults/{resultId} {
       allow read: if canReadCompanyData(resource.data.companyId)
         && canUseRoleplayDomain()
@@ -311,6 +318,15 @@ service cloud.firestore {
         && request.resource.data.userId == request.auth.uid
         && sameCompany(request.resource.data.companyId)
         && canUseRoleplayDomain();
+      allow update, delete: if false;
+    }
+
+    match /roleplayResultComments/{commentId} {
+      allow read: if canReadCompanyData(resource.data.companyId)
+        && canUseRoleplayDomain()
+        && (isOwnerRole() || isAdminRole() || resource.data.userId == request.auth.uid);
+      allow create: if canAdminCompanyData(request.resource.data.companyId)
+        && request.resource.data.createdBy == request.auth.uid;
       allow update, delete: if false;
     }
 
