@@ -276,7 +276,19 @@ service cloud.firestore {
       allow read: if canReadCompanyData(resource.data.companyId) && canUseTeleapoDomain();
       allow create: if canAdminCompanyData(request.resource.data.companyId)
         && request.resource.data.createdBy == request.auth.uid;
-      allow update, delete: if canAdminCompanyData(resource.data.companyId);
+      allow create: if isSignedIn()
+        && request.resource.data.createdBy == request.auth.uid
+        && sameCompany(request.resource.data.companyId)
+        && canUseTeleapoDomain();
+      allow update: if canAdminCompanyData(resource.data.companyId)
+        || (
+          resource.data.createdBy == request.auth.uid
+          && request.resource.data.createdBy == resource.data.createdBy
+          && request.resource.data.companyId == resource.data.companyId
+          && sameCompany(resource.data.companyId)
+          && canUseTeleapoDomain()
+        );
+      allow delete: if canAdminCompanyData(resource.data.companyId);
     }
 
     match /roleplayResults/{resultId} {

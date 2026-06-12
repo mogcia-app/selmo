@@ -268,6 +268,16 @@ export default function AdminAccountPage() {
 
             <SettingsCard iconSrc="/reload.png" title="パスワード設定">
               <form onSubmit={(event) => void handlePasswordChange(event)} className="space-y-4">
+                <input
+                  type="email"
+                  name="username"
+                  value={profile?.email ?? ""}
+                  readOnly
+                  autoComplete="username"
+                  className="hidden"
+                  tabIndex={-1}
+                  aria-hidden="true"
+                />
                 <PasswordField label="現在のパスワード" value={currentPassword} onChange={setCurrentPassword} autoComplete="current-password" />
                 <PasswordField label="新しいパスワード" value={newPassword} onChange={setNewPassword} autoComplete="new-password" />
                 <PasswordField label="新しいパスワード（確認）" value={confirmPassword} onChange={setConfirmPassword} autoComplete="new-password" />

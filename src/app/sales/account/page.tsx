@@ -306,6 +306,16 @@ export default function SalesAccountPage() {
 
             <SettingsCard iconSrc="/reload.png" title="パスワード設定">
               <form onSubmit={(event) => void handlePasswordChange(event)} className="space-y-4">
+                <input
+                  type="email"
+                  name="username"
+                  value={profile?.email ?? ""}
+                  readOnly
+                  autoComplete="username"
+                  className="hidden"
+                  tabIndex={-1}
+                  aria-hidden="true"
+                />
                 <PasswordField
                   label="現在のパスワード"
                   value={currentPassword}

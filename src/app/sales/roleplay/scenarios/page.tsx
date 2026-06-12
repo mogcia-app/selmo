@@ -341,7 +341,7 @@ function ScenarioCreateDialog({
         objections: splitLines(objections),
         evaluationCriteria: splitLines(criteria),
         difficulty,
-        visibility: scenario?.visibility ?? "all",
+        visibility: scenario?.visibility ?? "draft",
         createdBy: userId,
       };
       if (scenario) {
