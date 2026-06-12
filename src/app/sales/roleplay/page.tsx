@@ -4,7 +4,7 @@ import { FirebaseError } from "firebase/app";
 import Image from "next/image";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { useAuth } from "@/features/auth/auth-provider";
 import {
@@ -28,10 +28,19 @@ export default function SalesRoleplayPage() {
   const [scenarios, setScenarios] = useState<RoleplayScenario[]>([]);
   const [assignments, setAssignments] = useState<RoleplayAssignment[]>([]);
   const [messages, setMessages] = useState<RoleplayMessage[]>([]);
-  const [input, setInput] = useState("");
+  const [recordedPreview, setRecordedPreview] = useState("");
+  const [recordingElapsedSec, setRecordingElapsedSec] = useState(0);
+  const [isRecording, setIsRecording] = useState(false);
+  const [isTranscribing, setIsTranscribing] = useState(false);
   const [isThinking, setIsThinking] = useState(false);
+  const [isSpeaking, setIsSpeaking] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const recorderRef = useRef<MediaRecorder | null>(null);
+  const chunksRef = useRef<BlobPart[]>([]);
+  const recordingStartedAtRef = useRef<number | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+  const spokenInitialScenarioIdRef = useRef<string | null>(null);
   const scenarioId = searchParams.get("scenarioId") ?? "";
   const activeAssignmentScenarioIds = useMemo(
     () => new Set(assignments.filter((assignment) => assignment.status === "assigned").map((assignment) => assignment.scenarioId)),
@@ -67,26 +76,146 @@ export default function SalesRoleplayPage() {
 
   useEffect(() => {
     if (!scenario) return;
+    const firstMessage = {
+      role: "customer" as const,
+      content: `本日はよろしくお願いします。${scenario.customerRole}として、${scenario.goal || "導入判断に必要なこと"}を確認したいです。まず御社の提案概要を教えてください。`,
+      createdAt: new Date().toISOString(),
+    };
     setMessages([
-      {
-        role: "customer",
-        content: `本日はよろしくお願いします。${scenario.customerRole}として、${scenario.goal || "導入判断に必要なこと"}を確認したいです。まず御社の提案概要を教えてください。`,
-        createdAt: new Date().toISOString(),
-      },
+      firstMessage,
     ]);
+    setRecordedPreview("");
+    setRecordingElapsedSec(0);
+    if (spokenInitialScenarioIdRef.current !== scenario.id) {
+      spokenInitialScenarioIdRef.current = scenario.id;
+      window.setTimeout(() => speakText(firstMessage.content, setIsSpeaking), 450);
+    }
   }, [scenario]);
 
-  const handleSend = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    const content = input.trim();
-    if (!content || !scenario) return;
+  useEffect(() => {
+    if (!isRecording) return;
+    const timer = window.setInterval(() => {
+      if (!recordingStartedAtRef.current) return;
+      setRecordingElapsedSec(Math.max(0, Math.floor((Date.now() - recordingStartedAtRef.current) / 1000)));
+    }, 300);
+    return () => window.clearInterval(timer);
+  }, [isRecording]);
+
+  useEffect(() => {
+    return () => {
+      recorderRef.current?.stop();
+      streamRef.current?.getTracks().forEach((track) => track.stop());
+      if (typeof window !== "undefined" && "speechSynthesis" in window) {
+        window.speechSynthesis.cancel();
+      }
+    };
+  }, []);
+
+  const handleStartRecording = async () => {
+    if (!scenario || isRecording || isThinking || isTranscribing) return;
+    if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === "undefined") {
+      setError("このブラウザでは音声録音に対応していません。Chromeなどのブラウザでお試しください。");
+      return;
+    }
+
+    setError(null);
+    setRecordedPreview("");
+    if ("speechSynthesis" in window) {
+      window.speechSynthesis.cancel();
+      setIsSpeaking(false);
+    }
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mimeType = getSupportedAudioMimeType();
+      const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
+      chunksRef.current = [];
+      streamRef.current = stream;
+      recorderRef.current = recorder;
+      recordingStartedAtRef.current = Date.now();
+      setRecordingElapsedSec(0);
+
+      recorder.ondataavailable = (event) => {
+        if (event.data.size > 0) {
+          chunksRef.current.push(event.data);
+        }
+      };
+      recorder.onstop = () => {
+        const durationSec = recordingStartedAtRef.current
+          ? Math.max(1, Math.round((Date.now() - recordingStartedAtRef.current) / 1000))
+          : recordingElapsedSec;
+        const audioBlob = new Blob(chunksRef.current, { type: recorder.mimeType || "audio/webm" });
+        stream.getTracks().forEach((track) => track.stop());
+        streamRef.current = null;
+        recorderRef.current = null;
+        recordingStartedAtRef.current = null;
+        setIsRecording(false);
+        setRecordingElapsedSec(durationSec);
+        if (audioBlob.size > 0) {
+          void transcribeAndSend(audioBlob, durationSec);
+        } else {
+          setError("録音データが取得できませんでした。もう一度お試しください。");
+        }
+      };
+      recorder.start();
+      setIsRecording(true);
+    } catch {
+      setError("マイクの利用が許可されていません。ブラウザのマイク権限を確認してください。");
+    }
+  };
+
+  const handleStopRecording = () => {
+    if (recorderRef.current && recorderRef.current.state !== "inactive") {
+      recorderRef.current.stop();
+    }
+  };
+
+  const transcribeAndSend = async (audioBlob: Blob, durationSec: number) => {
+    if (!scenario) return;
+    setIsTranscribing(true);
+    setError(null);
+
+    try {
+      const formData = new FormData();
+      formData.append("audio", audioBlob, `roleplay-${Date.now()}.${getAudioExtension(audioBlob.type)}`);
+      formData.append("companyId", profile?.companyId ?? "");
+      formData.append("userId", userId ?? "");
+      formData.append("durationSec", String(durationSec));
+
+      const response = await fetch("/api/roleplay/transcribe", {
+        method: "POST",
+        body: formData,
+      });
+      const data = (await response.json()) as { text?: string; error?: string };
+      if (!response.ok) {
+        throw new Error(data.error ?? "音声の文字起こしに失敗しました。");
+      }
+
+      const text = data.text?.trim() ?? "";
+      if (!text) {
+        throw new Error("発話を認識できませんでした。もう少しはっきり話して再録音してください。");
+      }
+      setRecordedPreview(text);
+      await sendSalesMessage(text);
+    } catch (nextError) {
+      setError(nextError instanceof Error ? nextError.message : "音声ロープレの送信に失敗しました。");
+    } finally {
+      setIsTranscribing(false);
+    }
+  };
+
+  const sendSalesMessage = async (content: string) => {
+    if (!content.trim() || !scenario) return;
 
     const nextMessages: RoleplayMessage[] = [
       ...messages,
-      { role: "sales", content, createdAt: new Date().toISOString() },
+      {
+        role: "sales",
+        content: content.trim(),
+        createdAt: new Date().toISOString(),
+      },
     ];
     setMessages(nextMessages);
-    setInput("");
     setIsThinking(true);
     setError(null);
 
@@ -117,6 +246,7 @@ export default function SalesRoleplayPage() {
           createdAt: new Date().toISOString(),
         },
       ]);
+      speakText(data.message ?? "もう少し詳しく教えてください。", setIsSpeaking);
     } catch (nextError) {
       setError(nextError instanceof Error ? nextError.message : "AI顧客の応答に失敗しました。");
     } finally {
@@ -153,7 +283,7 @@ export default function SalesRoleplayPage() {
   };
 
   return (
-    <main className="overflow-x-hidden bg-transparent px-5 pb-6 pt-5 md:px-8 md:pb-8 md:pt-6">
+    <main className="overflow-x-hidden bg-transparent px-5 pb-3 pt-4 md:px-8 md:pb-4 md:pt-5">
       <div className="mx-auto max-w-[1380px]">
         <RoleplayHeader activeStep="practice" />
 
@@ -164,17 +294,70 @@ export default function SalesRoleplayPage() {
         ) : null}
 
         {scenario ? (
-          <section className="mt-4 grid gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
-            <article className="flex min-h-[650px] flex-col rounded-[24px] border border-[#e2e6ee] bg-white shadow-[0_8px_24px_rgba(17,24,39,0.04)]">
+          <section className="mt-3 grid gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
+            <article className="flex min-h-[540px] flex-col rounded-[24px] border border-[#e2e6ee] bg-white shadow-[0_8px_24px_rgba(17,24,39,0.04)]">
               <div className="border-b border-[#eef1f5] px-5 py-4">
                 <p className="text-[12px] font-bold text-[#8a6500]">{scenario.productName || "商材未設定"}</p>
                 <h1 className="mt-1 text-[24px] font-black tracking-[-0.03em] text-[#171717]">{scenario.title}</h1>
+              </div>
+
+              <div className="border-b border-[#eef1f5] bg-[#fcfcfd] px-5 py-5">
+                <div className="flex flex-col gap-4 rounded-[22px] border border-[#e6eaf0] bg-white px-5 py-5 md:flex-row md:items-center md:justify-between">
+                  <div>
+                    <p className="text-[12px] font-black uppercase tracking-[0.16em] text-[#b48600]">Voice Roleplay</p>
+                    <h2 className="mt-1 text-[22px] font-black text-[#171717]">マイクでAI顧客に返答</h2>
+                    <p className="mt-2 text-[13px] leading-6 text-[#707783]">
+                      録音停止後に文字起こしし、AI顧客が音声で返答します。
+                    </p>
+                  </div>
+                  <div className="flex flex-col items-stretch gap-2 sm:flex-row sm:items-center">
+                    <button
+                      type="button"
+                      onClick={isRecording ? handleStopRecording : () => void handleStartRecording()}
+                      disabled={isThinking || isTranscribing}
+                      className={`inline-flex h-14 min-w-[180px] items-center justify-center gap-2 rounded-[18px] px-6 text-[14px] font-black transition disabled:cursor-not-allowed disabled:opacity-50 ${
+                        isRecording ? "bg-[#d92d20] text-white" : "bg-[#171717] text-white"
+                      }`}
+                    >
+                      <MicIcon active={isRecording} />
+                      {isRecording ? "録音を停止" : "録音して話す"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const lastCustomer = [...messages].reverse().find((message) => message.role === "customer");
+                        if (lastCustomer) speakText(lastCustomer.content, setIsSpeaking);
+                      }}
+                      disabled={isSpeaking || isRecording}
+                      className="inline-flex h-14 min-w-[140px] items-center justify-center rounded-[18px] border border-[#e4e8ef] bg-white px-5 text-[13px] font-black text-[#343b48] disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      もう一度聞く
+                    </button>
+                  </div>
+                </div>
+
+                <div className="mt-4 grid gap-3 md:grid-cols-3">
+                  <StatusCard label="録音時間" value={isRecording ? formatElapsed(recordingElapsedSec) : "--:--"} tone={isRecording ? "danger" : "default"} />
+                  <StatusCard label="状態" value={buildVoiceStatus({ isRecording, isTranscribing, isThinking, isSpeaking })} tone="default" />
+                  <StatusCard label="営業発話" value={`${messages.filter((message) => message.role === "sales").length}回`} tone="default" />
+                </div>
+                {recordedPreview ? (
+                  <div className="mt-4 rounded-[18px] border border-[#e6eaf0] bg-white px-4 py-3">
+                    <div className="text-[12px] font-black text-[#8a909b]">直前の文字起こし</div>
+                    <p className="mt-1 text-[13px] leading-6 text-[#343b48]">{recordedPreview}</p>
+                  </div>
+                ) : null}
               </div>
 
               <div className="flex-1 space-y-4 overflow-y-auto px-5 py-5">
                 {messages.map((message, index) => (
                   <MessageBubble key={`${message.createdAt}-${index}`} message={message} />
                 ))}
+                {isTranscribing ? (
+                  <div className="max-w-[76%] rounded-[18px] border border-[#e6eaf0] bg-[#fcfcfd] px-4 py-3 text-[13px] font-semibold text-[#7a808c]">
+                    音声を文字起こししています...
+                  </div>
+                ) : null}
                 {isThinking ? (
                   <div className="max-w-[76%] rounded-[18px] border border-[#e6eaf0] bg-[#fcfcfd] px-4 py-3 text-[13px] font-semibold text-[#7a808c]">
                     AI顧客が考えています...
@@ -182,23 +365,9 @@ export default function SalesRoleplayPage() {
                 ) : null}
               </div>
 
-              <form onSubmit={handleSend} className="border-t border-[#eef1f5] p-4">
-                <div className="flex gap-3">
-                  <textarea
-                    value={input}
-                    onChange={(event) => setInput(event.target.value)}
-                    placeholder="営業として返答を入力"
-                    className="min-h-[64px] flex-1 resize-none rounded-[16px] border border-[#e4e8ef] bg-white px-4 py-3 text-[14px] leading-6 text-[#171717] outline-none focus:border-[#e0bd4b]"
-                  />
-                  <button
-                    type="submit"
-                    disabled={!input.trim() || isThinking}
-                    className="inline-flex w-[104px] items-center justify-center rounded-[16px] bg-[#171717] text-[14px] font-black text-white disabled:cursor-not-allowed disabled:opacity-50"
-                  >
-                    送信
-                  </button>
-                </div>
-              </form>
+              <div className="border-t border-[#eef1f5] px-5 py-4 text-[12px] font-bold text-[#8a909b]">
+                テキスト入力ではなく、録音した音声から会話を進めます。
+              </div>
             </article>
 
             <aside className="space-y-4">
@@ -225,7 +394,7 @@ export default function SalesRoleplayPage() {
             </aside>
           </section>
         ) : (
-          <section className="mt-4 rounded-[24px] border border-[#e2e6ee] bg-white px-6 py-12 text-center shadow-[0_8px_24px_rgba(17,24,39,0.04)] md:px-10 md:py-16">
+          <section className="mt-3 rounded-[24px] border border-[#e2e6ee] bg-white px-6 py-10 text-center shadow-[0_8px_24px_rgba(17,24,39,0.04)] md:px-10 md:py-12">
             <Image src="/mojiokoshi.png" alt="AIロープレ" width={180} height={180} priority className="mx-auto h-[140px] w-[140px] object-contain" />
             <h1 className="mt-5 text-[28px] font-black tracking-[-0.04em] text-[#171717]">シナリオを選択してください</h1>
             <p className="mx-auto mt-3 max-w-[560px] text-[15px] leading-7 text-[#596273]">
@@ -257,6 +426,65 @@ function MessageBubble({ message }: { message: RoleplayMessage }) {
       </div>
     </div>
   );
+}
+
+function StatusCard({ label, value, tone }: { label: string; value: string; tone: "default" | "danger" }) {
+  return (
+    <div className={`rounded-[18px] border px-4 py-3 ${tone === "danger" ? "border-[#ffd0cc] bg-[#fff4f2]" : "border-[#e6eaf0] bg-white"}`}>
+      <div className="text-[12px] font-black text-[#8a909b]">{label}</div>
+      <div className={`mt-1 text-[18px] font-black ${tone === "danger" ? "text-[#d92d20]" : "text-[#171717]"}`}>{value}</div>
+    </div>
+  );
+}
+
+function MicIcon({ active }: { active: boolean }) {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true" className={`h-5 w-5 fill-none stroke-current stroke-[2] ${active ? "animate-pulse" : ""}`}>
+      <path d="M12 14a4 4 0 0 0 4-4V6a4 4 0 0 0-8 0v4a4 4 0 0 0 4 4Z" />
+      <path d="M5 10a7 7 0 0 0 14 0" />
+      <path d="M12 17v4" />
+      <path d="M8 21h8" />
+    </svg>
+  );
+}
+
+function buildVoiceStatus(input: { isRecording: boolean; isTranscribing: boolean; isThinking: boolean; isSpeaking: boolean }) {
+  if (input.isRecording) return "録音中";
+  if (input.isTranscribing) return "文字起こし中";
+  if (input.isThinking) return "AI応答生成中";
+  if (input.isSpeaking) return "AI顧客が発話中";
+  return "待機中";
+}
+
+function speakText(text: string, setIsSpeaking: (value: boolean) => void) {
+  if (typeof window === "undefined" || !("speechSynthesis" in window) || !text.trim()) return;
+  window.speechSynthesis.cancel();
+  const utterance = new SpeechSynthesisUtterance(text);
+  utterance.lang = "ja-JP";
+  utterance.rate = 1;
+  utterance.pitch = 1;
+  utterance.onstart = () => setIsSpeaking(true);
+  utterance.onend = () => setIsSpeaking(false);
+  utterance.onerror = () => setIsSpeaking(false);
+  window.speechSynthesis.speak(utterance);
+}
+
+function getSupportedAudioMimeType() {
+  const candidates = ["audio/webm;codecs=opus", "audio/webm", "audio/mp4", "audio/mpeg"];
+  return candidates.find((mimeType) => MediaRecorder.isTypeSupported(mimeType)) ?? "";
+}
+
+function getAudioExtension(mimeType: string) {
+  if (mimeType.includes("mp4")) return "m4a";
+  if (mimeType.includes("mpeg")) return "mp3";
+  if (mimeType.includes("wav")) return "wav";
+  return "webm";
+}
+
+function formatElapsed(seconds: number) {
+  const minutes = Math.floor(seconds / 60);
+  const remainingSeconds = seconds % 60;
+  return `${String(minutes).padStart(2, "0")}:${String(remainingSeconds).padStart(2, "0")}`;
 }
 
 function evaluateRoleplay(scenario: RoleplayScenario, messages: RoleplayMessage[]) {

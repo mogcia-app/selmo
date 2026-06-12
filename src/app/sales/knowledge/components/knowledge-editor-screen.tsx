@@ -320,7 +320,7 @@ export function KnowledgeEditorScreen({ mode, knowledgeId, audience = "sales" }:
   };
 
   return (
-    <main className="min-h-screen bg-[#f7f8fb] px-5 py-5 md:px-8">
+    <main className="overflow-x-hidden bg-transparent px-5 pb-3 pt-4 md:px-8 md:pb-4 md:pt-5">
       <form onSubmit={handleSubmit} className="mx-auto max-w-[1580px]">
         <header className="flex flex-wrap items-center justify-between gap-4">
           <div className="flex items-center gap-4">

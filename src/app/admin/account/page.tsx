@@ -184,7 +184,7 @@ export default function AdminAccountPage() {
   }
 
   return (
-    <main className="min-h-screen bg-[#f7f7f8] px-4 py-5 md:px-7 md:py-7">
+    <main className="overflow-x-hidden bg-transparent px-4 pb-3 pt-4 md:px-7 md:pb-4 md:pt-5">
       <div className="mx-auto max-w-[1180px]">
         <section className="mb-5 overflow-hidden rounded-[28px] border border-[#f0d46b] bg-[#fff7d6] px-5 py-5 shadow-[0_18px_34px_rgba(245,189,7,0.14)] md:px-7">
           <div className="flex flex-col gap-5 md:flex-row md:items-center md:justify-between">

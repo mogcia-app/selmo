@@ -2,7 +2,7 @@ import Link from "next/link";
 
 export default function AdminMeetingDetailLandingPage() {
   return (
-    <main className="mx-auto min-h-screen max-w-[1480px] bg-[#f5f5f6] px-5 py-6 md:px-8 md:py-8">
+    <main className="mx-auto max-w-[1480px] overflow-x-hidden bg-transparent px-5 pb-3 pt-4 md:px-8 md:pb-4 md:pt-5">
       <header className="mb-6">
         <p className="text-[12px] font-bold uppercase tracking-[0.16em] text-[#8a6500]">MEETING DETAIL</p>
         <h1 className="mt-1 text-[32px] font-black tracking-[-0.04em] text-[#171717] md:text-[34px]">

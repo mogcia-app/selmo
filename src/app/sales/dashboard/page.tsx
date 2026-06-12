@@ -158,7 +158,7 @@ export default function SalesDashboardPage() {
   }
 
   return (
-    <main className="min-h-screen bg-[#f5f5f6] px-4 py-5 md:px-7 md:py-7">
+    <main className="overflow-x-hidden bg-transparent px-4 pb-3 pt-4 md:px-7 md:pb-4 md:pt-5">
       <div className="mx-auto max-w-[1440px] space-y-5">
         <section className="rounded-[24px] border border-[#e7e9ef] bg-white px-5 py-6 shadow-[0_14px_34px_rgba(17,24,39,0.06)] md:px-8">
           <div className="flex flex-col gap-5 xl:flex-row xl:items-center xl:justify-between">

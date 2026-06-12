@@ -72,7 +72,7 @@ export function MeetingCalendarScreen({ variant }: { variant: CalendarVariant })
   const domainLabel = domainFilter === "teleapo" ? "架電" : domainFilter === "meeting" ? "商談" : "すべて";
 
   return (
-    <main className="overflow-x-hidden bg-transparent px-5 pb-6 pt-5 md:px-8 md:pb-8 md:pt-6">
+    <main className="overflow-x-hidden bg-transparent px-5 pb-3 pt-4 md:px-8 md:pb-4 md:pt-5">
       <div className="mx-auto max-w-[1380px] space-y-4">
         <section className="rounded-[24px] border border-[#e2e6ee] bg-white px-5 py-5 shadow-[0_8px_24px_rgba(17,24,39,0.04)] md:px-6">
           <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">

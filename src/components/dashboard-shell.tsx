@@ -97,18 +97,9 @@ export function DashboardShell({ children, variant }: DashboardShellProps) {
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
   const [isNotificationOpen, setIsNotificationOpen] = useState(false);
   const sections = variant === "admin" ? adminSections : filterSalesSections(salesSections, profile);
-  const defaultUploadCategory = profile && !canUseSalesDomain(profile, "meeting") && canUseSalesDomain(profile, "teleapo") ? "teleapo" : "meeting";
   const initials = (profile?.name ?? profile?.email ?? "S").slice(0, 1);
   const unreadNotificationCount = notifications.filter((notification) => !notification.read).length;
-  const currentLabel =
-    pathname === "/admin/account"
-      ? "アカウント設定"
-      : pathname === "/sales/account"
-        ? "アカウント設定"
-        :
-    sections
-      .flatMap((section) => section.items)
-      .find((item) => isNavItemActive(pathname, item.href, searchParams))?.label ?? "ダッシュボード";
+  const currentLabel = resolveCurrentLabel(pathname, searchParams, sections);
   const nowLabel = new Intl.DateTimeFormat("ja-JP", {
     year: "numeric",
     month: "2-digit",
@@ -298,12 +289,6 @@ export function DashboardShell({ children, variant }: DashboardShellProps) {
                     </div>
                   ) : null}
                 </div>
-                <Link
-                  href={`/meetings/upload?category=${defaultUploadCategory}`}
-                  className="rounded-[14px] border border-[#171717] bg-[#171717] px-4 py-2.5 text-[13px] font-black text-white transition hover:bg-[#343b48]"
-                >
-                  ＋ 打ち合わせアップロード
-                </Link>
               </div>
             </header>
 
@@ -410,21 +395,12 @@ export function DashboardShell({ children, variant }: DashboardShellProps) {
             <span className="rounded-full border border-[#e8ebf0] bg-[#f7f7fa] px-3 py-2 text-[12px] font-semibold text-[#7d8490]">
               {nowLabel}
             </span>
-            {variant === "admin" ? (
-              <button
-                type="button"
-                className="rounded-[14px] border border-[#e8ebf0] bg-white px-4 py-2.5 text-[13px] font-semibold text-[#343b48] transition hover:border-[#f0c655] hover:bg-[#fffdf7]"
-              >
-                CSV出力
-              </button>
-            ) : (
-              <Link
-                href={`/meetings/upload?category=${defaultUploadCategory}`}
-                className="rounded-[14px] border border-[#171717] bg-[#171717] px-4 py-2.5 text-[13px] font-black text-white transition hover:bg-[#343b48]"
-              >
-                ＋ 打ち合わせアップロード
-              </Link>
-            )}
+            <button
+              type="button"
+              className="rounded-[14px] border border-[#e8ebf0] bg-white px-4 py-2.5 text-[13px] font-semibold text-[#343b48] transition hover:border-[#f0c655] hover:bg-[#fffdf7]"
+            >
+              CSV出力
+            </button>
           </div>
         </header>
 
@@ -434,6 +410,33 @@ export function DashboardShell({ children, variant }: DashboardShellProps) {
       )}
     </div>
   );
+}
+
+function resolveCurrentLabel(
+  pathname: string,
+  searchParams: { get: (name: string) => string | null },
+  sections: Array<{ label: string; items: NavItem[] }>,
+) {
+  if (pathname === "/admin/account" || pathname === "/sales/account") return "アカウント設定";
+  if (pathname === "/meetings/upload") return getCategoryLabel(searchParams, "アップロード");
+  if (pathname === "/meetings") return getCategoryLabel(searchParams, "一覧");
+  if (pathname.match(/^\/meetings\/[^/]+\/summary$/)) return "AIサマリー";
+  if (pathname.match(/^\/meetings\/[^/]+$/)) return "文字起こし";
+  if (pathname.match(/^\/admin\/meetings\/[^/]+$/)) return "レビュー詳細";
+  if (pathname.match(/^\/admin\/knowledge\/[^/]+$/)) return "ナレッジ詳細";
+  if (pathname.match(/^\/admin\/members\/[^/]+$/)) return "メンバー詳細";
+  if (pathname.match(/^\/sales\/knowledge\/products\/[^/]+$/)) return "商材ナレッジ";
+  if (pathname.match(/^\/sales\/knowledge\/categories\/[^/]+\/knowledge\/[^/]+\/edit$/)) return "ナレッジ編集";
+  if (pathname.match(/^\/sales\/knowledge\/categories\/[^/]+\/knowledge\/[^/]+$/)) return "ナレッジ詳細";
+  if (pathname.match(/^\/sales\/knowledge\/categories\/[^/]+$/)) return "カテゴリナレッジ";
+
+  return sections
+    .flatMap((section) => section.items)
+    .find((item) => isNavItemActive(pathname, item.href, searchParams))?.label ?? "ダッシュボード";
+}
+
+function getCategoryLabel(searchParams: { get: (name: string) => string | null }, suffix: string) {
+  return searchParams.get("category") === "teleapo" ? `架電${suffix}` : `商談${suffix}`;
 }
 
 function isNavItemActive(pathname: string, href: string, searchParams: { get: (name: string) => string | null }) {

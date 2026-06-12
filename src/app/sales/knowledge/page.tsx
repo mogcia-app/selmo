@@ -119,7 +119,7 @@ export default function SalesKnowledgePage() {
   };
 
   return (
-    <main className="overflow-x-hidden bg-transparent px-5 pb-6 pt-4 md:px-8 md:pb-8">
+    <main className="overflow-x-hidden bg-transparent px-5 pb-3 pt-4 md:px-8 md:pb-4">
       <div className="mx-auto max-w-[1500px]">
         <header className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_440px]">
           <section className="rounded-[28px] border border-[#eceef4] bg-white p-5 shadow-[0_12px_34px_rgba(17,24,39,0.04)] md:p-7">

@@ -119,7 +119,7 @@ export default function MeetingsPage() {
   }, [category, dateFilter, meetings, productFilter, search, statusFilter]);
 
   return (
-    <main className="overflow-x-hidden bg-transparent px-5 pb-6 pt-5 md:px-8 md:pb-8 md:pt-6">
+    <main className="overflow-x-hidden bg-transparent px-5 pb-3 pt-4 md:px-8 md:pb-4 md:pt-5">
       <section className="mb-4 flex flex-col gap-5 xl:flex-row xl:items-start xl:justify-between">
         <div>
           <h1 className="text-[34px] font-bold tracking-[-0.04em] text-[#171717]">

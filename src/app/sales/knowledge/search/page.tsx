@@ -177,7 +177,7 @@ export default function SalesKnowledgeSearchPage() {
   };
 
   return (
-    <main className="mx-auto min-h-screen max-w-[1500px] px-6 py-8 md:px-10">
+    <main className="mx-auto max-w-[1500px] overflow-x-hidden bg-transparent px-5 pb-3 pt-4 md:px-8 md:pb-4 md:pt-5">
       <section className="rounded-[24px] border border-[#eceef4] bg-white px-4 py-4 shadow-[0_8px_24px_rgba(17,24,39,0.04)] sm:px-5">
         <div className="grid items-center gap-4 lg:grid-cols-[140px_minmax(0,1fr)_auto]">
           <Link

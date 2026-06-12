@@ -63,8 +63,8 @@ export default function SalesKnowledgeCategoryPage() {
   );
 
   return (
-    <main className="min-h-screen overflow-x-hidden bg-[#fbfbfc]">
-      <div className="min-w-0 px-6 py-8 md:px-10">
+    <main className="overflow-x-hidden bg-transparent">
+      <div className="min-w-0 px-5 pb-3 pt-4 md:px-8 md:pb-4 md:pt-5">
         <div className="mx-auto max-w-[1180px] min-w-0">
           <Link
             href="/sales/knowledge"

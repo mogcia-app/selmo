@@ -599,7 +599,7 @@ export function MeetingDetailScreen({
 
   if (isLoading) {
     return (
-      <main className="min-h-screen bg-[#f7f7f8] px-5 py-6 md:px-8 md:py-7">
+      <main className="overflow-x-hidden bg-transparent px-5 pb-3 pt-4 md:px-8 md:pb-4 md:pt-5">
         <div className="rounded-[22px] border border-[#eceef4] bg-white p-8 text-[14px] text-[#7a808c] shadow-[0_10px_28px_rgba(17,24,39,0.05)]">
           打ち合わせ詳細を読み込み中です。
         </div>
@@ -609,7 +609,7 @@ export function MeetingDetailScreen({
 
   if (!meeting) {
     return (
-      <main className="min-h-screen bg-[#f7f7f8] px-5 py-6 md:px-8 md:py-7">
+      <main className="overflow-x-hidden bg-transparent px-5 pb-3 pt-4 md:px-8 md:pb-4 md:pt-5">
         <div className="rounded-[22px] border border-[#ffd8cc] bg-[#fff4ef] p-8 text-[14px] text-[#cf4b39] shadow-[0_10px_28px_rgba(17,24,39,0.05)]">
           打ち合わせデータが見つかりませんでした。
         </div>
@@ -619,7 +619,7 @@ export function MeetingDetailScreen({
 
   if (!canUseSalesDomain(profile, meeting.salesDomain)) {
     return (
-      <main className="min-h-screen bg-[#f7f7f8] px-5 py-6 md:px-8 md:py-7">
+      <main className="overflow-x-hidden bg-transparent px-5 pb-3 pt-4 md:px-8 md:pb-4 md:pt-5">
         <div className="rounded-[22px] border border-[#ffd8cc] bg-[#fff4ef] p-8 text-[14px] text-[#cf4b39] shadow-[0_10px_28px_rgba(17,24,39,0.05)]">
           {meeting.salesDomain === "teleapo" ? "この架電データを閲覧する権限がありません。" : "この商談データを閲覧する権限がありません。"}
         </div>
@@ -640,7 +640,7 @@ export function MeetingDetailScreen({
   };
 
   return (
-    <main className="min-h-screen bg-[#f5f6f8] px-5 py-6 md:px-8 md:py-8">
+    <main className="overflow-x-hidden bg-transparent px-5 pb-3 pt-4 md:px-8 md:pb-4 md:pt-5">
       <div className="mx-auto max-w-[1540px]">
         {errorMessage ? (
           <div className="mb-5">

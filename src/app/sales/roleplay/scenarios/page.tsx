@@ -80,7 +80,7 @@ export default function SalesRoleplayScenariosPage() {
   );
 
   return (
-    <main className="overflow-x-hidden bg-transparent px-5 pb-6 pt-5 md:px-8 md:pb-8 md:pt-6">
+    <main className="overflow-x-hidden bg-transparent px-5 pb-3 pt-4 md:px-8 md:pb-4 md:pt-5">
       <div className="mx-auto max-w-[1380px]">
         <RoleplayHeader activeStep="scenario" />
 
@@ -90,8 +90,8 @@ export default function SalesRoleplayScenariosPage() {
           </div>
         ) : null}
 
-        <section className="mt-4 grid gap-4 xl:grid-cols-[minmax(0,1fr)_380px]">
-          <article className="rounded-[24px] border border-[#e2e6ee] bg-white px-6 py-7 shadow-[0_8px_24px_rgba(17,24,39,0.04)]">
+        <section className="mt-3 grid gap-4 xl:grid-cols-[minmax(0,1fr)_380px]">
+          <article className="rounded-[24px] border border-[#e2e6ee] bg-white px-6 py-6 shadow-[0_8px_24px_rgba(17,24,39,0.04)]">
             <div className="flex flex-wrap items-end justify-between gap-4">
               <div>
                 <p className="text-[12px] font-bold text-[#8a6500]">SCENARIOS</p>
@@ -171,7 +171,7 @@ export default function SalesRoleplayScenariosPage() {
                 ))}
               </div>
             ) : (
-              <div className="mt-6 rounded-[18px] border border-dashed border-[#dfe4ec] bg-[#fcfcfd] px-5 py-12 text-center">
+              <div className="mt-5 rounded-[18px] border border-dashed border-[#dfe4ec] bg-[#fcfcfd] px-5 py-10 text-center">
                 <span className="mx-auto inline-flex h-12 w-12 items-center justify-center rounded-[14px] bg-white text-[#8f96a3] shadow-[0_6px_14px_rgba(17,24,39,0.04)]">
                   <ScenarioIcon />
                 </span>
@@ -183,7 +183,7 @@ export default function SalesRoleplayScenariosPage() {
             )}
           </article>
 
-          <aside className="rounded-[24px] border border-[#e2e6ee] bg-white px-5 py-6 shadow-[0_8px_24px_rgba(17,24,39,0.04)]">
+          <aside className="rounded-[24px] border border-[#e2e6ee] bg-white px-5 py-5 shadow-[0_8px_24px_rgba(17,24,39,0.04)]">
             <h2 className="text-[18px] font-black text-[#171717]">選択中のAI顧客</h2>
             {activeScenario ? (
               <div className="mt-5 space-y-4">

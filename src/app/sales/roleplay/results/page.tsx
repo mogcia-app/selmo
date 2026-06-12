@@ -30,7 +30,7 @@ export default function SalesRoleplayResultsPage() {
   }, [companyId, isAdmin, userId]);
 
   return (
-    <main className="overflow-x-hidden bg-transparent px-5 pb-6 pt-5 md:px-8 md:pb-8 md:pt-6">
+    <main className="overflow-x-hidden bg-transparent px-5 pb-3 pt-4 md:px-8 md:pb-4 md:pt-5">
       <div className="mx-auto max-w-[1380px]">
         <RoleplayHeader activeStep="results" />
 
@@ -40,13 +40,13 @@ export default function SalesRoleplayResultsPage() {
           </div>
         ) : null}
 
-        <section className="mt-4 grid gap-4 lg:grid-cols-3">
+        <section className="mt-3 grid gap-4 lg:grid-cols-3">
           <SummaryCard label="練習回数" value={`${results.length}回`} />
           <SummaryCard label="平均スコア" value={results.length > 0 ? `${averageScore}点` : "-"} />
           <SummaryCard label="最新実施日" value={formatDate(results[0]?.createdAt ?? null)} />
         </section>
 
-        <section className="mt-4 rounded-[24px] border border-[#e2e6ee] bg-white px-6 py-7 shadow-[0_8px_24px_rgba(17,24,39,0.04)]">
+        <section className="mt-3 rounded-[24px] border border-[#e2e6ee] bg-white px-6 py-6 shadow-[0_8px_24px_rgba(17,24,39,0.04)]">
           <div className="flex flex-wrap items-end justify-between gap-4">
             <div>
               <p className="text-[12px] font-bold text-[#8a6500]">RESULTS</p>
@@ -67,7 +67,7 @@ export default function SalesRoleplayResultsPage() {
               ))}
             </div>
           ) : (
-            <div className="mt-6 rounded-[18px] border border-dashed border-[#dfe4ec] bg-[#fcfcfd] px-5 py-12 text-center">
+            <div className="mt-5 rounded-[18px] border border-dashed border-[#dfe4ec] bg-[#fcfcfd] px-5 py-10 text-center">
               <span className="mx-auto inline-flex h-14 w-14 items-center justify-center rounded-[16px] bg-[#fffdf7] text-[#9c7600] shadow-[0_6px_14px_rgba(17,24,39,0.04)]">
                 <ScoreIcon />
               </span>

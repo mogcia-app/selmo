@@ -51,7 +51,7 @@ export default function SalesKnowledgeDetailPage() {
   };
 
   return (
-    <main className="min-h-screen bg-[#fbfbfc] px-6 py-8 md:px-10">
+    <main className="overflow-x-hidden bg-transparent px-5 pb-3 pt-4 md:px-8 md:pb-4 md:pt-5">
       <div className="mx-auto max-w-[900px]">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <Link

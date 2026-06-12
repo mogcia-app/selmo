@@ -265,7 +265,7 @@ export function calcWinRate(meetings: MeetingRecord[]) {
 }
 
 export function PageShell({ children }: { children: React.ReactNode }) {
-  return <main className="min-h-screen bg-[#f5f5f6] px-5 py-6 md:px-8 md:py-8">{children}</main>;
+  return <main className="overflow-x-hidden bg-transparent px-5 pb-3 pt-4 md:px-8 md:pb-4 md:pt-5">{children}</main>;
 }
 
 export function PageHeader({
