@@ -20,6 +20,7 @@ type StructuredPaste = {
   pricing?: string;
   competitors?: string[];
   commonObjections?: string[];
+  faq?: string[];
   successTalk?: string[];
   ngTalk?: string[];
   sourceSummary?: string;
@@ -85,6 +86,7 @@ async function structureText(kind: StructureKind, text: string): Promise<Structu
               pricing: { type: "string" },
               competitors: { type: "array", items: { type: "string" } },
               commonObjections: { type: "array", items: { type: "string" } },
+              faq: { type: "array", items: { type: "string" } },
               successTalk: { type: "array", items: { type: "string" } },
               ngTalk: { type: "array", items: { type: "string" } },
               sourceSummary: { type: "string" },
@@ -105,6 +107,7 @@ async function structureText(kind: StructureKind, text: string): Promise<Structu
               "pricing",
               "competitors",
               "commonObjections",
+              "faq",
               "successTalk",
               "ngTalk",
               "sourceSummary",
@@ -129,7 +132,7 @@ async function structureText(kind: StructureKind, text: string): Promise<Structu
             `分類対象: ${kind === "manual" ? "営業マニュアル" : "商材情報"}`,
             kind === "manual"
               ? "営業マニュアルの場合は title/content/criteria/requiredQuestions/scoringRules/objectionHandling/closingRules を重点的に埋めてください。商材用フィールドは空で構いません。"
-              : "商材情報の場合は name/description/targetCustomer/painPoints/valueProposition/pricing/competitors/commonObjections/successTalk/ngTalk/sourceSummary を重点的に埋めてください。マニュアル用フィールドは空で構いません。",
+              : "商材情報の場合は name/description/targetCustomer/painPoints/valueProposition/pricing/competitors/commonObjections/faq/successTalk/ngTalk/sourceSummary を重点的に埋めてください。FAQは質問と回答が分かる短い1行に整理してください。マニュアル用フィールドは空で構いません。",
             "貼り付け本文:",
             text.slice(0, 16000),
           ].join("\n\n"),
@@ -168,6 +171,7 @@ function normalizeStructuredPaste(value: StructuredPaste): StructuredPaste {
     pricing: readString(value.pricing),
     competitors: readStringArray(value.competitors),
     commonObjections: readStringArray(value.commonObjections),
+    faq: readStringArray(value.faq),
     successTalk: readStringArray(value.successTalk),
     ngTalk: readStringArray(value.ngTalk),
     sourceSummary: readString(value.sourceSummary),

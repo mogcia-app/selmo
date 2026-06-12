@@ -69,6 +69,7 @@ export type KnowledgeProduct = {
   pricing: string;
   competitors: string[];
   commonObjections: string[];
+  faq: string[];
   successTalk: string[];
   ngTalk: string[];
   sourceUrl: string;
@@ -151,6 +152,7 @@ export type KnowledgeProductAnalysisInput = {
   pricing?: string;
   competitors?: string[];
   commonObjections?: string[];
+  faq?: string[];
   successTalk?: string[];
   ngTalk?: string[];
   sourceUrl?: string;
@@ -379,6 +381,7 @@ export async function createKnowledgeProduct(input: { name: string; logoUrl?: st
     pricing: input.pricing ?? "",
     competitors: input.competitors ?? [],
     commonObjections: input.commonObjections ?? [],
+    faq: input.faq ?? [],
     successTalk: input.successTalk ?? [],
     ngTalk: input.ngTalk ?? [],
     sourceUrl: input.sourceUrl ?? "",
@@ -410,6 +413,7 @@ export async function updateKnowledgeProduct(input: { id: string; name: string; 
       pricing: input.pricing ?? "",
       competitors: input.competitors ?? [],
       commonObjections: input.commonObjections ?? [],
+      faq: input.faq ?? [],
       successTalk: input.successTalk ?? [],
       ngTalk: input.ngTalk ?? [],
       sourceUrl: input.sourceUrl ?? "",
@@ -695,6 +699,7 @@ function mapKnowledgeProduct(snapshot: QueryDocumentSnapshot<DocumentData>): Kno
     pricing: readString(data.pricing),
     competitors: readStringArray(data.competitors),
     commonObjections: readStringArray(data.commonObjections),
+    faq: readStringArray(data.faq),
     successTalk: readStringArray(data.successTalk),
     ngTalk: readStringArray(data.ngTalk),
     sourceUrl: readString(data.sourceUrl),

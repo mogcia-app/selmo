@@ -12,6 +12,7 @@ export type AnalysisContext = {
     pricing: string;
     competitors: string[];
     commonObjections: string[];
+    faq: string[];
     successTalk: string[];
     ngTalk: string[];
     sourceSummary: string;
@@ -67,6 +68,7 @@ export function buildAnalysisContextPrompt(context: AnalysisContext) {
         `料金: ${context.product.pricing}`,
         `競合: ${context.product.competitors.join(" / ")}`,
         `よくある反論: ${context.product.commonObjections.join(" / ")}`,
+        `FAQ: ${context.product.faq.join(" / ")}`,
         `成功トーク: ${context.product.successTalk.join(" / ")}`,
         `NGトーク: ${context.product.ngTalk.join(" / ")}`,
         `URL解析メモ: ${context.product.sourceSummary}`,
@@ -102,6 +104,7 @@ function mapProduct(data: DocumentData): NonNullable<AnalysisContext["product"]>
     pricing: readString(data.pricing),
     competitors: readStringArray(data.competitors),
     commonObjections: readStringArray(data.commonObjections),
+    faq: readStringArray(data.faq),
     successTalk: readStringArray(data.successTalk),
     ngTalk: readStringArray(data.ngTalk),
     sourceSummary: readString(data.sourceSummary),

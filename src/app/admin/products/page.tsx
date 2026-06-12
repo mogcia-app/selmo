@@ -62,10 +62,13 @@ export default function AdminProductsPage() {
                     </div>
 
                     <div className="mt-4 grid gap-3 md:grid-cols-2">
-                      <Info label="商品概要" value={findTab(linkedKnowledge, ["概要", "商品概要"])} />
-                      <Info label="料金" value={findTab(linkedKnowledge, ["料金", "価格"])} />
+                      <Info label="商品概要" value={formatTextSummary(product.description)} />
+                      <Info label="料金" value={formatTextSummary(product.pricing)} />
+                      <Info label="顧客課題" value={formatListSummary(product.painPoints)} />
+                      <Info label="価値訴求" value={formatTextSummary(product.valueProposition)} />
+                      <Info label="競合" value={formatListSummary(product.competitors)} />
                       <Info label="よくある反論" value={formatListSummary(product.commonObjections)} />
-                      <Info label="FAQ" value={findTab(linkedKnowledge, ["Q&A", "FAQ"])} />
+                      <Info label="FAQ" value={formatListSummary(product.faq)} />
                     </div>
 
                     <div className="mt-4 flex flex-wrap gap-2 text-[12px] font-bold text-[#596273]">
@@ -114,6 +117,7 @@ function ProductDialog({
   const [pricing, setPricing] = useState(product?.pricing ?? "");
   const [competitors, setCompetitors] = useState((product?.competitors ?? []).join("\n"));
   const [commonObjections, setCommonObjections] = useState((product?.commonObjections ?? []).join("\n"));
+  const [faq, setFaq] = useState((product?.faq ?? []).join("\n"));
   const [successTalk, setSuccessTalk] = useState((product?.successTalk ?? []).join("\n"));
   const [ngTalk, setNgTalk] = useState((product?.ngTalk ?? []).join("\n"));
   const [sourceUrl, setSourceUrl] = useState(product?.sourceUrl ?? "");
@@ -142,6 +146,7 @@ function ProductDialog({
       setPricing((current) => structured.pricing || current);
       setCompetitors(joinLines(structured.competitors) || competitors);
       setCommonObjections(joinLines(structured.commonObjections) || commonObjections);
+      setFaq(joinLines(structured.faq) || faq);
       setSuccessTalk(joinLines(structured.successTalk) || successTalk);
       setNgTalk(joinLines(structured.ngTalk) || ngTalk);
       setSourceSummary((current) => structured.sourceSummary || current);
@@ -181,6 +186,7 @@ function ProductDialog({
         pricing: pricing.trim(),
         competitors: splitLines(competitors),
         commonObjections: splitLines(commonObjections),
+        faq: splitLines(faq),
         successTalk: splitLines(successTalk),
         ngTalk: splitLines(ngTalk),
         sourceUrl: sourceUrl.trim(),
@@ -280,10 +286,13 @@ function ProductDialog({
         <Field label="よくある反論">
           <textarea value={commonObjections} onChange={(event) => setCommonObjections(event.target.value)} className={textareaClassName} placeholder="1行に1つ" />
         </Field>
+        <Field label="FAQ">
+          <textarea value={faq} onChange={(event) => setFaq(event.target.value)} className={textareaClassName} placeholder="1行に1つ" />
+        </Field>
         <Field label="成功トーク">
           <textarea value={successTalk} onChange={(event) => setSuccessTalk(event.target.value)} className={textareaClassName} placeholder="1行に1つ" />
         </Field>
-        <Field label="NGトーク" className="md:col-span-2">
+        <Field label="NGトーク">
           <textarea value={ngTalk} onChange={(event) => setNgTalk(event.target.value)} className={textareaClassName} placeholder="1行に1つ" />
         </Field>
         </div>
@@ -324,9 +333,10 @@ function Field({ label, className = "", children }: { label: string; className?:
   );
 }
 
-function findTab(items: Array<{ tabTitle: string; title: string }>, candidates: string[]) {
-  const item = items.find((candidate) => candidates.includes(candidate.tabTitle));
-  return item?.title ?? "未登録";
+function formatTextSummary(value: string) {
+  const normalized = value.trim();
+  if (!normalized) return "未登録";
+  return normalized.length > 80 ? `${normalized.slice(0, 80)}...` : normalized;
 }
 
 function formatListSummary(items: string[]) {
@@ -372,6 +382,7 @@ async function structureProductPaste(text: string) {
       pricing?: string;
       competitors?: string[];
       commonObjections?: string[];
+      faq?: string[];
       successTalk?: string[];
       ngTalk?: string[];
       sourceSummary?: string;
