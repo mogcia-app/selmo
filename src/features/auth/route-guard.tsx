@@ -3,7 +3,7 @@
 import Image from "next/image";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 
 import { useAuth } from "@/features/auth/auth-provider";
 import { getRoleHomePath } from "@/features/auth/role-routing";
@@ -17,24 +17,63 @@ type RouteGuardProps = {
 export function RouteGuard({ allowedRoles, children }: RouteGuardProps) {
   const router = useRouter();
   const pathname = usePathname();
-  const { isAuthenticated, isFirebaseReady, isLoading, profile, missingEnvKeys } = useAuth();
+  const { isAuthenticated, isFirebaseReady, isLoading, profile, missingEnvKeys, sessionExpiresAt, signOut } = useAuth();
+  const [isAuthSettling, setIsAuthSettling] = useState(true);
 
   useEffect(() => {
-    if (isLoading) {
+    if (isLoading || isAuthenticated) {
+      setIsAuthSettling(false);
+      return;
+    }
+
+    setIsAuthSettling(true);
+    const timeoutId = window.setTimeout(() => {
+      setIsAuthSettling(false);
+    }, 900);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [isAuthenticated, isLoading, pathname]);
+
+  useEffect(() => {
+    if (!isAuthenticated || !sessionExpiresAt) {
+      return;
+    }
+
+    const redirectToLogin = () => {
+      const loginPath = pathname.startsWith("/admin") ? "/admin/login" : "/login";
+      router.replace(`${loginPath}?reason=session-expired`);
+    };
+
+    const remainingMs = sessionExpiresAt - Date.now();
+    if (remainingMs <= 0) {
+      void signOut().finally(redirectToLogin);
+      return;
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      void signOut().finally(redirectToLogin);
+    }, remainingMs);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [isAuthenticated, pathname, router, sessionExpiresAt, signOut]);
+
+  useEffect(() => {
+    if (isLoading || isAuthSettling) {
       return;
     }
 
     if (!isAuthenticated) {
-      router.replace(`/login?next=${encodeURIComponent(pathname)}`);
+      const loginPath = pathname.startsWith("/admin") ? "/admin/login" : "/login";
+      router.replace(`${loginPath}?next=${encodeURIComponent(pathname)}`);
       return;
     }
 
     if (allowedRoles && profile && !allowedRoles.includes(profile.role)) {
       router.replace(getRoleHomePath(profile.role));
     }
-  }, [allowedRoles, isAuthenticated, isLoading, pathname, profile, router]);
+  }, [allowedRoles, isAuthenticated, isAuthSettling, isLoading, pathname, profile, router]);
 
-  if (isLoading) {
+  if (isLoading || (!isAuthenticated && isAuthSettling)) {
     return <AuthLoadingScreen />;
   }
 
@@ -48,7 +87,7 @@ export function RouteGuard({ allowedRoles, children }: RouteGuardProps) {
   }
 
   if (!isAuthenticated) {
-    return <GuardMessage title="ログインが必要です" body="ログイン後にこの画面へ移動できます。" />;
+    return <AuthLoadingScreen />;
   }
 
   if (allowedRoles && profile && !allowedRoles.includes(profile.role)) {

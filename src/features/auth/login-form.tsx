@@ -47,10 +47,12 @@ export function LoginForm({
     try {
       const nextProfile = await signIn(email, password);
       if (!nextProfile) {
+        await waitForAuthStateFlush();
         router.replace(isAdmin ? "/admin/dashboard" : "/sales/dashboard");
         return;
       }
 
+      await waitForAuthStateFlush();
       router.replace(resolveRoleSafePath(nextPath, nextProfile.role));
     } catch (error) {
       if (error instanceof FirebaseError) {
@@ -174,6 +176,12 @@ export function LoginForm({
       </div>
     </form>
   );
+}
+
+function waitForAuthStateFlush() {
+  return new Promise<void>((resolve) => {
+    window.requestAnimationFrame(() => resolve());
+  });
 }
 
 function EyeIcon({ open }: { open: boolean }) {

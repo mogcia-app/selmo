@@ -6,6 +6,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { useAuth } from "@/features/auth/auth-provider";
+import { firebaseAuth } from "@/lib/firebase/client";
 import {
   subscribeToCalendarEvents,
   type CalendarEvent,
@@ -120,10 +121,6 @@ export default function MeetingUploadPage() {
     () => availableCalendarEvents.find((event) => event.id === selectedCalendarEventId) ?? null,
     [availableCalendarEvents, selectedCalendarEventId],
   );
-  const monthlyUploadCount = useMemo(
-    () => meetings.filter((meeting) => isCurrentMonth(meeting.recordedAt)).length,
-    [meetings],
-  );
   const audioRetentionLimit = useMemo(
     () => readSharedAiQuota(profile?.monthlyTranscriptionQuota ?? 15, profile?.monthlyRoleplayQuota ?? 15),
     [profile?.monthlyRoleplayQuota, profile?.monthlyTranscriptionQuota],
@@ -227,6 +224,16 @@ export default function MeetingUploadPage() {
         onUploadProgress: setUploadProgress,
       });
 
+      if (inputMode === "audio" && selectedFile && isWavAudioFile(selectedFile)) {
+        try {
+          await convertMeetingAudioToMp3(meetingId);
+        } catch {
+          setSuccessMessage(null);
+          setErrorMessage("アップロードは完了しましたが、WAVからmp3への自動変換に失敗しました。時間を置いて再度お試しください。");
+          return;
+        }
+      }
+
       setSuccessMessage(
         inputMode === "transcript"
           ? `文字起こしテキストを保存しました。ID: ${meetingId}`
@@ -265,26 +272,6 @@ export default function MeetingUploadPage() {
       ) : null}
       {canAccessDomain ? (
       <>
-      <header className="mb-6 flex flex-col gap-5 xl:flex-row xl:items-start xl:justify-between">
-        <div>
-          <h1 className="text-[34px] font-bold tracking-[-0.04em] text-[#171717]">
-            {salesDomain === "teleapo" ? "架電ログを追加" : "商談を追加"}
-          </h1>
-          <p className="mt-2 text-[16px] text-[#7a808c]">
-            {salesDomain === "teleapo"
-              ? "音声ファイル、または既存の文字起こしテキストから架電分析を始められます。"
-              : "音声ファイル、または既存の文字起こしテキストから商談分析を始められます。"}
-          </p>
-        </div>
-
-        <div className="rounded-[18px] border border-[#eceef4] bg-white px-5 py-4 text-right shadow-[0_10px_28px_rgba(17,24,39,0.05)]">
-          <div className="text-[13px] text-[#8a909b]">今月のアップロード件数</div>
-          <div className="mt-1 text-[28px] font-bold tracking-[-0.03em] text-[#171717]">
-            {monthlyUploadCount}件
-          </div>
-        </div>
-      </header>
-
       <section className="grid gap-5 xl:grid-cols-[1.02fr_0.98fr]">
         <section className="rounded-[24px] border border-[#eceef4] bg-white p-5 shadow-[0_10px_28px_rgba(17,24,39,0.05)]">
           <div className="mb-5 grid gap-4 lg:grid-cols-[minmax(0,1fr)_320px] lg:items-center">
@@ -296,9 +283,6 @@ export default function MeetingUploadPage() {
                 <h2 className="text-[22px] font-bold tracking-[-0.03em] text-[#171717]">
                   入力方法
                 </h2>
-                <p className="mt-1 text-[13px] leading-5 text-[#7a808c]">
-                  音声アップロード、または文字起こし貼り付け
-                </p>
               </div>
             </div>
             <Segmented
@@ -329,7 +313,7 @@ export default function MeetingUploadPage() {
                   音声ファイルをアップロード
                 </div>
                 <div className="mt-2 text-[14px] leading-7 text-[#7a808c]">
-                  mp3 / wav / m4a に対応しています
+                  mp3 / m4a / wav に対応しています。wavは保存時にmp3へ自動変換されます。
                 </div>
                 <button
                   type="button"
@@ -391,9 +375,6 @@ export default function MeetingUploadPage() {
           ) : (
             <div className="rounded-[22px] border border-[#e6e8ee] bg-[#fafafa] px-5 py-5">
               <div className="text-[18px] font-bold text-[#171717]">文字起こしテキストを貼り付け</div>
-              <p className="mt-2 text-[13px] leading-6 text-[#7a808c]">
-                Zoom / Teams / Notta などで作成済みの文字起こしを貼り付けると、音声なしで商談分析に進めます。
-              </p>
               <textarea
                 value={transcriptText}
                 onChange={(event) => setTranscriptText(event.target.value)}
@@ -469,9 +450,6 @@ export default function MeetingUploadPage() {
             </div>
           ) : null}
 
-          <div className="mt-5 rounded-[18px] bg-[#fff8e7] px-5 py-4 text-[13px] leading-7 text-[#6d7482]">
-            音声だけ先に保存して、打ち合わせ情報はあとから追記できます。
-          </div>
         </section>
 
         <section className="rounded-[24px] border border-[#eceef4] bg-white p-5 shadow-[0_10px_28px_rgba(17,24,39,0.05)]">
@@ -583,15 +561,15 @@ export default function MeetingUploadPage() {
             </Field>
 
             <Field label="成約/失注ステータス" required>
-              <Segmented
-                options={[
-                  { label: "成約", value: "won" },
-                  { label: "検討中", value: "considering" },
-                  { label: "失注", value: "lost" },
-                ]}
-                active={status}
-                onChange={(value) => setStatus(value as "won" | "considering" | "lost")}
-              />
+              <select
+                className={inputClassName}
+                value={status}
+                onChange={(event) => setStatus(event.target.value as "won" | "considering" | "lost")}
+              >
+                <option value="won">成約</option>
+                <option value="considering">検討中</option>
+                <option value="lost">失注</option>
+              </select>
             </Field>
 
             <Field label="場所">
@@ -708,8 +686,9 @@ function Segmented({
   active: string;
   onChange: (value: string) => void;
 }) {
+  const gridClassName = options.length === 3 ? "grid-cols-3" : "grid-cols-2";
   return (
-    <div className="grid grid-cols-2 rounded-[16px] border border-[#e6e8ee] bg-[#f7f8fb] p-1">
+    <div className={`grid ${gridClassName} rounded-[16px] border border-[#e6e8ee] bg-[#f7f8fb] p-1`}>
       {options.map((option) => {
         const isActive = option.value === active;
         return (
@@ -759,6 +738,31 @@ function isSupportedAudioFile(file: File) {
   }
 
   return lowerName.endsWith(".mp3") || lowerName.endsWith(".wav") || lowerName.endsWith(".m4a");
+}
+
+function isWavAudioFile(file: File) {
+  const lowerName = file.name.toLowerCase();
+  const lowerType = file.type.toLowerCase();
+
+  return lowerType.includes("wav") || lowerName.endsWith(".wav") || lowerName.endsWith(".wave");
+}
+
+async function convertMeetingAudioToMp3(meetingId: string) {
+  const token = await firebaseAuth?.currentUser?.getIdToken();
+  if (!token) {
+    throw new Error("ログイン情報を確認できませんでした。");
+  }
+
+  const response = await fetch(`/api/meetings/${meetingId}/convert-audio`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  });
+
+  if (!response.ok) {
+    throw new Error("WAV音声のmp3変換に失敗しました。");
+  }
 }
 
 function formatFileSize(sizeBytes: number) {
@@ -888,15 +892,6 @@ function calculateTranscriptDurationSec(startedAt: Date, endedAtTime: string) {
 
   const durationSec = Math.round((endedAt.getTime() - startedAt.getTime()) / 1000);
   return durationSec > 0 ? durationSec : null;
-}
-
-function isCurrentMonth(date: Date | null) {
-  if (!date) {
-    return false;
-  }
-
-  const now = new Date();
-  return date.getFullYear() === now.getFullYear() && date.getMonth() === now.getMonth();
 }
 
 function readSharedAiQuota(transcriptionQuota: number | null, roleplayQuota: number | null) {

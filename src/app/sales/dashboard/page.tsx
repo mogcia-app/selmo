@@ -1,11 +1,10 @@
 "use client";
 
-import Image from "next/image";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { useAuth } from "@/features/auth/auth-provider";
+import { firebaseAuth } from "@/lib/firebase/client";
 import {
   subscribeToVisibleKnowledgeItems,
   type KnowledgeItem,
@@ -17,108 +16,156 @@ import {
   type RoleplayResult,
   type RoleplayScenario,
 } from "@/lib/firebase/roleplay";
-import type { CompanyPlan } from "@/lib/firebase/auth";
 import { canUseSalesDomain, type SalesDomain } from "@/lib/sales-domains";
 
-type OodaCycleCard = {
-  label: "Observe" | "Orient" | "Decide" | "Act";
-  title: string;
-  count: number;
-  unit: string;
-  caption: string;
-  href: string;
-  tone: "observe" | "orient" | "decide" | "act";
-};
-
-type OodaProgress = {
-  label: "Observe" | "Orient" | "Decide" | "Act";
+type SummaryMetric = {
+  label: string;
   value: string;
   caption: string;
+  tone: "yellow" | "green" | "blue" | "dark";
+};
+
+type PriorityAction = {
+  title: string;
+  reason: string;
+};
+
+type OodaCardData = {
+  label: "Observe" | "Orient" | "Decide" | "Act";
+  badge: string;
+  title: string;
+  description: string;
+  spotlight?: {
+    label: string;
+    value: string;
+    caption: string;
+  };
+  items: Array<{ label: string; value: string }>;
+  actions?: Array<{ label: string; href: string; primary?: boolean }>;
+};
+
+type AarCardData = {
+  title: string;
+  body: string;
+  point: string;
+  tone: "good" | "improve" | "reason" | "next";
+};
+
+type SkillScore = {
+  label: string;
+  score: number;
+  comment: string;
+};
+
+type GrowthMetric = {
+  label: string;
+  value: string;
+  caption: string;
+  percentage: number;
+};
+
+type CoachInsight = {
+  label: string;
+  finding: string;
+  evidence: string;
+  nextAction: string;
+  training: string;
+};
+
+type DashboardInsight = {
+  summaryMetrics: SummaryMetric[];
+  coachInsight: CoachInsight;
+  priorityActions: PriorityAction[];
+  oodaCards: OodaCardData[];
+  aarCards: AarCardData[];
+  skillScores: SkillScore[];
+  growthMetrics: GrowthMetric[];
 };
 
 export default function SalesDashboardPage() {
-  const router = useRouter();
   const { profile } = useAuth();
   const [meetings, setMeetings] = useState<MeetingRecord[]>([]);
   const [knowledgeItems, setKnowledgeItems] = useState<KnowledgeItem[]>([]);
   const [roleplayScenarios, setRoleplayScenarios] = useState<RoleplayScenario[]>([]);
   const [roleplayResults, setRoleplayResults] = useState<RoleplayResult[]>([]);
-  const [searchTerm, setSearchTerm] = useState("");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [knowledgeError, setKnowledgeError] = useState<string | null>(null);
-  const [, setIsLoading] = useState(true);
+  const [isMeetingsLoaded, setIsMeetingsLoaded] = useState(false);
+  const [isKnowledgeLoaded, setIsKnowledgeLoaded] = useState(false);
+  const [isRoleplayScenariosLoaded, setIsRoleplayScenariosLoaded] = useState(false);
+  const [isRoleplayResultsLoaded, setIsRoleplayResultsLoaded] = useState(false);
+  const [generatedActionCards, setGeneratedActionCards] = useState<OodaCardData[] | null>(null);
+  const requestedActionKeyRef = useRef<string | null>(null);
   const canUseMeeting = !profile || canUseSalesDomain(profile, "meeting");
-  const canUseTeleapo = !profile || canUseSalesDomain(profile, "teleapo");
-  const displayName = profile?.name?.trim() || profile?.email?.split("@")[0] || "営業担当";
   const activeDomain: SalesDomain = canUseMeeting ? "meeting" : "teleapo";
-  const domainCopy = activeDomain === "teleapo"
-    ? {
-        unit: "架電",
-        addLabel: "架電を追加",
-        actionTitle: "要対応架電",
-        recentTitle: "最近の架電",
-        emptyActionTitle: "要対応の架電はありません",
-        emptyRecentTitle: "最近の架電はありません",
-      }
-    : {
-        unit: "商談",
-        addLabel: "商談を追加",
-        actionTitle: "要対応商談",
-        recentTitle: "最近の商談",
-        emptyActionTitle: "要対応の商談はありません",
-        emptyRecentTitle: "最近の商談はありません",
-      };
+  const unitLabel = activeDomain === "teleapo" ? "テレアポ" : "商談";
+  const displayName = profile?.name?.trim() || profile?.email?.split("@")[0] || "営業担当";
 
   useEffect(() => {
     if (!profile?.uid || !profile.role || !profile.companyId) {
       return;
     }
 
+    setIsMeetingsLoaded(false);
+    setIsKnowledgeLoaded(false);
+    setIsRoleplayScenariosLoaded(false);
+    setIsRoleplayResultsLoaded(false);
+    setGeneratedActionCards(null);
+    requestedActionKeyRef.current = null;
+
     const unsubscribers = [
       subscribeToMeetings(
         { role: profile.role, userId: profile.uid, companyId: profile.companyId },
         (nextMeetings) => {
           setMeetings(nextMeetings.filter((meeting) => meeting.salesDomain === activeDomain));
-          setIsLoading(false);
+          setIsMeetingsLoaded(true);
+          setErrorMessage(null);
         },
-        () => {
-          setErrorMessage("商談データの読み込みに失敗しました。");
-          setIsLoading(false);
-        },
+        () => setErrorMessage(`${unitLabel}データの読み込みに失敗しました。`),
       ),
       subscribeToVisibleKnowledgeItems(
         { userId: profile.uid, companyId: profile.companyId },
         (nextItems) => {
           setKnowledgeItems(nextItems);
-          setKnowledgeError(null);
+          setIsKnowledgeLoaded(true);
         },
-        () => setKnowledgeError("ナレッジデータを取得できませんでした。"),
+        () => setErrorMessage("ナレッジデータを取得できませんでした。"),
       ),
       subscribeToRoleplayScenarios(
         profile.companyId,
-        setRoleplayScenarios,
+        (nextScenarios) => {
+          setRoleplayScenarios(nextScenarios);
+          setIsRoleplayScenariosLoaded(true);
+        },
         () => setErrorMessage("ロープレシナリオの読み込みに失敗しました。"),
       ),
       subscribeToRoleplayResults(
         { userId: profile.uid, companyId: profile.companyId, isAdmin: profile.role === "admin" },
-        setRoleplayResults,
+        (nextResults) => {
+          setRoleplayResults(nextResults);
+          setIsRoleplayResultsLoaded(true);
+        },
         () => setErrorMessage("ロープレ結果の読み込みに失敗しました。"),
       ),
     ];
 
     return () => unsubscribers.forEach((unsubscribe) => unsubscribe());
-  }, [activeDomain, profile?.companyId, profile?.role, profile?.uid]);
+  }, [activeDomain, profile?.companyId, profile?.role, profile?.uid, unitLabel]);
 
   const monthlyMeetings = useMemo(
     () => meetings.filter((meeting) => isCurrentMonth(meeting.recordedAt)),
+    [meetings],
+  );
+  const weeklyMeetings = useMemo(
+    () => meetings.filter((meeting) => meeting.recordedAt && daysSince(meeting.recordedAt) <= 7),
     [meetings],
   );
   const monthlyRoleplayResults = useMemo(
     () => roleplayResults.filter((result) => isCurrentMonth(result.createdAt)),
     [roleplayResults],
   );
-  const actionMeetings = useMemo(() => buildActionMeetings(meetings), [meetings]);
   const recentMeetings = useMemo(() => meetings.slice(0, 5), [meetings]);
+  const actionMeetings = useMemo(() => buildActionMeetings(meetings), [meetings]);
+  const latestMeeting = recentMeetings[0] ?? null;
   const recommendedScenario = useMemo(
     () => selectRecommendedScenario(
       roleplayScenarios.filter((scenario) => scenario.visibility === "all" || scenario.createdBy === profile?.uid),
@@ -126,69 +173,128 @@ export default function SalesDashboardPage() {
     ),
     [profile?.uid, roleplayResults, roleplayScenarios],
   );
-  const recommendedKnowledge = useMemo(
-    () => selectRecommendedKnowledge(knowledgeItems, actionMeetings),
-    [actionMeetings, knowledgeItems],
-  );
-  const oodaCycleCards = useMemo(
+  const insight = useMemo(
     () =>
-      buildOodaCycleCards({
+      buildDashboardInsight({
         meetings,
+        monthlyMeetings,
+        weeklyMeetings,
         actionMeetings,
+        knowledgeItems,
+        monthlyRoleplayCount: monthlyRoleplayResults.length,
         recommendedScenario,
-        salesDomain: activeDomain,
+        activeDomain,
+        unitLabel,
       }),
-    [actionMeetings, activeDomain, meetings, recommendedScenario],
+    [
+      actionMeetings,
+      activeDomain,
+      knowledgeItems,
+      meetings,
+      monthlyMeetings,
+      monthlyRoleplayResults.length,
+      recommendedScenario,
+      unitLabel,
+      weeklyMeetings,
+    ],
   );
-  const oodaProgress = useMemo(
-    () =>
-      buildOodaProgress({
-        meetings: monthlyMeetings,
-        actionMeetings,
-        roleplayCount: monthlyRoleplayResults.length,
-        knowledgeCount: knowledgeItems.length,
-      }),
-    [actionMeetings, knowledgeItems.length, monthlyMeetings, monthlyRoleplayResults.length],
-  );
+  const displayedActionCards = normalizeActionCardDescriptions(generatedActionCards ?? insight.oodaCards);
 
-  function handleKnowledgeSearch(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const query = searchTerm.trim();
-    router.push(query ? `/sales/knowledge/search?q=${encodeURIComponent(query)}` : "/sales/knowledge/search");
-  }
+  useEffect(() => {
+    const isDashboardReady =
+      isMeetingsLoaded &&
+      isKnowledgeLoaded &&
+      isRoleplayScenariosLoaded &&
+      isRoleplayResultsLoaded;
+
+    if (!profile?.uid || !profile.companyId || !isDashboardReady) {
+      return;
+    }
+
+    const requestKey = `${profile.uid}:${activeDomain}:${getTodayActionDateKey()}`;
+    if (requestedActionKeyRef.current === requestKey) {
+      return;
+    }
+
+    requestedActionKeyRef.current = requestKey;
+
+    const generateActions = async () => {
+      const token = await firebaseAuth?.currentUser?.getIdToken();
+      if (!token) {
+        return;
+      }
+
+      const response = await fetch("/api/sales/dashboard-actions", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          salesDomain: activeDomain,
+          unitLabel,
+          fallbackCards: insight.oodaCards,
+          context: buildDashboardActionContext({
+            meetings,
+            monthlyMeetings,
+            weeklyMeetings,
+            actionMeetings,
+            knowledgeItems,
+            roleplayResults,
+            roleplayScenarios,
+            recommendedScenario,
+            skillScores: insight.skillScores,
+            unitLabel,
+          }),
+        }),
+      });
+
+      if (!response.ok) {
+        return;
+      }
+
+      const payload = (await response.json()) as { cards?: OodaCardData[] };
+      if (Array.isArray(payload.cards) && payload.cards.length === 4) {
+        setGeneratedActionCards(payload.cards);
+      }
+    };
+
+    void generateActions().catch(() => {
+      requestedActionKeyRef.current = null;
+    });
+  }, [
+    actionMeetings,
+    activeDomain,
+    insight.oodaCards,
+    insight.skillScores,
+    isKnowledgeLoaded,
+    isMeetingsLoaded,
+    isRoleplayResultsLoaded,
+    isRoleplayScenariosLoaded,
+    knowledgeItems,
+    meetings,
+    monthlyMeetings,
+    profile?.companyId,
+    profile?.uid,
+    recommendedScenario,
+    roleplayResults,
+    roleplayScenarios,
+    unitLabel,
+    weeklyMeetings,
+  ]);
 
   return (
-    <main className="overflow-x-hidden bg-transparent px-4 pb-3 pt-4 md:px-7 md:pb-4 md:pt-5">
+    <main className="overflow-x-hidden bg-transparent px-4 pb-0 pt-4 md:px-7 md:pb-0 md:pt-5">
       <div className="mx-auto max-w-[1440px] space-y-5">
-        <section className="rounded-[24px] border border-[#e7e9ef] bg-white px-5 py-6 shadow-[0_14px_34px_rgba(17,24,39,0.06)] md:px-8">
-          <div className="flex flex-col gap-5 xl:flex-row xl:items-center xl:justify-between">
-            <div className="flex items-start gap-4">
-              <Image
-                src="/da.png"
-                alt="selmo"
-                width={72}
-                height={72}
-                className="mt-1 h-16 w-16 object-contain"
-                priority
-              />
-              <div className="min-w-0">
-                <div className="text-[12px] font-bold uppercase tracking-[0.18em] text-[#b48600]">
-                  AI Sales Coach
-                </div>
-                <h1 className="mt-2 text-[24px] font-bold text-[#171717] md:text-[28px]">
-                  こんにちは、{displayName}さん
-                </h1>
-                <p className="mt-2 max-w-[760px] text-[13px] leading-6 text-[#707783]">
-                  {domainCopy.unit}・ナレッジ・ロープレから、今日見るべきことと改善アクションをまとめます。
-                </p>
-              </div>
-            </div>
-
-            <div className="grid gap-2.5 sm:grid-cols-3">
-              <PrimaryLink href={`/meetings/upload?category=${activeDomain}`} label={domainCopy.addLabel} icon={<UploadIcon />} />
-              {canUseMeeting ? <PrimaryLink href="/sales/knowledge/search" label="ナレッジ検索" icon={<SearchIcon />} /> : null}
-              {canUseTeleapo ? <PrimaryLink href={`/sales/roleplay/scenarios?category=${activeDomain}`} label="ロープレ開始" icon={<RoleplayIcon />} /> : null}
-            </div>
+        <section className="rounded-[24px] border border-[#e7e9ef] bg-white px-5 py-5 shadow-[0_14px_34px_rgba(17,24,39,0.05)] md:px-7">
+          <div>
+            <p className="text-[12px] font-bold uppercase tracking-[0.18em] text-[#9c7600]">OODA × AAR Dashboard</p>
+            <h1 className="mt-2 text-[24px] font-bold text-[#171717] md:text-[30px]">
+              こんにちは、{displayName}さん
+            </h1>
+            <p className="mt-2 max-w-[780px] text-[13px] leading-6 text-[#6f7480]">
+              今月の商談・ロープレ・分析状況
+            </p>
           </div>
         </section>
 
@@ -198,340 +304,239 @@ export default function SalesDashboardPage() {
           </div>
         ) : null}
 
+        <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+          {insight.summaryMetrics.map((metric) => (
+            <SummaryCard key={metric.label} metric={metric} />
+          ))}
+        </section>
+
+        <RecentMeetingList
+          meetings={recentMeetings}
+          activeDomain={activeDomain}
+          latestMeeting={latestMeeting}
+          unitLabel={unitLabel}
+        />
+
         <section className="rounded-[24px] border border-[#e7e9ef] bg-white p-5 shadow-[0_12px_30px_rgba(17,24,39,0.05)] md:p-6">
-          <div className="flex flex-wrap items-end justify-between gap-4">
-            <div>
-              <p className="text-[12px] font-bold uppercase tracking-[0.18em] text-[#b48600]">OODA Cycle</p>
-              <h2 className="mt-1 text-[24px] font-bold text-[#171717]">OODAサイクル</h2>
-            </div>
-          </div>
-
-          <div className="mt-5 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-            {oodaCycleCards.map((card) => (
-              <OodaCycleShortcut key={card.label} card={card} />
-            ))}
-          </div>
-        </section>
-
-        <section className="grid gap-5 xl:grid-cols-[minmax(0,1.2fr)_minmax(360px,0.8fr)]">
-          <AiUsageCard
-            plan={profile?.companyPlan ?? "standard"}
-            transcriptionQuota={profile?.monthlyTranscriptionQuota ?? 15}
-            roleplayQuota={profile?.monthlyRoleplayQuota ?? 15}
-            transcriptionUsed={monthlyMeetings.length}
-            roleplayUsed={monthlyRoleplayResults.length}
+          <SectionHeading
+            eyebrow="OODA"
+            title="営業アクション"
+            body="活動状況、傾向、改善テーマ、次の対応を表示します。"
           />
-
-          <article className="rounded-[24px] border border-[#e7e9ef] bg-white p-5 shadow-[0_12px_30px_rgba(17,24,39,0.05)] md:p-6">
-            <h2 className="text-[20px] font-bold text-[#171717]">ナレッジ検索</h2>
-            <div className="mt-1 flex h-[118px] justify-center overflow-hidden">
-              <Image
-                src="/kensaku1.png"
-                alt="ナレッジ検索"
-                width={220}
-                height={180}
-                className="h-[140px] w-auto object-contain"
-              />
-            </div>
-            <form onSubmit={handleKnowledgeSearch} className="-mt-7">
-              <label className="relative block">
-                <span className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-[#96a0ad]">
-                  <SearchIcon />
-                </span>
-                <input
-                  value={searchTerm}
-                  onChange={(event) => setSearchTerm(event.target.value)}
-                  placeholder="料金、反論、競合比較など"
-                  className="w-full rounded-[16px] border border-[#e6e8ee] bg-white py-3 pl-12 pr-4 text-[14px] text-[#171717] outline-none transition placeholder:text-[#96a0ad] focus:border-[#f0c655] focus:shadow-[0_0_0_3px_rgba(255,196,0,0.14)]"
-                />
-              </label>
-              <button
-                type="submit"
-                className="mt-3 h-11 w-full rounded-[16px] bg-[#ffc400] px-4 text-[14px] font-bold text-[#171717] transition hover:bg-[#f0b400]"
-              >
-                ナレッジ検索
-              </button>
-            </form>
-            <div className="mt-4 rounded-[18px] bg-[#f7f8fb] px-4 py-4 text-[13px] leading-6 text-[#6f7480]">
-              商談前に不安な論点を入れると、該当ナレッジやAI回答に移動できます。
-            </div>
-          </article>
+          <div className="mt-5 grid gap-4 lg:grid-cols-2">
+              {displayedActionCards.map((card) => (
+                <OodaCard key={card.label} card={card} />
+              ))}
+          </div>
         </section>
 
-        <section className="grid gap-5 xl:grid-cols-[minmax(0,1.35fr)_minmax(360px,0.75fr)]">
-          <div className="space-y-5">
-            <article className="rounded-[24px] border border-[#e7e9ef] bg-white p-5 shadow-[0_12px_30px_rgba(17,24,39,0.05)]">
-              <SectionHeader title={domainCopy.actionTitle} href={`/meetings?category=${activeDomain}`} />
-              {actionMeetings.length === 0 ? (
-                <EmptyState
-                  title={domainCopy.emptyActionTitle}
-                  body="新しい商談を追加すると、AI分析状態や商談結果に応じて次回アクションを提示します。"
-                  href={`/meetings/upload?category=${activeDomain}`}
-                  action={domainCopy.addLabel}
-                />
-              ) : (
-                <div className="mt-4 space-y-3">
-                  {actionMeetings.slice(0, 5).map((meeting) => (
-                    <ActionMeetingRow key={meeting.id} meeting={meeting} />
-                  ))}
-                </div>
-              )}
-            </article>
-
-            <article className="rounded-[24px] border border-[#e7e9ef] bg-white p-5 shadow-[0_12px_30px_rgba(17,24,39,0.05)]">
-              <SectionHeader title={domainCopy.recentTitle} href={`/meetings?category=${activeDomain}`} />
-              {recentMeetings.length === 0 ? (
-                <EmptyState
-                  title={domainCopy.emptyRecentTitle}
-                  body="商談音声をアップロードすると、ここから履歴と次回アクションを確認できます。"
-                  href={`/meetings/upload?category=${activeDomain}`}
-                  action={domainCopy.addLabel}
-                />
-              ) : (
-                <div className="mt-4 divide-y divide-[#eef0f4]">
-                  {recentMeetings.map((meeting) => (
-                    <RecentMeetingRow key={meeting.id} meeting={meeting} />
-                  ))}
-                </div>
-              )}
-            </article>
-
-            <section className="rounded-[24px] border border-[#e7e9ef] bg-white p-5 shadow-[0_12px_30px_rgba(17,24,39,0.05)] md:p-6">
-              <div className="flex flex-wrap items-end justify-between gap-4">
-                <div>
-                  <p className="text-[12px] font-bold uppercase tracking-[0.18em] text-[#b48600]">Growth Log</p>
-                  <h2 className="mt-1 text-[22px] font-bold text-[#171717]">成長記録</h2>
-                </div>
-                <span className="text-[13px] font-semibold text-[#8d94a1]">スコアより、行動量を見る場所</span>
-              </div>
-
-              <div className="mt-5 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-                <GrowthCard label="商談件数" value={`${monthlyMeetings.length}件`} caption="今月アップロードされた商談" />
-                <GrowthCard label="ロープレ回数" value={`${monthlyRoleplayResults.length}回`} caption="今月保存された練習結果" />
-                <GrowthCard label="ナレッジ閲覧数" value={`${knowledgeItems.length}件`} caption="確認できるナレッジ数" />
-                <GrowthCard
-                  label="AI活用回数"
-                  value={`${monthlyMeetings.length + monthlyRoleplayResults.length}回`}
-                  caption="商談分析とロープレの合計"
-                />
-              </div>
-
-              <div className="mt-5 border-t border-[#eef0f4] pt-5">
-                <div className="flex flex-wrap items-center justify-between gap-3">
-                  <h3 className="text-[16px] font-bold text-[#171717]">今月のOODA進捗</h3>
-                  <span className="text-[12px] font-semibold text-[#9aa1ac]">行動の裏側にある確認メモ</span>
-                </div>
-                <div className="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-                  {oodaProgress.map((item) => (
-                    <OodaProgressCard key={item.label} item={item} />
-                  ))}
-                </div>
-              </div>
-            </section>
-          </div>
-
-          <aside className="space-y-5">
-            <RecommendedRoleplayCard scenario={recommendedScenario} actionMeetings={actionMeetings} />
-            <RecommendedKnowledgeCard item={recommendedKnowledge} knowledgeError={knowledgeError} />
-          </aside>
+        <section className="grid gap-5 xl:grid-cols-[minmax(0,0.95fr)_minmax(0,1.05fr)]">
+          <SkillScoreCard scores={insight.skillScores} />
+          <GrowthChartCard metrics={insight.growthMetrics} />
         </section>
       </div>
     </main>
   );
 }
 
-function OodaCycleShortcut({ card }: { card: OodaCycleCard }) {
-  const toneClass = {
-    observe: "border-[#f3d4a8] bg-[#fffaf0] text-[#9c7600]",
-    orient: "border-[#cfdcf8] bg-[#f5f8ff] text-[#4669b2]",
-    decide: "border-[#ffc9c0] bg-[#fff5f3] text-[#c4513f]",
-    act: "border-[#cfe9d7] bg-[#f2fbf5] text-[#3b8655]",
-  }[card.tone];
-
+function SummaryCard({ metric }: { metric: SummaryMetric }) {
   return (
-    <Link
-      href={card.href}
-      className="rounded-[20px] border border-[#e7e9ef] bg-white p-5 transition hover:-translate-y-0.5 hover:border-[#f0c655] hover:shadow-[0_14px_28px_rgba(17,24,39,0.08)]"
-    >
-      <div className={`inline-flex rounded-full border px-3 py-1 text-[12px] font-bold ${toneClass}`}>
-        {card.label}
-      </div>
-      <div className="mt-4 flex items-end justify-between gap-3">
-        <div>
-          <h3 className="text-[17px] font-bold text-[#171717]">{card.title}</h3>
-          <p className="mt-2 text-[13px] leading-6 text-[#68707d]">{card.caption}</p>
-        </div>
-        <div className="shrink-0 text-right">
-          <div className="text-[34px] font-bold leading-none text-[#171717]">{card.count}</div>
-          <div className="mt-1 text-[12px] font-bold text-[#8d94a1]">{card.unit}</div>
-        </div>
-      </div>
-      <div className="mt-4 text-[13px] font-bold text-[#9c7600]">開く</div>
-    </Link>
-  );
-}
-
-function AiUsageCard({
-  plan,
-  transcriptionQuota,
-  roleplayQuota,
-  transcriptionUsed,
-  roleplayUsed,
-}: {
-  plan: CompanyPlan;
-  transcriptionQuota: number | null;
-  roleplayQuota: number | null;
-  transcriptionUsed: number;
-  roleplayUsed: number;
-}) {
-  const planLabel = formatPlanLabel(plan);
-  const totalUsed = transcriptionUsed + roleplayUsed;
-  const sharedQuota = readSharedAiQuota(transcriptionQuota, roleplayQuota);
-
-  return (
-    <article className="rounded-[24px] border border-[#e7e9ef] bg-white p-5 text-[#171717] shadow-[0_12px_30px_rgba(17,24,39,0.05)] md:p-6">
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <p className="text-[12px] font-bold uppercase tracking-[0.18em] text-[#8a6500]">AI Usage</p>
-          <h2 className="mt-1 text-[26px] font-bold">今月のAI回数</h2>
-        </div>
-        <div className="inline-flex items-center gap-2 rounded-full border border-[#f0c655] bg-[#fffaf0] px-4 py-2 text-[13px] font-bold text-[#6f5500]">
-          <span className="h-2 w-2 rounded-full bg-[#ffc400]" />
-          <span>{planLabel}プラン</span>
-        </div>
-      </div>
-
-      <div className="mt-6">
-        <UsageGauge
-          used={totalUsed}
-          limit={sharedQuota}
-        />
-      </div>
-
-      <div className="mt-5 grid gap-3 md:grid-cols-2">
-        <AiUsageRatio
-          transcriptionUsed={transcriptionUsed}
-          roleplayUsed={roleplayUsed}
-        />
-        <AiChargeButton />
-      </div>
+    <article className="rounded-[22px] border border-[#e7e9ef] bg-white p-5 shadow-[0_10px_24px_rgba(17,24,39,0.04)]">
+      <p className="text-[13px] font-bold text-[#6f7480]">{metric.label}</p>
+      <div className="mt-3 text-[34px] font-bold leading-none text-[#171717]">{metric.value}</div>
+      <p className="mt-3 text-[12px] leading-5 text-[#7a808c]">{metric.caption}</p>
     </article>
   );
 }
 
-function UsageGauge({
-  used,
-  limit,
-}: {
-  used: number;
-  limit: number | null;
-}) {
-  const percentage =
-    limit === null
-      ? 100
-      : Math.min(100, Math.round((used / limit) * 100));
-
+function OodaCard({ card }: { card: OodaCardData }) {
   return (
-    <div className="mt-5">
-      <div className="flex items-end justify-between gap-4 text-[13px] font-semibold text-[#6f5500]">
-        <span>AI利用枠</span>
-        <span>{limit === null ? "要相談" : `使用 ${used}回 / 月${limit}回`}</span>
-      </div>
-      <div className="relative mt-3 pt-8">
-        <Image
-          src="/gag.png"
-          alt=""
-          width={44}
-          height={44}
-          className="absolute left-0 top-0 h-11 w-11 object-contain"
-        />
-        <div className="h-4 overflow-hidden rounded-full bg-[#e8ebf0]">
-          <div
-            className="h-full rounded-full bg-[#ffc400] transition-all"
-            style={{ width: `${percentage}%` }}
-          />
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function readSharedAiQuota(transcriptionQuota: number | null, roleplayQuota: number | null) {
-  if (transcriptionQuota === null || roleplayQuota === null) {
-    return null;
-  }
-
-  return Math.min(transcriptionQuota, roleplayQuota);
-}
-
-function formatPlanLabel(plan: CompanyPlan) {
-  if (plan === "pro") {
-    return "Pro";
-  }
-
-  if (plan === "enterprise") {
-    return "Enterprise";
-  }
-
-  return "Standard";
-}
-
-function AiUsageRatio({
-  transcriptionUsed,
-  roleplayUsed,
-}: {
-  transcriptionUsed: number;
-  roleplayUsed: number;
-}) {
-  return (
-    <div className="rounded-[16px] border border-[#f0c655] bg-white/50 px-4 py-3">
-      <div className="text-[12px] font-bold text-[#8a6500]">利用内訳</div>
-      <div className="mt-3 flex items-center justify-between gap-3 text-[12px] font-bold text-[#6f5500]">
-        <span>文字起こし {transcriptionUsed}回</span>
-        <span>ロープレ {roleplayUsed}回</span>
-      </div>
-    </div>
-  );
-}
-
-function AiChargeButton() {
-  return (
-    <Link
-      href="/sales/account"
-      className="group rounded-[16px] border border-[#f0c655] bg-[#fffdf7] px-4 py-3 text-left transition hover:border-[#d9a900] hover:bg-[#fff7d6]"
-    >
-      <div className="flex items-center justify-between gap-3">
+    <article className="flex min-h-[260px] flex-col rounded-[22px] border border-[#e7e9ef] bg-[#fcfcfd] p-5 shadow-[0_8px_20px_rgba(17,24,39,0.035)]">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>
-          <div className="text-[12px] font-bold text-[#8a6500]">チャージ</div>
-          <div className="mt-1 text-[16px] font-bold text-[#171717]">AI回数を追加</div>
+          <h3 className="text-[18px] font-bold text-[#171717]">{card.title}</h3>
+          <p className="mt-2 text-[13px] leading-6 text-[#7a808c]">{card.description}</p>
         </div>
-        <span className="flex h-9 w-9 items-center justify-center rounded-full bg-[#ffc400] text-[20px] font-bold leading-none text-[#171717] transition group-hover:bg-[#f0b400]">
-          +
+        <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-[#f0d46b] bg-[#fffaf0] text-[12px] font-black text-[#8a6500]">
+          {card.badge}
         </span>
       </div>
-    </Link>
+      {card.spotlight ? (
+        <div className="mt-5 rounded-[18px] border border-[#f0d46b] bg-[#fffaf0] px-4 py-4">
+          <div className="text-[12px] font-bold text-[#9c7600]">{card.spotlight.label}</div>
+          <div className="mt-2 text-[20px] font-black leading-7 text-[#171717]">{card.spotlight.value}</div>
+          <p className="mt-2 text-[12px] leading-5 text-[#7a808c]">{card.spotlight.caption}</p>
+        </div>
+      ) : null}
+      <div className="mt-4 grid gap-3 sm:grid-cols-2">
+        {card.items.map((item) => (
+          <div key={item.label} className="rounded-[16px] bg-white px-4 py-3 ring-1 ring-[#edf0f4]">
+            <div className="text-[12px] font-bold text-[#8d94a1]">{item.label}</div>
+            <div className="mt-1.5 text-[14px] font-bold leading-6 text-[#20242c]">{item.value}</div>
+          </div>
+        ))}
+      </div>
+      {card.actions ? (
+        <div className="mt-auto grid gap-2 pt-5 sm:grid-cols-1">
+          {card.actions.map((action) => (
+            <Link
+              key={action.label}
+              href={action.href}
+              className={
+                action.primary
+                  ? "flex h-10 items-center justify-center rounded-[14px] bg-[#171717] px-3 text-[13px] font-bold text-white"
+                  : "flex h-10 items-center justify-center rounded-[14px] border border-[#e5e8ef] bg-white px-3 text-[13px] font-bold text-[#171717]"
+              }
+            >
+              {action.label}
+            </Link>
+          ))}
+        </div>
+      ) : null}
+    </article>
   );
 }
 
-function ActionMeetingRow({ meeting }: { meeting: MeetingRecord }) {
+function normalizeActionCardDescriptions(cards: OodaCardData[]) {
+  return cards.map((card) => ({
+    ...card,
+    description: readActionCardDescription(card),
+  }));
+}
+
+function readActionCardDescription(card: OodaCardData) {
+  if (card.title === "活動状況" || card.label === "Observe") {
+    return "今週の記録数 / 分析済み / 未分析";
+  }
+
+  if (card.title === "商談の傾向" || card.label === "Orient") {
+    return "ステータス / 課題 / 頻出ワード";
+  }
+
+  if (card.title === "改善テーマ" || card.label === "Decide") {
+    return "未達項目 / 優先確認項目";
+  }
+
+  return "確認 / ロープレ / ナレッジ";
+}
+
+function SkillScoreCard({ scores }: { scores: SkillScore[] }) {
   return (
-    <Link
-      href={`/meetings/${meeting.id}`}
-      className="grid gap-3 rounded-[18px] border border-[#eef0f4] bg-[#fcfcfd] px-4 py-4 transition hover:border-[#f0c655] hover:bg-[#fffdf7] lg:grid-cols-[minmax(0,1fr)_120px_120px_170px_92px]"
-    >
-      <div className="min-w-0">
-        <div className="truncate text-[15px] font-bold text-[#20242c]">{meeting.customerName || "未設定の商談"}</div>
-        <div className="mt-1 text-[13px] text-[#7a808c]">
-          {meeting.productType || "商材未設定"} ・ {meeting.recordedAt ? formatDate(meeting.recordedAt) : "日時未設定"}
-        </div>
+    <section className="rounded-[24px] border border-[#e7e9ef] bg-white p-5 shadow-[0_12px_30px_rgba(17,24,39,0.05)] md:p-6">
+      <SectionHeading
+        eyebrow="Skill"
+        title="スキル別評価"
+        body="商談分析の評価項目をスキル別に表示します。"
+      />
+      <div className="mt-5 space-y-4">
+        {scores.map((score) => (
+          <div key={score.label}>
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <div className="text-[14px] font-bold text-[#171717]">{score.label}</div>
+                <div className="mt-1 text-[12px] text-[#7a808c]">{score.comment}</div>
+              </div>
+              <span className="text-[20px] font-bold text-[#171717]">{score.score}</span>
+            </div>
+            <div className="mt-2 h-2 overflow-hidden rounded-full bg-[#eef0f4]">
+              <div className="h-full rounded-full bg-[#ffc400]" style={{ width: `${score.score}%` }} />
+            </div>
+          </div>
+        ))}
       </div>
-      <StatusBadge value={meeting.status} />
-      <ProcessingText value={meeting.processingStatus} />
-      <div className="text-[13px] font-semibold leading-6 text-[#4d5563]">{buildNextAction(meeting)}</div>
-      <span className="inline-flex h-9 items-center justify-center rounded-[13px] border border-[#e5e8ef] bg-white px-3 text-[12px] font-bold text-[#171717]">
-        詳細
-      </span>
-    </Link>
+    </section>
+  );
+}
+
+function GrowthChartCard({ metrics }: { metrics: GrowthMetric[] }) {
+  return (
+    <section className="rounded-[24px] border border-[#e7e9ef] bg-white p-5 shadow-[0_12px_30px_rgba(17,24,39,0.05)] md:p-6">
+      <SectionHeading
+        eyebrow="Growth"
+        title="成長推移"
+        body="スコア、分析件数、ロープレ回数の推移を表示します。"
+      />
+      <div className="mt-5 grid gap-3 md:grid-cols-2">
+        {metrics.map((metric) => (
+          <article key={metric.label} className="rounded-[18px] border border-[#edf0f4] bg-[#fcfcfd] p-4">
+            <div className="flex items-end justify-between gap-3">
+              <div>
+                <div className="text-[13px] font-bold text-[#6f7480]">{metric.label}</div>
+                <div className="mt-2 text-[26px] font-bold leading-none text-[#171717]">{metric.value}</div>
+              </div>
+              <div className="text-[12px] font-bold text-[#9c7600]">{metric.caption}</div>
+            </div>
+            <div className="mt-4 h-2 overflow-hidden rounded-full bg-[#eef0f4]">
+              <div className="h-full rounded-full bg-[#ffc400]" style={{ width: `${metric.percentage}%` }} />
+            </div>
+          </article>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function RecentMeetingList({
+  meetings,
+  activeDomain,
+  latestMeeting,
+  unitLabel,
+}: {
+  meetings: MeetingRecord[];
+  activeDomain: SalesDomain;
+  latestMeeting: MeetingRecord | null;
+  unitLabel: string;
+}) {
+  return (
+    <section className="rounded-[24px] border border-[#e7e9ef] bg-white p-5 shadow-[0_12px_30px_rgba(17,24,39,0.05)] md:p-6">
+      <div className="flex flex-wrap items-end justify-between gap-4">
+        <SectionHeading
+          eyebrow="Recent"
+          title={`直近${unitLabel}一覧`}
+          body={`直近5件の${unitLabel}を表示します。`}
+        />
+        <Link href={`/meetings?category=${activeDomain}`} className="text-[13px] font-bold text-[#9c7600]">
+          すべて見る
+        </Link>
+      </div>
+
+      {meetings.length === 0 ? (
+        <div className="mt-5 rounded-[18px] border border-dashed border-[#dfe4ec] bg-[#fcfcfd] px-5 py-8 text-center">
+          <div className="text-[15px] font-bold text-[#20242c]">{unitLabel}はまだありません</div>
+          <p className="mt-2 text-[13px] leading-6 text-[#7a808c]">
+            {unitLabel}を追加すると、ここに表示されます。
+          </p>
+          <Link
+            href={`/meetings/upload?category=${activeDomain}`}
+            className="mt-4 inline-flex h-10 items-center justify-center rounded-[14px] bg-[#ffc400] px-4 text-[13px] font-bold text-[#171717]"
+          >
+            {unitLabel}を追加
+          </Link>
+        </div>
+      ) : (
+        <div className="mt-5 overflow-hidden rounded-[18px] border border-[#edf0f4]">
+          <div className="hidden grid-cols-[minmax(0,1fr)_120px_110px_100px_minmax(180px,0.7fr)_84px] gap-3 bg-[#fffaf0] px-4 py-3 text-[12px] font-bold text-[#8a6500] lg:grid">
+            <span>{unitLabel}名</span>
+            <span>日付</span>
+            <span>結果</span>
+            <span>AIスコア</span>
+            <span>主な改善ポイント</span>
+            <span>詳細</span>
+          </div>
+          <div className="divide-y divide-[#edf0f4]">
+            {meetings.map((meeting) => (
+              <RecentMeetingRow key={meeting.id} meeting={meeting} />
+            ))}
+          </div>
+        </div>
+      )}
+
+      {latestMeeting ? (
+        <p className="mt-3 text-[12px] leading-5 text-[#8d94a1]">
+          最新: {latestMeeting.customerName || "未設定"}
+        </p>
+      ) : null}
+    </section>
   );
 }
 
@@ -539,176 +544,29 @@ function RecentMeetingRow({ meeting }: { meeting: MeetingRecord }) {
   return (
     <Link
       href={`/meetings/${meeting.id}`}
-      className="grid gap-3 py-4 transition hover:bg-[#fffdf7] md:grid-cols-[minmax(0,1fr)_118px_110px_170px_82px]"
+      className="grid gap-3 px-4 py-4 transition hover:bg-[#fffdf7] lg:grid-cols-[minmax(0,1fr)_120px_110px_100px_minmax(180px,0.7fr)_84px] lg:items-center"
     >
       <div className="min-w-0">
-        <div className="truncate text-[15px] font-bold text-[#20242c]">{meeting.customerName || "未設定の商談"}</div>
-        <div className="mt-1 text-[13px] text-[#7a808c]">{meeting.recordedAt ? formatDate(meeting.recordedAt) : "日時未設定"}</div>
+        <div className="truncate text-[14px] font-bold text-[#171717]">{meeting.customerName || "未設定"}</div>
+        <div className="mt-1 text-[12px] text-[#8d94a1] lg:hidden">{meeting.recordedAt ? formatDate(meeting.recordedAt) : "日時未設定"}</div>
+      </div>
+      <div className="hidden text-[13px] font-semibold text-[#596273] lg:block">
+        {meeting.recordedAt ? formatDate(meeting.recordedAt) : "未設定"}
       </div>
       <StatusBadge value={meeting.status} />
-      <div className="text-[13px] font-bold text-[#596273]">{readMeetingAiScore(meeting)}</div>
-      <div className="text-[13px] font-semibold leading-6 text-[#4d5563]">{buildNextAction(meeting)}</div>
+      <div className="text-[13px] font-bold text-[#596273]">{formatScore(readMeetingAiScoreNumber(meeting))}</div>
+      <div className="text-[13px] font-semibold leading-6 text-[#4d5563]">{buildImprovementPoint(meeting)}</div>
       <span className="text-[13px] font-bold text-[#9c7600]">詳細</span>
     </Link>
   );
 }
 
-function RecommendedRoleplayCard({
-  scenario,
-  actionMeetings,
-}: {
-  scenario: RoleplayScenario | null;
-  actionMeetings: MeetingRecord[];
-}) {
-  if (!scenario) {
-    return (
-      <article className="rounded-[24px] border border-[#e7e9ef] bg-white p-5 shadow-[0_12px_30px_rgba(17,24,39,0.05)]">
-        <h2 className="text-[20px] font-bold text-[#171717]">推奨ロープレ</h2>
-        <EmptyState
-          title="シナリオはまだありません"
-          body="シナリオが追加されると、改善テーマに合わせて練習できます。"
-          href="/sales/roleplay/scenarios"
-          action="シナリオを見る"
-        />
-      </article>
-    );
-  }
-
+function SectionHeading({ eyebrow, title, body }: { eyebrow: string; title: string; body: string }) {
   return (
-    <article className="rounded-[24px] border border-[#e7e9ef] bg-white p-5 shadow-[0_12px_30px_rgba(17,24,39,0.05)]">
-      <h2 className="text-[20px] font-bold text-[#171717]">推奨ロープレ</h2>
-      <div className="mt-4 rounded-[18px] border border-[#f3e3a5] bg-[#fffaf0] px-4 py-4">
-        <div className="text-[16px] font-bold text-[#20242c]">{scenario.title}</div>
-        <p className="mt-2 text-[13px] leading-6 text-[#6f7480]">
-          {actionMeetings.some((meeting) => meeting.status === "lost")
-            ? "失注要因を次回商談に持ち越さないため推奨しています。"
-            : "次回商談前に説明と切り返しを整えるため推奨しています。"}
-        </p>
-        <div className="mt-3 rounded-[14px] bg-white px-3 py-2 text-[12px] font-bold text-[#8a6500]">
-          想定時間: 10分
-        </div>
-        <Link
-          href={`/sales/roleplay?scenarioId=${scenario.id}`}
-          className="mt-4 inline-flex h-11 w-full items-center justify-center rounded-[14px] bg-[#171717] px-4 text-[14px] font-semibold text-white"
-        >
-          開始する
-        </Link>
-      </div>
-    </article>
-  );
-}
-
-function RecommendedKnowledgeCard({
-  item,
-  knowledgeError,
-}: {
-  item: KnowledgeItem | null;
-  knowledgeError: string | null;
-}) {
-  return (
-    <article className="rounded-[24px] border border-[#e7e9ef] bg-white p-5 shadow-[0_12px_30px_rgba(17,24,39,0.05)]">
-      <h2 className="text-[20px] font-bold text-[#171717]">推奨ナレッジ</h2>
-      {knowledgeError ? (
-        <div className="mt-4 rounded-[18px] border border-[#f3d4a8] bg-[#fffaf0] px-4 py-4">
-          <div className="text-[14px] font-bold text-[#8a6500]">{knowledgeError}</div>
-          <Link
-            href="/sales/knowledge/search"
-            className="mt-4 inline-flex h-10 items-center justify-center rounded-[14px] border border-[#f0c655] bg-white px-4 text-[13px] font-bold text-[#171717]"
-          >
-            検索ページを開く
-          </Link>
-        </div>
-      ) : item ? (
-        <div className="mt-4 rounded-[18px] border border-[#d8e7ff] bg-[#f5f8ff] px-4 py-4">
-          <div className="text-[16px] font-bold text-[#20242c]">{item.title || "無題のナレッジ"}</div>
-          <p className="mt-2 text-[13px] leading-6 text-[#6f7480]">
-            {item.productId ? "商材に紐づく確認事項があるため推奨しています。" : "商談前の説明や反論対応を整えるため推奨しています。"}
-          </p>
-          <Link
-            href={buildKnowledgeHref(item)}
-            className="mt-4 inline-flex h-11 w-full items-center justify-center rounded-[14px] bg-[#171717] px-4 text-[14px] font-semibold text-white"
-          >
-            閲覧する
-          </Link>
-        </div>
-      ) : (
-        <EmptyState
-          title="推奨ナレッジはまだありません"
-          body="ナレッジを作成すると、商談準備に合わせて表示されます。"
-          href="/sales/knowledge/new"
-          action="ナレッジを作成"
-        />
-      )}
-    </article>
-  );
-}
-
-function GrowthCard({ label, value, caption }: { label: string; value: string; caption: string }) {
-  return (
-    <div className="rounded-[18px] border border-[#e8ebf0] bg-[#fcfcfd] px-5 py-4">
-      <div className="text-[13px] font-bold text-[#7a808c]">{label}</div>
-      <div className="mt-2 text-[28px] font-bold text-[#171717]">{value}</div>
-      <div className="mt-1 text-[12px] leading-5 text-[#9aa1ac]">{caption}</div>
-    </div>
-  );
-}
-
-function OodaProgressCard({ item }: { item: OodaProgress }) {
-  return (
-    <div className="rounded-[16px] border border-[#edf0f4] bg-[#fcfcfd] px-4 py-3">
-      <div className="flex items-center justify-between gap-3">
-        <span className="text-[13px] font-bold text-[#171717]">{item.label}</span>
-        <span className="text-[13px] font-bold text-[#b48600]">{item.value}</span>
-      </div>
-      <div className="mt-1 text-[12px] leading-5 text-[#8d94a1]">{item.caption}</div>
-    </div>
-  );
-}
-
-function PrimaryLink({ href, label, icon }: { href: string; label: string; icon: React.ReactNode }) {
-  return (
-    <Link
-      href={href}
-      className="inline-flex h-10 items-center justify-center gap-2 rounded-[14px] border border-[#f0d46b] bg-[#fffaf0] px-3.5 text-[12px] font-bold text-[#171717] transition hover:bg-[#fff3c4]"
-    >
-      {icon}
-      {label}
-    </Link>
-  );
-}
-
-function SectionHeader({ title, href }: { title: string; href: string }) {
-  return (
-    <div className="flex items-center justify-between gap-3">
-      <h2 className="text-[20px] font-bold text-[#171717]">{title}</h2>
-      <Link href={href} className="text-[13px] font-semibold text-[#9c7600]">
-        すべて見る
-      </Link>
-    </div>
-  );
-}
-
-function EmptyState({
-  title,
-  body,
-  href,
-  action,
-}: {
-  title: string;
-  body: string;
-  href: string;
-  action: string;
-}) {
-  return (
-    <div className="mt-4 rounded-[18px] border border-dashed border-[#dfe4ec] bg-[#fcfcfd] px-5 py-6 text-center">
-      <div className="text-[15px] font-bold text-[#20242c]">{title}</div>
-      <p className="mx-auto mt-2 max-w-[420px] text-[13px] leading-6 text-[#7a808c]">{body}</p>
-      <Link
-        href={href}
-        className="mt-4 inline-flex items-center justify-center rounded-[14px] border border-[#f0c655] bg-white px-4 py-2.5 text-[13px] font-semibold text-[#171717]"
-      >
-        {action}
-      </Link>
+    <div>
+      <p className="text-[12px] font-bold uppercase tracking-[0.16em] text-[#b48600]">{eyebrow}</p>
+      <h2 className="mt-1 text-[22px] font-bold text-[#171717]">{title}</h2>
+      <p className="mt-2 text-[13px] leading-6 text-[#7a808c]">{body}</p>
     </div>
   );
 }
@@ -728,104 +586,274 @@ function StatusBadge({ value }: { value: MeetingRecord["status"] }) {
   );
 }
 
-function ProcessingText({ value }: { value: MeetingRecord["processingStatus"] }) {
-  const label =
-    value === "completed"
-      ? "分析完了"
-      : value === "failed"
-        ? "処理失敗"
-        : value === "uploading"
-          ? "アップロード中"
-          : value === "uploaded"
-            ? "分析待ち"
-            : value === "transcribing"
-              ? "文字起こし中"
-              : value === "analyzing"
-                ? "分析中"
-                : "処理中";
-  return <span className="text-[13px] font-semibold text-[#7a808c]">{label}</span>;
-}
-
-function buildKnowledgeHref(item: KnowledgeItem) {
-  if (item.categoryId) {
-    return `/sales/knowledge/categories/${item.categoryId}/knowledge/${item.id}`;
-  }
-
-  return `/sales/knowledge/search?q=${encodeURIComponent(item.title)}`;
-}
-
-function selectRecommendedScenario(scenarios: RoleplayScenario[], results: RoleplayResult[]) {
-  if (scenarios.length === 0) {
-    return null;
-  }
-
-  const completedScenarioIds = new Set(results.map((result) => result.scenarioId));
-  return scenarios.find((scenario) => !completedScenarioIds.has(scenario.id)) ?? scenarios[0];
-}
-
-function selectRecommendedKnowledge(items: KnowledgeItem[], actionMeetings: MeetingRecord[]) {
-  if (items.length === 0) {
-    return null;
-  }
-
-  const productTypes = new Set(actionMeetings.map((meeting) => meeting.productType).filter(Boolean));
-  return (
-    items.find((item) => item.productId && productTypes.size > 0) ??
-    items.find((item) => item.kind === "qa") ??
-    items[0]
-  );
-}
-
-function buildOodaCycleCards(input: {
+function buildDashboardActionContext(input: {
   meetings: MeetingRecord[];
+  monthlyMeetings: MeetingRecord[];
+  weeklyMeetings: MeetingRecord[];
   actionMeetings: MeetingRecord[];
+  knowledgeItems: KnowledgeItem[];
+  roleplayResults: RoleplayResult[];
+  roleplayScenarios: RoleplayScenario[];
   recommendedScenario: RoleplayScenario | null;
-  salesDomain: SalesDomain;
-}): OodaCycleCard[] {
-  const unprocessedCount = input.meetings.filter((meeting) => meeting.processingStatus !== "completed").length;
-  const completedCount = input.meetings.filter((meeting) => meeting.processingStatus === "completed").length;
-  const actionCount = input.actionMeetings.length;
-  const unitLabel = input.salesDomain === "teleapo" ? "架電" : "商談";
-  const listHref = `/meetings?category=${input.salesDomain}`;
+  skillScores: SkillScore[];
+  unitLabel: string;
+}) {
+  return {
+    unitLabel: input.unitLabel,
+    counts: {
+      totalMeetings: input.meetings.length,
+      monthlyMeetings: input.monthlyMeetings.length,
+      weeklyMeetings: input.weeklyMeetings.length,
+      analyzedMeetings: input.monthlyMeetings.filter((meeting) => meeting.aiSummary || meeting.aiSummaryStatus === "completed").length,
+      pendingAnalysis: input.monthlyMeetings.filter((meeting) => !meeting.aiSummary && meeting.aiSummaryStatus !== "completed").length,
+      actionMeetings: input.actionMeetings.length,
+      knowledgeItems: input.knowledgeItems.length,
+      roleplayResults: input.roleplayResults.length,
+      roleplayScenarios: input.roleplayScenarios.length,
+    },
+    recentMeetings: input.meetings.slice(0, 8).map((meeting) => ({
+      id: meeting.id,
+      customerName: meeting.customerName,
+      productType: meeting.productType,
+      customerType: meeting.customerType,
+      meetingPurpose: meeting.meetingPurpose,
+      status: meeting.status,
+      recordedAt: meeting.recordedAt?.toISOString() ?? null,
+      aiScore: readMeetingAiScoreNumber(meeting),
+      overview: truncateText(meeting.aiSummary?.overview ?? "", 180),
+      statusLabel: meeting.aiSummary?.diagnosis?.status.label ?? null,
+      temperature: meeting.aiSummary?.diagnosis?.temperature.label ?? null,
+      consideration: meeting.aiSummary?.diagnosis?.consideration.label ?? null,
+      missingCriteria: meeting.aiSummary?.manualCompliance?.missingCriteria?.slice(0, 5) ?? [],
+      improvementPhrases: meeting.aiSummary?.manualCompliance?.improvementPhrases?.slice(0, 5) ?? [],
+    })),
+    skillScores: input.skillScores,
+    roleplay: {
+      recommendedScenario: input.recommendedScenario
+        ? {
+            id: input.recommendedScenario.id,
+            title: input.recommendedScenario.title,
+            productName: input.recommendedScenario.productName,
+            category: input.recommendedScenario.scenarioCategory,
+            targetSegment: input.recommendedScenario.targetSegment,
+          }
+        : null,
+      recentResults: input.roleplayResults.slice(0, 5).map((result) => ({
+        scenarioTitle: result.scenarioTitle,
+        productName: result.productName,
+        score: result.score,
+        improvements: result.improvements.slice(0, 4),
+        improvementPhrases: result.improvementPhrases.slice(0, 4),
+      })),
+    },
+    knowledge: input.knowledgeItems.slice(0, 8).map((item) => ({
+      title: item.title,
+      tabTitle: item.tabTitle,
+      categoryId: item.categoryId,
+      productId: item.productId,
+      tags: item.tags?.slice(0, 5) ?? [],
+    })),
+  };
+}
 
-  return [
-    {
-      label: "Observe",
-      title: `未分析の${unitLabel}`,
-      count: unprocessedCount,
-      unit: "件",
-      caption: `AI分析待ち、処理中、処理失敗の${unitLabel}`,
-      href: listHref,
-      tone: "observe",
-    },
-    {
-      label: "Orient",
-      title: "分析完了",
-      count: completedCount,
-      unit: "件",
-      caption: `要約や会話ログを確認できる${unitLabel}`,
-      href: listHref,
-      tone: "orient",
-    },
-    {
-      label: "Decide",
-      title: "要アクション",
-      count: actionCount,
-      unit: "件",
-      caption: `次回接触や失注要因確認が必要な${unitLabel}`,
-      href: input.actionMeetings[0] ? `/meetings/${input.actionMeetings[0].id}` : listHref,
-      tone: "decide",
-    },
-    {
-      label: "Act",
-      title: "ロープレ推奨",
-      count: input.recommendedScenario ? 1 : 0,
-      unit: "件",
-      caption: `次の${unitLabel}前に練習したいシナリオ`,
-      href: input.recommendedScenario ? `/sales/roleplay?scenarioId=${input.recommendedScenario.id}` : `/sales/roleplay/scenarios?category=${input.salesDomain}`,
-      tone: "act",
-    },
-  ];
+function buildDashboardInsight(input: {
+  meetings: MeetingRecord[];
+  monthlyMeetings: MeetingRecord[];
+  weeklyMeetings: MeetingRecord[];
+  actionMeetings: MeetingRecord[];
+  knowledgeItems: KnowledgeItem[];
+  monthlyRoleplayCount: number;
+  recommendedScenario: RoleplayScenario | null;
+  activeDomain: SalesDomain;
+  unitLabel: string;
+}): DashboardInsight {
+  const wonCount = input.monthlyMeetings.filter((meeting) => meeting.status === "won").length;
+  const lostCount = input.weeklyMeetings.filter((meeting) => meeting.status === "lost").length;
+  const completedMeetings = input.monthlyMeetings.filter((meeting) => meeting.aiSummary || meeting.processingStatus === "completed");
+  const pendingAnalysisCount = input.monthlyMeetings.filter((meeting) => !meeting.aiSummary && meeting.aiSummaryStatus !== "completed").length;
+  const conversionRate = input.monthlyMeetings.length > 0 ? Math.round((wonCount / input.monthlyMeetings.length) * 100) : 0;
+  const averageScore = readAverageScore(completedMeetings);
+  const averageDuration = readAverageDuration(input.weeklyMeetings);
+  const frequentWords = readFrequentWords(input.weeklyMeetings);
+  const skillScores = buildSkillScores(completedMeetings);
+  const improveTargets = buildImproveTargets(input.actionMeetings, skillScores);
+  const stalledCount = input.actionMeetings.filter((meeting) => meeting.status === "considering" || meeting.status === "lost").length;
+  const coachInsight = buildCoachInsight({
+    completedMeetings,
+    actionMeetings: input.actionMeetings,
+    improveTargets,
+    skillScores,
+    recommendedScenario: input.recommendedScenario,
+    unitLabel: input.unitLabel,
+  });
+  const roleplayHref = input.recommendedScenario
+    ? `/sales/roleplay?category=${input.activeDomain}&scenarioId=${input.recommendedScenario.id}`
+    : `/sales/roleplay/scenarios?category=${input.activeDomain}`;
+  const topMissingCriteria = readTopManualCriteria(completedMeetings);
+  const topStatus = readTopMeetingStatus(input.monthlyMeetings);
+  const topCustomerIssue = readTopCustomerIssue(completedMeetings);
+  const reviewHref = input.meetings[0] ? `/meetings/${input.meetings[0].id}` : `/meetings?category=${input.activeDomain}`;
+
+  return {
+    summaryMetrics: [
+      {
+        label: `今月の${input.unitLabel}数`,
+        value: `${input.monthlyMeetings.length}件`,
+        caption: "今月アップロードされた記録",
+        tone: "yellow",
+      },
+      {
+        label: "成約率",
+        value: `${conversionRate}%`,
+        caption: wonCount > 0 ? `成約 ${wonCount}件` : "成約データなし",
+        tone: "green",
+      },
+      {
+        label: "分析済み件数",
+        value: `${completedMeetings.length}件`,
+        caption: "AIサマリー確認済みの件数",
+        tone: "blue",
+      },
+      {
+        label: "AIスコア",
+        value: formatScore(averageScore),
+        caption: "直近分析の平均値",
+        tone: "dark",
+      },
+    ],
+    coachInsight,
+    priorityActions: [
+      {
+        title: improveTargets[0] ?? "提案前に顧客課題を一度要約する",
+        reason: coachInsight.evidence,
+      },
+      {
+        title: improveTargets[1] ?? "料金説明の前に導入時期を確認する",
+        reason: "条件確認が浅いまま金額に入ると、比較検討で止まりやすくなります。",
+      },
+      {
+        title: improveTargets[2] ?? "競合比較の有無を先に聞く",
+        reason: "比較軸を早めに把握すると、切り返しではなく価値接続で話せます。",
+      },
+    ],
+    oodaCards: [
+      {
+        label: "Observe",
+        badge: "01",
+        title: "活動状況",
+        description: "今週の記録数と分析状況を表示します。",
+        items: [
+          { label: `今週の${input.unitLabel}`, value: `${input.weeklyMeetings.length}件` },
+          { label: "未分析", value: `${pendingAnalysisCount}件` },
+          { label: "分析済み", value: `${completedMeetings.length}件` },
+          { label: `平均${input.unitLabel}時間`, value: averageDuration },
+          { label: "今月のロープレ", value: `${input.monthlyRoleplayCount}回` },
+          { label: "停滞/要確認", value: `${stalledCount}件` },
+        ],
+      },
+      {
+        label: "Orient",
+        badge: "02",
+        title: "商談の傾向",
+        description: "商談ステータスと会話内の傾向を表示します。",
+        items: [
+          { label: "顧客課題", value: topCustomerIssue },
+          { label: "多いステータス", value: topStatus },
+          { label: "失注/停滞", value: `${lostCount + stalledCount}件` },
+          { label: "頻出ワード", value: frequentWords.join(" / ") || "蓄積待ち" },
+          { label: "弱いスキル", value: coachInsight.label },
+        ],
+      },
+      {
+        label: "Decide",
+        badge: "03",
+        title: "改善テーマ",
+        description: "未達項目と優先確認項目を表示します。",
+        items: [
+          { label: "優先項目", value: improveTargets[0] ?? coachInsight.nextAction },
+          { label: "必ず聞くこと", value: topMissingCriteria },
+          { label: "避けたい流れ", value: "課題確認前に料金説明へ入る" },
+          { label: "関連ロープレ", value: input.recommendedScenario?.title ?? coachInsight.training },
+          { label: "確認タイミング", value: "提案前とクロージング前" },
+        ],
+      },
+      {
+        label: "Act",
+        badge: "04",
+        title: "やること",
+        description: "確認、ロープレ、ナレッジへの導線を表示します。",
+        items: [
+          { label: "次の確認", value: pendingAnalysisCount > 0 ? `未分析の${input.unitLabel}` : "ロープレシナリオ" },
+          { label: "商談確認", value: input.meetings[0]?.customerName || "直近商談を確認" },
+          { label: "ロープレ", value: input.recommendedScenario?.title ?? "シナリオを選択" },
+          { label: "ナレッジ", value: `${input.knowledgeItems.length}件から検索可能` },
+          { label: "次回準備", value: topMissingCriteria },
+        ],
+        actions: [
+          {
+            label: pendingAnalysisCount > 0 ? "直近商談を確認" : "AIロープレ開始",
+            href: pendingAnalysisCount > 0 ? reviewHref : roleplayHref,
+            primary: true,
+          },
+          { label: "関連ナレッジ確認", href: "/sales/knowledge/search" },
+          { label: "一覧を見る", href: `/meetings?category=${input.activeDomain}` },
+        ],
+      },
+    ],
+    aarCards: [
+      {
+        title: "良かったこと",
+        point: "Keep",
+        tone: "good",
+        body: buildAarKeep(completedMeetings, input.unitLabel),
+      },
+      {
+        title: "改善すべきこと",
+        point: "Problem",
+        tone: "improve",
+        body: coachInsight.finding,
+      },
+      {
+        title: "なぜそうなったか",
+        point: "Why",
+        tone: "reason",
+        body: coachInsight.evidence,
+      },
+      {
+        title: "次回どうするか",
+        point: "Next",
+        tone: "next",
+        body: coachInsight.nextAction,
+      },
+    ],
+    skillScores,
+    growthMetrics: [
+      {
+        label: "AIスコア推移",
+        value: formatScore(averageScore),
+        caption: averageScore === null ? "蓄積待ち" : "今月平均",
+        percentage: averageScore ?? 24,
+      },
+      {
+        label: "成約率推移",
+        value: `${conversionRate}%`,
+        caption: "今月",
+        percentage: Math.max(8, conversionRate),
+      },
+      {
+        label: "分析件数",
+        value: `${completedMeetings.length}件`,
+        caption: `今月${input.monthlyMeetings.length}件中`,
+        percentage: input.monthlyMeetings.length > 0 ? Math.round((completedMeetings.length / input.monthlyMeetings.length) * 100) : 10,
+      },
+      {
+        label: "ロープレ回数",
+        value: `${input.monthlyRoleplayCount}回`,
+        caption: "今月",
+        percentage: Math.min(100, Math.max(10, input.monthlyRoleplayCount * 12)),
+      },
+    ],
+  };
 }
 
 function buildActionMeetings(meetings: MeetingRecord[]) {
@@ -849,12 +877,8 @@ function getMeetingPriority(meeting: MeetingRecord) {
     score += 36;
   }
 
-  if (meeting.processingStatus === "completed") {
-    score += 24;
-  }
-
   if (meeting.aiSummary) {
-    score += 12;
+    score += 24;
   }
 
   if (meeting.recordedAt) {
@@ -864,59 +888,339 @@ function getMeetingPriority(meeting: MeetingRecord) {
   return score;
 }
 
-function buildNextAction(meeting: MeetingRecord) {
-  if (meeting.processingStatus === "failed") {
-    return "音声処理を再確認";
+function selectRecommendedScenario(scenarios: RoleplayScenario[], results: RoleplayResult[]) {
+  if (scenarios.length === 0) {
+    return null;
   }
 
-  if (meeting.status === "lost") {
-    return "失注要因を確認";
-  }
-
-  if (meeting.status === "considering" && meeting.processingStatus === "completed") {
-    return "次回接触の論点整理";
-  }
-
-  if (meeting.processingStatus === "completed") {
-    return "AI要約を確認";
-  }
-
-  if (meeting.processingStatus === "uploaded" || meeting.processingStatus === "transcribing" || meeting.processingStatus === "analyzing") {
-    return "AI分析完了を待つ";
-  }
-
-  return "次回アクションを設定";
+  const completedScenarioIds = new Set(results.map((result) => result.scenarioId));
+  return scenarios.find((scenario) => !completedScenarioIds.has(scenario.id)) ?? scenarios[0];
 }
 
-function buildOodaProgress(input: {
-  meetings: MeetingRecord[];
-  actionMeetings: MeetingRecord[];
-  roleplayCount: number;
-  knowledgeCount: number;
-}): OodaProgress[] {
-  const completedMeetings = input.meetings.filter((meeting) => meeting.processingStatus === "completed").length;
+function buildImproveTargets(actionMeetings: MeetingRecord[], skills: SkillScore[]) {
+  const weakestSkills = [...skills].sort((left, right) => left.score - right.score).map((skill) => skill.label);
+  const targets: string[] = [];
+
+  if (weakestSkills.includes("ヒアリング")) {
+    targets.push("提案前に顧客課題を一度要約する");
+  }
+
+  if (weakestSkills.includes("クロージング")) {
+    targets.push("最後に次回日程と宿題を必ず合意する");
+  }
+
+  if (weakestSkills.includes("切り返し")) {
+    targets.push("競合比較や不安を先に聞いてから価値を接続する");
+  }
+
+  if (actionMeetings.some((meeting) => meeting.status === "lost")) {
+    targets.push("失注商談の反論パターンをロープレで復習する");
+  }
+
+  return unique([
+    ...targets,
+    "料金説明の前に導入時期を確認する",
+    "決裁者と社内確認フローを聞く",
+    "顧客の言葉で課題を整理してから提案する",
+  ]).slice(0, 3);
+}
+
+function buildSkillScores(meetings: MeetingRecord[]): SkillScore[] {
+  const evaluations = meetings.flatMap((meeting) => meeting.aiSummary?.diagnosis?.salesEvaluation ?? []);
+  const readScore = (label: string, fallback: number) => {
+    const matched = evaluations.filter((evaluation) => evaluation.label.includes(label));
+    if (matched.length === 0) {
+      return fallback;
+    }
+
+    return Math.round(matched.reduce((sum, evaluation) => sum + evaluation.score, 0) / matched.length);
+  };
 
   return [
-    { label: "Observe", value: `${input.meetings.length}件`, caption: "今月の商談ログ" },
-    { label: "Orient", value: `${completedMeetings}件`, caption: "分析完了した商談" },
-    { label: "Decide", value: `${input.actionMeetings.length}件`, caption: "要対応の商談" },
-    { label: "Act", value: `${input.roleplayCount}回`, caption: `ナレッジ ${input.knowledgeCount}件` },
+    { label: "ヒアリング", score: readScore("ヒアリング", 62), comment: "現状・背景・課題を聞けているか" },
+    { label: "課題整理", score: readScore("課題", 58), comment: "顧客の言葉で課題を整理できているか" },
+    { label: "提案力", score: readScore("提案", 60), comment: "商材価値を課題に接続できているか" },
+    { label: "切り返し", score: readScore("反論", 54), comment: "不安や比較に対して確認できているか" },
+    { label: "クロージング", score: readScore("クロージング", 50), comment: "次回日程・宿題・決裁確認まで進めたか" },
   ];
 }
 
-function readMeetingAiScore(meeting: MeetingRecord) {
+function buildCoachInsight(input: {
+  completedMeetings: MeetingRecord[];
+  actionMeetings: MeetingRecord[];
+  improveTargets: string[];
+  skillScores: SkillScore[];
+  recommendedScenario: RoleplayScenario | null;
+  unitLabel: string;
+}): CoachInsight {
+  const weakestSkill = [...input.skillScores].sort((left, right) => left.score - right.score)[0];
+  const missingCriteria = unique(
+    input.completedMeetings.flatMap((meeting) => meeting.aiSummary?.manualCompliance?.missingCriteria ?? []),
+  );
+  const improvementPhrases = unique(
+    input.completedMeetings.flatMap((meeting) => meeting.aiSummary?.manualCompliance?.improvementPhrases ?? []),
+  );
+  const evidence = pickStrongestEvidence(input.completedMeetings, weakestSkill?.label);
+  const stalledCount = input.actionMeetings.filter((meeting) => meeting.status === "considering" || meeting.status === "lost").length;
+  const primaryTarget = input.improveTargets[0] ?? "提案前に顧客課題を一度要約する";
+
+  if (input.completedMeetings.length === 0) {
+    return {
+      label: "分析データ不足",
+      finding: `まだ${input.unitLabel}分析が少ないため、改善点は仮説ベースです。`,
+      evidence: `まずは直近の${input.unitLabel}でAIサマリーを開き、課題・不安・次回アクションを抽出してください。`,
+      nextAction: primaryTarget,
+      training: input.recommendedScenario?.title ?? "新規提案の基本ロープレ",
+    };
+  }
+
+  if (missingCriteria.length > 0) {
+    return {
+      label: weakestSkill ? `${weakestSkill.label} ${weakestSkill.score}点` : "マニュアル未達",
+      finding: `直近分析では「${missingCriteria[0]}」が弱点として残っています。`,
+      evidence: evidence || `マニュアルの未達項目に「${missingCriteria.slice(0, 2).join(" / ")}」が出ています。`,
+      nextAction: improvementPhrases[0] ?? primaryTarget,
+      training: input.recommendedScenario?.title ?? `${missingCriteria[0]}を重点練習`,
+    };
+  }
+
+  if (weakestSkill && weakestSkill.score < 65) {
+    return {
+      label: `${weakestSkill.label} ${weakestSkill.score}点`,
+      finding: `${weakestSkill.label}が相対的に弱く、商談の前進を止めている可能性があります。`,
+      evidence: evidence || `${weakestSkill.comment} の評価が他スキルより低めです。`,
+      nextAction: primaryTarget,
+      training: input.recommendedScenario?.title ?? `${weakestSkill.label}を鍛えるロープレ`,
+    };
+  }
+
+  if (stalledCount > 0) {
+    return {
+      label: `要対応 ${stalledCount}件`,
+      finding: "検討中・失注の商談が残っているため、次回アクションの明確化が優先です。",
+      evidence: `${stalledCount}件の${input.unitLabel}で、追加確認や再接触が必要な状態です。`,
+      nextAction: "次回日程・決裁者・導入時期を一つずつ確認する",
+      training: input.recommendedScenario?.title ?? "次回アクション確定ロープレ",
+    };
+  }
+
+  return {
+    label: weakestSkill ? `${weakestSkill.label} ${weakestSkill.score}点` : "安定",
+    finding: "大きな弱点は目立ちません。次は再現性を高める段階です。",
+    evidence: evidence || "分析済み商談の評価に大きな偏りはありません。",
+    nextAction: "うまくいった商談の質問順と切り返しをテンプレ化する",
+    training: input.recommendedScenario?.title ?? "成功パターン再現ロープレ",
+  };
+}
+
+function pickStrongestEvidence(meetings: MeetingRecord[], skillLabel?: string) {
+  const evaluations = meetings.flatMap((meeting) => meeting.aiSummary?.diagnosis?.salesEvaluation ?? []);
+  const matchedEvaluation = skillLabel
+    ? evaluations.find((evaluation) => evaluation.label.includes(skillLabel) && evaluation.evidence.length > 0)
+    : null;
+  const evidence =
+    matchedEvaluation?.evidence[0] ??
+    meetings.find((meeting) => (meeting.aiSummary?.diagnosis?.consideration.evidence.length ?? 0) > 0)?.aiSummary?.diagnosis?.consideration.evidence[0] ??
+    meetings.find((meeting) => (meeting.aiSummary?.diagnosis?.status.evidence.length ?? 0) > 0)?.aiSummary?.diagnosis?.status.evidence[0] ??
+    null;
+
+  return evidence ? `根拠: ${truncateText(evidence, 86)}` : "";
+}
+
+function buildAarKeep(meetings: MeetingRecord[], unitLabel: string) {
+  const positiveEvidence =
+    meetings.find((meeting) => meeting.aiSummary?.diagnosis?.temperature.level === "high")?.aiSummary?.diagnosis?.temperature.evidence[0] ??
+    meetings.find((meeting) => (meeting.aiSummary?.diagnosis?.salesEvaluation?.some((evaluation) => evaluation.score >= 70) ?? false))?.aiSummary?.diagnosis?.salesEvaluation?.find((evaluation) => evaluation.score >= 70)?.evidence[0] ??
+    null;
+
+  if (positiveEvidence) {
+    return `良かった根拠: ${truncateText(positiveEvidence, 92)}`;
+  }
+
+  return meetings.length > 0
+    ? `${unitLabel}ログとAI分析が登録されています。`
+    : `${unitLabel}の記録はまだありません。`;
+}
+
+function readAverageScore(meetings: MeetingRecord[]) {
+  const scores = meetings
+    .map(readMeetingAiScoreNumber)
+    .filter((score): score is number => typeof score === "number");
+
+  if (scores.length === 0) {
+    return null;
+  }
+
+  return Math.round(scores.reduce((sum, score) => sum + score, 0) / scores.length);
+}
+
+function readMeetingAiScoreNumber(meeting: MeetingRecord) {
   const record = meeting as MeetingRecord & {
     aiScore?: unknown;
     score?: unknown;
     analysisScore?: unknown;
   };
-  const score = [record.aiScore, record.analysisScore, record.score].find((value) => typeof value === "number");
+  const directScore = [record.aiScore, record.analysisScore, record.score].find((value) => typeof value === "number");
 
-  if (typeof score === "number") {
-    return `${Math.round(score)}点`;
+  if (typeof directScore === "number") {
+    return Math.round(directScore);
   }
 
-  return meeting.processingStatus === "completed" ? "算出待ち" : "-";
+  const evaluationScores = meeting.aiSummary?.diagnosis?.salesEvaluation?.map((evaluation) => evaluation.score) ?? [];
+  if (evaluationScores.length > 0) {
+    return Math.round(evaluationScores.reduce((sum, score) => sum + score, 0) / evaluationScores.length);
+  }
+
+  if (typeof meeting.aiSummary?.manualCompliance?.score === "number") {
+    return meeting.aiSummary.manualCompliance.score;
+  }
+
+  return null;
+}
+
+function readAverageDuration(meetings: MeetingRecord[]) {
+  const durations = meetings
+    .map((meeting) => meeting.audioDurationSec ?? meeting.transcriptionProbeDurationSec ?? null)
+    .filter((duration): duration is number => typeof duration === "number" && duration > 0);
+
+  if (durations.length === 0) {
+    return "--";
+  }
+
+  const averageSeconds = durations.reduce((sum, duration) => sum + duration, 0) / durations.length;
+  return `${Math.round(averageSeconds / 60)}分`;
+}
+
+function readFrequentWords(meetings: MeetingRecord[]) {
+  const text = meetings
+    .flatMap((meeting) => [
+      meeting.transcriptionProbeText ?? "",
+      ...(meeting.transcriptBlocks ?? []).map((block) => block.text),
+      ...(meeting.conversationLogs ?? []).map((log) => log.text),
+    ])
+    .join("\n");
+
+  const stopWords = new Set([
+    "です",
+    "ます",
+    "ました",
+    "こと",
+    "これ",
+    "それ",
+    "ため",
+    "ので",
+    "よう",
+    "こちら",
+    "ありがとう",
+    "ございます",
+  ]);
+  const counts = new Map<string, number>();
+
+  for (const match of text.matchAll(/[一-龥ぁ-んァ-ンA-Za-z0-9ー]{2,}/g)) {
+    const word = match[0].trim();
+    if (word.length < 2 || stopWords.has(word)) {
+      continue;
+    }
+
+    counts.set(word, (counts.get(word) ?? 0) + 1);
+  }
+
+  return [...counts.entries()]
+    .filter(([, count]) => count >= 2)
+    .sort((left, right) => right[1] - left[1])
+    .slice(0, 4)
+    .map(([word]) => word);
+}
+
+function readTopManualCriteria(meetings: MeetingRecord[]) {
+  const counts = new Map<string, number>();
+
+  for (const meeting of meetings) {
+    for (const criterion of meeting.aiSummary?.manualCompliance?.missingCriteria ?? []) {
+      counts.set(criterion, (counts.get(criterion) ?? 0) + 1);
+    }
+  }
+
+  const topCriterion = [...counts.entries()].sort((left, right) => right[1] - left[1])[0]?.[0];
+  return topCriterion ?? "予算・決裁者・導入時期を確認";
+}
+
+function readTopMeetingStatus(meetings: MeetingRecord[]) {
+  if (meetings.length === 0) {
+    return "蓄積待ち";
+  }
+
+  const counts = new Map<MeetingRecord["status"], number>();
+  for (const meeting of meetings) {
+    counts.set(meeting.status, (counts.get(meeting.status) ?? 0) + 1);
+  }
+
+  const [status, count] = [...counts.entries()].sort((left, right) => right[1] - left[1])[0];
+  const label =
+    status === "won"
+      ? "成約"
+      : status === "lost"
+        ? "失注"
+        : "検討中";
+
+  return `${label} ${count}件`;
+}
+
+function readTopCustomerIssue(meetings: MeetingRecord[]) {
+  const texts = meetings.flatMap((meeting) => [
+    meeting.aiSummary?.overview ?? "",
+    ...(meeting.aiSummary?.bullets ?? []),
+    ...(meeting.aiSummary?.diagnosis?.status.evidence ?? []),
+    ...(meeting.aiSummary?.diagnosis?.temperature.evidence ?? []),
+    ...(meeting.aiSummary?.diagnosis?.consideration.evidence ?? []),
+  ]);
+  const patterns = [
+    { label: "料金・費用対効果", regex: /料金|費用|予算|高い|コスト|費用対効果/g },
+    { label: "導入時期・進め方", regex: /導入時期|時期|スケジュール|いつ|開始|進め方/g },
+    { label: "決裁者・社内確認", regex: /決裁|上司|社内|確認|稟議|判断/g },
+    { label: "課題整理", regex: /課題|困って|悩み|改善|現状|問題/g },
+    { label: "競合比較・不安", regex: /競合|他社|比較|不安|懸念|迷/g },
+  ];
+  const joinedText = texts.join("\n");
+  const ranked = patterns
+    .map((pattern) => ({
+      label: pattern.label,
+      count: joinedText.match(pattern.regex)?.length ?? 0,
+    }))
+    .sort((left, right) => right.count - left.count);
+
+  return ranked[0]?.count ? ranked[0].label : "分析データなし";
+}
+
+function buildImprovementPoint(meeting: MeetingRecord) {
+  const missingCriteria = meeting.aiSummary?.manualCompliance?.missingCriteria?.[0];
+  const improvementPhrase = meeting.aiSummary?.manualCompliance?.improvementPhrases?.[0];
+
+  if (missingCriteria) {
+    return missingCriteria;
+  }
+
+  if (improvementPhrase) {
+    return improvementPhrase;
+  }
+
+  if (meeting.status === "lost") {
+    return "失注理由と反論対応を確認";
+  }
+
+  if (meeting.status === "considering") {
+    return "次回アクションと決裁者確認";
+  }
+
+  return meeting.aiSummary ? "良かった流れを再現する" : "AI分析を実行する";
+}
+
+function formatScore(score: number | null) {
+  return typeof score === "number" ? `${score}点` : "--";
+}
+
+function truncateText(value: string, maxLength: number) {
+  return value.length > maxLength ? `${value.slice(0, maxLength)}...` : value;
 }
 
 function isCurrentMonth(date: Date | null) {
@@ -942,31 +1246,15 @@ function formatDate(date: Date) {
   }).format(date);
 }
 
-function UploadIcon() {
-  return (
-    <svg viewBox="0 0 24 24" aria-hidden="true" className="h-5 w-5 fill-none stroke-current stroke-[1.8]">
-      <path d="M12 16V5" />
-      <path d="m8 9 4-4 4 4" />
-      <path d="M5 19h14" />
-    </svg>
-  );
+function getTodayActionDateKey() {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Tokyo",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date());
 }
 
-function SearchIcon() {
-  return (
-    <svg viewBox="0 0 24 24" aria-hidden="true" className="h-5 w-5 fill-none stroke-current stroke-[1.8]">
-      <circle cx="11" cy="11" r="6.5" />
-      <path d="m16 16 4 4" />
-    </svg>
-  );
-}
-
-function RoleplayIcon() {
-  return (
-    <svg viewBox="0 0 24 24" aria-hidden="true" className="h-5 w-5 fill-none stroke-current stroke-[1.8]">
-      <path d="M7 18.5v-2.2a4 4 0 0 1 4-4h2a4 4 0 0 1 4 4v2.2" />
-      <circle cx="12" cy="8" r="3.2" />
-      <path d="M4.5 9.5a3 3 0 0 1 3-3M19.5 9.5a3 3 0 0 0-3-3" />
-    </svg>
-  );
+function unique(values: string[]) {
+  return [...new Set(values)];
 }

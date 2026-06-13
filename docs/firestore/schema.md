@@ -132,6 +132,9 @@ type AudioProcessingJobDocument = {
   status:
     | "waiting"
     | "uploading"
+    | "convert_required"
+    | "converting"
+    | "converted"
     | "transcribing"
     | "analyzing"
     | "completed"

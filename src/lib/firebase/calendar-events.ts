@@ -58,7 +58,7 @@ export type CreateCalendarEventInput = {
 };
 
 export function subscribeToCalendarEvents(
-  input: { companyId?: string | null; userId?: string | null; isAdmin?: boolean },
+  input: { companyId?: string | null; userId?: string | null; isAdmin?: boolean; salesDomains?: SalesDomain[] },
   callback: (events: CalendarEvent[]) => void,
   onError?: (error: FirestoreError) => void,
 ): Unsubscribe {
@@ -68,24 +68,54 @@ export function subscribeToCalendarEvents(
     return () => undefined;
   }
 
-  const eventsQuery = input.isAdmin
-    ? query(collection(firestore, "calendarEvents"), where("companyId", "==", input.companyId))
-    : query(
-        collection(firestore, "calendarEvents"),
-        where("companyId", "==", input.companyId),
-        where("userId", "==", input.userId),
-      );
-
-  return onSnapshot(
-    eventsQuery,
-    (snapshot) =>
-      callback(
-        snapshot.docs
-          .map(mapCalendarEvent)
-          .sort((left, right) => (left.scheduledAt?.getTime() ?? 0) - (right.scheduledAt?.getTime() ?? 0)),
-      ),
-    onError,
+  const salesDomains = Array.from(new Set(input.salesDomains ?? [])).filter(
+    (domain): domain is SalesDomain => domain === "meeting" || domain === "teleapo",
   );
+  const targetDomains = salesDomains.length > 0 ? salesDomains : [null];
+  const recordsById = new Map<string, CalendarEvent>();
+  const loadedIndexes = new Set<number>();
+  let isActive = true;
+
+  const unsubscribers = targetDomains.map((salesDomain, index) => {
+    const baseConstraints = [
+      where("companyId", "==", input.companyId),
+      ...(salesDomain ? [where("salesDomain", "==", salesDomain)] : []),
+    ];
+    const eventsQuery = input.isAdmin
+      ? query(collection(firestore, "calendarEvents"), ...baseConstraints)
+      : query(
+          collection(firestore, "calendarEvents"),
+          ...baseConstraints,
+          where("userId", "==", input.userId),
+        );
+
+    return onSnapshot(
+      eventsQuery,
+      (snapshot) => {
+        if (!isActive) return;
+        snapshot.docChanges().forEach((change) => {
+          if (change.type === "removed") {
+            recordsById.delete(change.doc.id);
+          } else {
+            recordsById.set(change.doc.id, mapCalendarEvent(change.doc));
+          }
+        });
+        loadedIndexes.add(index);
+        if (loadedIndexes.size !== targetDomains.length) return;
+        callback(
+          Array.from(recordsById.values()).sort(
+            (left, right) => (left.scheduledAt?.getTime() ?? 0) - (right.scheduledAt?.getTime() ?? 0),
+          ),
+        );
+      },
+      onError,
+    );
+  });
+
+  return () => {
+    isActive = false;
+    unsubscribers.forEach((unsubscribe) => unsubscribe());
+  };
 }
 
 export async function createCalendarEvent(input: CreateCalendarEventInput) {

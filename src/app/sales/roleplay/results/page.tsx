@@ -57,7 +57,7 @@ export default function SalesRoleplayResultsPage() {
   }
 
   return (
-    <main className="overflow-x-hidden bg-transparent px-5 pb-3 pt-4 md:px-8 md:pb-4 md:pt-5">
+    <main className="overflow-x-hidden bg-transparent px-5 pb-0 pt-4 md:px-8 md:pb-0 md:pt-5">
       <div className="mx-auto max-w-[1380px]">
         <RoleplayHeader activeStep="results" roleplayType={roleplayType} />
 
@@ -158,7 +158,7 @@ function ResultCard({
           <div className="mt-3 flex flex-wrap gap-2 text-[12px] font-black text-[#596273]">
             <span className="rounded-full bg-white px-3 py-1 ring-1 ring-[#e6eaf0]">評価 {analysis.passedCount} / {analysis.checklist.length}</span>
             <span className="rounded-full bg-white px-3 py-1 ring-1 ring-[#e6eaf0]">営業発話 {salesTurnCount}回</span>
-            <span className="rounded-full bg-white px-3 py-1 ring-1 ring-[#e6eaf0]">口癖 {analysis.fillers.length}件</span>
+            <span className="rounded-full bg-white px-3 py-1 ring-1 ring-[#e6eaf0]">頻出ワード {analysis.fillers.length}件</span>
           </div>
           <p className="mt-3 line-clamp-1 text-[12px] font-bold text-[#7a808c]">改善: {primaryImprovement}</p>
         </div>

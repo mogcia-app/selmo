@@ -3,10 +3,11 @@
 import { FirebaseError } from "firebase/app";
 import Image from "next/image";
 import Link from "next/link";
-import { useRouter, useSearchParams } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 
 import { useAuth } from "@/features/auth/auth-provider";
+import { getKnowledgeBasePath } from "@/lib/knowledge-paths";
 import {
   buildKnowledgeSearchTerms,
   filterKnowledgeItems,
@@ -40,8 +41,11 @@ type AiAnswer = {
 
 export default function SalesKnowledgeSearchPage() {
   const router = useRouter();
+  const pathname = usePathname();
   const searchParams = useSearchParams();
   const { profile } = useAuth();
+  const basePath = getKnowledgeBasePath(pathname);
+  const knowledgeRole = basePath.startsWith("/admin") ? "admin" : "sales";
   const query = searchParams.get("q")?.trim() ?? "";
   const [searchTerm, setSearchTerm] = useState(query);
   const [items, setItems] = useState<KnowledgeItem[]>([]);
@@ -62,11 +66,11 @@ export default function SalesKnowledgeSearchPage() {
     if (!userId || !companyId) return;
 
     return subscribeToVisibleKnowledgeItems(
-      { userId, companyId },
+      { userId, companyId, role: knowledgeRole },
       setItems,
       (nextError: FirebaseError) => setError(nextError.message),
     );
-  }, [companyId, userId]);
+  }, [companyId, knowledgeRole, userId]);
 
   useEffect(() => {
     if (!companyId) return;
@@ -87,8 +91,8 @@ export default function SalesKnowledgeSearchPage() {
 
   const results = useMemo(() => filterKnowledgeItems(items, query), [items, query]);
   const productResults = useMemo(() => filterKnowledgeProducts(products, query), [products, query]);
-  const knowledgeEvidence = useMemo(() => buildSearchEvidence(results, query), [query, results]);
-  const productEvidence = useMemo(() => buildProductEvidence(productResults), [productResults]);
+  const knowledgeEvidence = useMemo(() => buildSearchEvidence(results, query, basePath), [basePath, query, results]);
+  const productEvidence = useMemo(() => buildProductEvidence(productResults, basePath), [basePath, productResults]);
   const evidence = useMemo(
     () => [...knowledgeEvidence, ...productEvidence],
     [knowledgeEvidence, productEvidence],
@@ -173,15 +177,15 @@ export default function SalesKnowledgeSearchPage() {
   const handleSearch = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const term = searchTerm.trim();
-    router.push(`/sales/knowledge/search${term ? `?q=${encodeURIComponent(term)}` : ""}`);
+    router.push(`${basePath}/search${term ? `?q=${encodeURIComponent(term)}` : ""}`);
   };
 
   return (
-    <main className="mx-auto max-w-[1500px] overflow-x-hidden bg-transparent px-5 pb-3 pt-4 md:px-8 md:pb-4 md:pt-5">
+    <main className="mx-auto max-w-[1500px] overflow-x-hidden bg-transparent px-5 pb-0 pt-4 md:px-8 md:pb-0 md:pt-5">
       <section className="rounded-[24px] border border-[#eceef4] bg-white px-4 py-4 shadow-[0_8px_24px_rgba(17,24,39,0.04)] sm:px-5">
         <div className="grid items-center gap-4 lg:grid-cols-[140px_minmax(0,1fr)_auto]">
           <Link
-            href="/sales/knowledge"
+            href={basePath}
             className="inline-flex items-center gap-2 text-[13px] font-semibold text-[#3d4350] transition hover:text-[#171717]"
           >
             <ArrowLeftIcon />
@@ -215,14 +219,14 @@ export default function SalesKnowledgeSearchPage() {
 
           <div className="flex flex-wrap items-center gap-3">
             <Link
-              href="/sales/knowledge/new?kind=knowledge&scope=personal"
+              href={`${basePath}/new?kind=knowledge&scope=personal`}
               className="inline-flex h-[42px] items-center gap-2 rounded-[14px] border border-[#f0c655] bg-white px-4 text-[13px] font-semibold text-[#171717] shadow-[0_8px_18px_rgba(17,24,39,0.05)]"
             >
               <PlusIcon />
               ナレッジを作成
             </Link>
             <Link
-              href="/sales/knowledge/new?kind=memo&scope=personal"
+              href={`${basePath}/new?kind=memo&scope=personal`}
               className="inline-flex h-[42px] items-center gap-2 rounded-[14px] border border-[#e6eaf0] bg-white px-4 text-[13px] font-semibold text-[#3d4350] shadow-[0_8px_18px_rgba(17,24,39,0.05)]"
             >
               <PenIcon />
@@ -286,7 +290,7 @@ export default function SalesKnowledgeSearchPage() {
                         type="button"
                         onClick={() => {
                           setSearchTerm(followUp);
-                          router.push(`/sales/knowledge/search?q=${encodeURIComponent(followUp)}`);
+                          router.push(`${basePath}/search?q=${encodeURIComponent(followUp)}`);
                         }}
                         className="rounded-full border border-[#e6eaf0] bg-white px-3 py-1.5 text-[12px] font-semibold text-[#596273] transition hover:border-[#ead8a8] hover:bg-[#fffdf7]"
                       >
@@ -310,11 +314,11 @@ export default function SalesKnowledgeSearchPage() {
           </section>
 
           <EvidenceSection query={query} evidence={evidence} />
-          <ProductResultSection query={query} products={productResults} />
-          <ResultSection title="関連ナレッジ" query={query} items={results} emptyTitle="関連ナレッジはまだありません" />
-          <ResultSection title="マイナレッジ" query={query} items={personalResults} emptyTitle="自分のナレッジはまだありません" />
-          <ResultSection title="共有ナレッジ" query={query} items={sharedResults} emptyTitle="共有ナレッジはまだありません" />
-          <ResultSection title="関連するQ&A" query={query} items={qaResults} emptyTitle="関連するQ&Aはまだありません" />
+          <ProductResultSection query={query} products={productResults} basePath={basePath} />
+          <ResultSection title="関連ナレッジ" query={query} items={results} emptyTitle="関連ナレッジはまだありません" basePath={basePath} />
+          <ResultSection title="マイナレッジ" query={query} items={personalResults} emptyTitle="自分のナレッジはまだありません" basePath={basePath} />
+          <ResultSection title="共有ナレッジ" query={query} items={sharedResults} emptyTitle="共有ナレッジはまだありません" basePath={basePath} />
+          <ResultSection title="関連するQ&A" query={query} items={qaResults} emptyTitle="関連するQ&Aはまだありません" basePath={basePath} />
         </div>
 
         <aside className="space-y-5">
@@ -401,9 +405,11 @@ function EvidenceSection({ query, evidence }: { query: string; evidence: Knowled
 function ProductResultSection({
   query,
   products,
+  basePath,
 }: {
   query: string;
   products: Array<{ product: KnowledgeProduct; snippets: ProductSnippet[] }>;
+  basePath: string;
 }) {
   if (!query || products.length === 0) {
     return null;
@@ -421,7 +427,7 @@ function ProductResultSection({
         {products.map(({ product, snippets }) => (
           <Link
             key={product.id}
-            href={`/sales/knowledge/products/${product.id}`}
+            href={`${basePath}/products/${product.id}`}
             className="min-w-0 rounded-[16px] border border-[#eef1f5] bg-[#fcfcfd] px-4 py-4 transition hover:border-[#ead8a8] hover:bg-[#fffdf7]"
           >
             <div className="flex items-start justify-between gap-3">
@@ -457,11 +463,13 @@ function ResultSection({
   query,
   items,
   emptyTitle,
+  basePath,
 }: {
   title: string;
   query: string;
   items: KnowledgeItem[];
   emptyTitle: string;
+  basePath: string;
 }) {
   return (
     <section className="rounded-[20px] border border-[#eceef4] bg-white px-5 py-5 shadow-[0_8px_22px_rgba(17,24,39,0.04)]">
@@ -471,7 +479,7 @@ function ResultSection({
           {items.map((item) => (
             <Link
               key={item.id}
-              href={getKnowledgeDetailHref(item)}
+              href={getKnowledgeDetailHref(item, basePath)}
               className="min-w-0 rounded-[16px] border border-[#eef1f5] bg-[#fcfcfd] px-4 py-4 transition hover:border-[#ead8a8] hover:bg-[#fffdf7]"
             >
               <div className="flex items-start gap-3">
@@ -509,11 +517,11 @@ function ResultSection({
   );
 }
 
-function getKnowledgeDetailHref(item: KnowledgeItem) {
-  return `/sales/knowledge/categories/${item.categoryId ?? "how-to"}/knowledge/${item.id}`;
+function getKnowledgeDetailHref(item: KnowledgeItem, basePath: string) {
+  return `${basePath}/categories/${item.categoryId ?? "how-to"}/knowledge/${item.id}`;
 }
 
-function buildSearchEvidence(items: KnowledgeItem[], query: string): KnowledgeSearchEvidence[] {
+function buildSearchEvidence(items: KnowledgeItem[], query: string, basePath: string): KnowledgeSearchEvidence[] {
   if (!query.trim()) {
     return [];
   }
@@ -524,7 +532,7 @@ function buildSearchEvidence(items: KnowledgeItem[], query: string): KnowledgeSe
       title: item.title,
       kind: item.kind,
       scope: item.scope,
-      href: getKnowledgeDetailHref(item),
+      href: getKnowledgeDetailHref(item, basePath),
       snippets: buildKnowledgeSnippets(item, query),
     }))
     .filter((entry) => entry.snippets.length > 0)
@@ -572,13 +580,13 @@ function filterKnowledgeProducts(products: KnowledgeProduct[], query: string) {
     .sort((left, right) => right.snippets.length - left.snippets.length);
 }
 
-function buildProductEvidence(products: Array<{ product: KnowledgeProduct; snippets: ProductSnippet[] }>): KnowledgeSearchEvidence[] {
+function buildProductEvidence(products: Array<{ product: KnowledgeProduct; snippets: ProductSnippet[] }>, basePath: string): KnowledgeSearchEvidence[] {
   return products.map(({ product, snippets }) => ({
     id: `product-${product.id}`,
     title: product.name,
     kind: "product",
     scope: "shared",
-    href: `/sales/knowledge/products/${product.id}`,
+    href: `${basePath}/products/${product.id}`,
     snippets: snippets.map((snippet) => `${snippet.label}: ${snippet.value}`).slice(0, 4),
   }));
 }

@@ -26,9 +26,16 @@ export type RoleplayScenarioVisibility = "draft" | "all";
 export type RoleplayScenarioCategory = "新規" | "既存" | "";
 export type RoleplayType = "meeting" | "teleapo";
 
+export type RoleplayScenarioCustomField = {
+  id: string;
+  label: string;
+  value: string;
+};
+
 export type RoleplayScenario = {
   id: string;
   companyId: string | null;
+  roleplayType: RoleplayType;
   title: string;
   description: string;
   productId: string | null;
@@ -40,6 +47,7 @@ export type RoleplayScenario = {
   goal: string;
   objections: string[];
   evaluationCriteria: string[];
+  customFields: RoleplayScenarioCustomField[];
   difficulty: RoleplayDifficulty;
   visibility: RoleplayScenarioVisibility;
   createdBy: string | null;
@@ -112,6 +120,7 @@ export type RoleplayTalkGuide = {
 
 export type CreateRoleplayScenarioInput = {
   companyId?: string | null;
+  roleplayType?: RoleplayType;
   title: string;
   description: string;
   productId?: string | null;
@@ -123,6 +132,7 @@ export type CreateRoleplayScenarioInput = {
   goal: string;
   objections: string[];
   evaluationCriteria: string[];
+  customFields?: RoleplayScenarioCustomField[];
   difficulty: RoleplayDifficulty;
   visibility?: RoleplayScenarioVisibility;
   createdBy: string;
@@ -309,6 +319,7 @@ export async function createRoleplayScenario(input: CreateRoleplayScenarioInput)
 
   await addDoc(collection(firestore, "roleplayScenarios"), {
     companyId: input.companyId ?? null,
+    roleplayType: input.roleplayType ?? "meeting",
     title: input.title,
     description: input.description,
     productId: input.productId ?? null,
@@ -320,6 +331,7 @@ export async function createRoleplayScenario(input: CreateRoleplayScenarioInput)
     goal: input.goal,
     objections: input.objections,
     evaluationCriteria: input.evaluationCriteria,
+    customFields: normalizeRoleplayScenarioCustomFields(input.customFields),
     difficulty: input.difficulty,
     visibility: input.visibility ?? "all",
     createdBy: input.createdBy,
@@ -333,6 +345,7 @@ export async function updateRoleplayScenario(id: string, input: CreateRoleplaySc
 
   await updateDoc(doc(firestore, "roleplayScenarios", id), {
     companyId: input.companyId ?? null,
+    roleplayType: input.roleplayType ?? "meeting",
     title: input.title,
     description: input.description,
     productId: input.productId ?? null,
@@ -344,6 +357,7 @@ export async function updateRoleplayScenario(id: string, input: CreateRoleplaySc
     goal: input.goal,
     objections: input.objections,
     evaluationCriteria: input.evaluationCriteria,
+    customFields: normalizeRoleplayScenarioCustomFields(input.customFields),
     difficulty: input.difficulty,
     visibility: input.visibility ?? "all",
     createdBy: input.createdBy,
@@ -498,6 +512,7 @@ function mapRoleplayScenario(snapshot: QueryDocumentSnapshot<DocumentData>): Rol
   return {
     id: snapshot.id,
     companyId: readNullableString(data.companyId),
+    roleplayType: readRoleplayType(data.roleplayType),
     title: readString(data.title, "無題のシナリオ"),
     description: readString(data.description),
     productId: readNullableString(data.productId),
@@ -509,6 +524,7 @@ function mapRoleplayScenario(snapshot: QueryDocumentSnapshot<DocumentData>): Rol
     goal: readString(data.goal),
     objections: readStringArray(data.objections),
     evaluationCriteria: readStringArray(data.evaluationCriteria),
+    customFields: readRoleplayScenarioCustomFields(data.customFields),
     difficulty,
     visibility: data.visibility === "draft" ? "draft" : "all",
     createdBy: readNullableString(data.createdBy),
@@ -616,6 +632,38 @@ function readDate(value: unknown) {
 
 function readStringArray(value: unknown) {
   return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string" && Boolean(item.trim())) : [];
+}
+
+function normalizeRoleplayScenarioCustomFields(value: RoleplayScenarioCustomField[] | undefined) {
+  return (value ?? [])
+    .map((field) => ({
+      id: field.id || `custom-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      label: field.label.trim(),
+      value: field.value.trim(),
+    }))
+    .filter((field) => field.label && field.value)
+    .slice(0, 12);
+}
+
+function readRoleplayScenarioCustomFields(value: unknown): RoleplayScenarioCustomField[] {
+  if (!Array.isArray(value)) return [];
+
+  return value
+    .map((item, index) => {
+      if (!item || typeof item !== "object") return null;
+      const record = item as Record<string, unknown>;
+      const label = readString(record.label).trim();
+      const fieldValue = readString(record.value).trim();
+      if (!label || !fieldValue) return null;
+
+      return {
+        id: readString(record.id) || `custom-${index + 1}`,
+        label,
+        value: fieldValue,
+      };
+    })
+    .filter((item): item is RoleplayScenarioCustomField => Boolean(item))
+    .slice(0, 12);
 }
 
 function readMessages(value: unknown): RoleplayMessage[] {

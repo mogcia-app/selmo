@@ -52,11 +52,11 @@ const modeCopy: Record<ReviewMode, {
   teleapo: {
     eyebrow: "TELEAPO REVIEW",
     title: "テレアポ一覧 / レビュー",
-    description: "全営業マンの過去架電ログを探し、文字起こし・要約・テレアポ分析結果を確認します。",
-    panelTitle: "架電一覧",
-    emptyTitle: "架電ログはまだありません",
+    description: "全営業マンの過去テレアポログを探し、文字起こし・要約・テレアポ分析結果を確認します。",
+    panelTitle: "テレアポ一覧",
+    emptyTitle: "テレアポログはまだありません",
     emptyBody: "sales側でテレアポの音声や文字起こしを登録すると、ここに表示されます。",
-    searchPlaceholder: "架電先・営業マンで検索",
+    searchPlaceholder: "テレアポ先・営業マンで検索",
     successLabel: "アポ獲得",
     pendingLabel: "追客中",
     lostLabel: "未獲得",
@@ -142,7 +142,7 @@ export default function AdminMeetingsPage() {
             <div className="grid gap-3 md:grid-cols-7">
             <Select value={memberId} onChange={setMemberId} options={[["", "営業マンすべて"], ...memberRows.map((member) => [member.id, member.name] as [string, string])]} />
             <Select value={product} onChange={setProduct} options={[["", "商材すべて"], ...products.map((item) => [item, item] as [string, string])]} />
-            <Select value={purpose} onChange={setPurpose} options={[["", mode === "teleapo" ? "架電目的すべて" : "商談目的すべて"], ...meetingPurposeOptions]} />
+            <Select value={purpose} onChange={setPurpose} options={[["", mode === "teleapo" ? "テレアポ目的すべて" : "商談目的すべて"], ...meetingPurposeOptions]} />
             <Select value={outcome} onChange={setOutcome} options={[["", "結果すべて"], ["won", copy.successLabel], ["lost", copy.lostLabel], ["considering", copy.pendingLabel]]} />
             <Select value={dateRange} onChange={(value) => setDateRange(value as DateRangeFilter)} options={dateRangeOptions} />
             <Select value={sort} onChange={setSort} options={[["date", "新しい順"], ["score", "スコア順"]]} />

@@ -33,6 +33,16 @@ import {
 import { assertFirebaseClient } from "@/lib/firebase/client";
 
 const LOCAL_DEFAULT_CATEGORY_ID = "how-to";
+const SYSTEM_KNOWLEDGE_UPDATED_AT = new Date("2026-06-14T00:00:00+09:00");
+const SYSTEM_KNOWLEDGE_CATEGORY: KnowledgeCategory = {
+  id: LOCAL_DEFAULT_CATEGORY_ID,
+  companyId: null,
+  title: "使い方",
+  description: "selmo.の営業向け・管理者向けの基本操作と注意点を確認できます。",
+  knowledgeCount: 2,
+  memoCount: 0,
+  updatedAt: SYSTEM_KNOWLEDGE_UPDATED_AT,
+};
 
 const knowledgeSearchAliases: Record<string, string[]> = {
   料金: ["価格", "費用", "月額", "初期費用", "プラン", "値段", "課金"],
@@ -155,6 +165,8 @@ export type KnowledgeSearchHistory = {
   searchedAt: Date | null;
 };
 
+type SystemKnowledgeRole = "sales" | "admin";
+
 export type KnowledgeProductAnalysisInput = {
   description?: string;
   targetCustomer?: string;
@@ -187,9 +199,9 @@ export function subscribeToKnowledgeCategories(
     categoriesQuery,
     (snapshot) =>
       callback(
-        snapshot.docs
-          .map(mapKnowledgeCategory)
-          .sort((left, right) => (right.updatedAt?.getTime() ?? 0) - (left.updatedAt?.getTime() ?? 0)),
+        mergeSystemCategory(snapshot.docs.map(mapKnowledgeCategory)).sort(
+          (left, right) => (right.updatedAt?.getTime() ?? 0) - (left.updatedAt?.getTime() ?? 0),
+        ),
       ),
     onError,
   );
@@ -220,7 +232,7 @@ export function subscribeToKnowledgeProducts(
 }
 
 export function subscribeToVisibleKnowledgeItems(
-  input: { userId: string; companyId?: string | null },
+  input: { userId: string; companyId?: string | null; role?: SystemKnowledgeRole | null },
   callback: (items: KnowledgeItem[]) => void,
   onError?: (error: FirestoreError) => void,
 ): Unsubscribe {
@@ -259,7 +271,7 @@ export function subscribeToVisibleKnowledgeItems(
       });
 
       callback(
-        Array.from(itemsById.values()).sort(
+        mergeSystemKnowledgeItems(Array.from(itemsById.values()), input.role).sort(
           (left, right) => (right.updatedAt?.getTime() ?? 0) - (left.updatedAt?.getTime() ?? 0),
         ),
       );
@@ -291,21 +303,21 @@ export function subscribeToAllKnowledgeItems(
     itemsQuery,
     (snapshot) =>
       callback(
-        snapshot.docs
-          .map(mapKnowledgeItem)
-          .sort((left, right) => (right.updatedAt?.getTime() ?? 0) - (left.updatedAt?.getTime() ?? 0)),
+        mergeSystemKnowledgeItems(snapshot.docs.map(mapKnowledgeItem)).sort(
+          (left, right) => (right.updatedAt?.getTime() ?? 0) - (left.updatedAt?.getTime() ?? 0),
+        ),
       ),
     onError,
   );
 }
 
 export function subscribeToKnowledgeItemsByCategory(
-  input: { categoryId: string; userId: string; companyId?: string | null },
+  input: { categoryId: string; userId: string; companyId?: string | null; role?: SystemKnowledgeRole | null },
   callback: (items: KnowledgeItem[]) => void,
   onError?: (error: FirestoreError) => void,
 ): Unsubscribe {
   return subscribeToVisibleKnowledgeItems(
-    { userId: input.userId, companyId: input.companyId },
+    { userId: input.userId, companyId: input.companyId, role: input.role },
     (items) => callback(items.filter((item) => item.categoryId === input.categoryId)),
     onError,
   );
@@ -328,6 +340,12 @@ export function subscribeToKnowledgeItem(
   callback: (item: KnowledgeItem | null) => void,
   onError?: (error: FirestoreError) => void,
 ): Unsubscribe {
+  const systemItem = getSystemKnowledgeItemById(knowledgeId);
+  if (systemItem) {
+    callback(systemItem);
+    return () => undefined;
+  }
+
   const { firestore } = assertFirebaseClient();
 
   return onSnapshot(
@@ -692,6 +710,175 @@ export function buildKnowledgeSearchTerms(term: string) {
       ]),
     ),
   );
+}
+
+function mergeSystemCategory(categories: KnowledgeCategory[]) {
+  const hasDefaultCategory = categories.some((category) => category.id === SYSTEM_KNOWLEDGE_CATEGORY.id);
+  return hasDefaultCategory ? categories : [SYSTEM_KNOWLEDGE_CATEGORY, ...categories];
+}
+
+function mergeSystemKnowledgeItems(items: KnowledgeItem[], role?: SystemKnowledgeRole | null) {
+  const existingIds = new Set(items.map((item) => item.id));
+  const systemItems = getSystemKnowledgeItems(role).filter((item) => !existingIds.has(item.id));
+  return [...systemItems, ...items];
+}
+
+function getSystemKnowledgeItemById(knowledgeId: string) {
+  return getSystemKnowledgeItems().find((item) => item.id === knowledgeId) ?? null;
+}
+
+function getSystemKnowledgeItems(role?: SystemKnowledgeRole | null): KnowledgeItem[] {
+  const items = [buildSalesHelpKnowledge(), buildAdminHelpKnowledge()];
+  return role ? items.filter((item) => item.tags.includes(role)) : items;
+}
+
+function buildSystemKnowledgeItem(input: {
+  id: string;
+  title: string;
+  description: string;
+  body: string;
+  tabTitle: string;
+  tags: string[];
+}): KnowledgeItem {
+  return {
+    id: input.id,
+    companyId: null,
+    title: input.title,
+    description: input.description,
+    body: input.body,
+    tabTitle: input.tabTitle,
+    categoryId: LOCAL_DEFAULT_CATEGORY_ID,
+    productId: null,
+    ownerId: null,
+    scope: "shared",
+    sharedWithUserIds: [],
+    visibleToAdmin: true,
+    kind: "knowledge",
+    tags: ["使い方", "selmo", "ヘルプ", ...input.tags],
+    links: [],
+    attachments: [],
+    createdAt: SYSTEM_KNOWLEDGE_UPDATED_AT,
+    updatedAt: SYSTEM_KNOWLEDGE_UPDATED_AT,
+  };
+}
+
+function buildSalesHelpKnowledge() {
+  return buildSystemKnowledgeItem({
+    id: "system-help-sales",
+    title: "使い方",
+    tabTitle: "営業",
+    description: "営業画面の各ページで何を見るか、何を登録するか、注意点をまとめた共通ナレッジです。",
+    tags: [
+      "sales",
+      "営業",
+      "ダッシュボード",
+      "カレンダー",
+      "アップロード",
+      "商談分析",
+      "テレアポ分析",
+      "打ち合わせ一覧",
+      "ロープレ",
+      "ナレッジ",
+    ],
+    body: `営業向けの使い方
+
+ダッシュボード
+- 今日見るべき数字、直近商談、営業アクションを確認するページです。
+- まずは今月の商談数、分析済み件数、AIスコアを見て、改善テーマを決めます。
+- 数字だけで判断せず、直近商談の改善ポイントと合わせて確認してください。
+
+カレンダー
+- 商談やテレアポの予定を登録し、事前準備やロープレにつなげるページです。
+- 予定には商材、顧客種別、商談目的、メモを入れておくと、アップロード時やロープレ前の確認がしやすくなります。
+- 予定を開くと詳細を確認できます。
+
+アップロード
+- 音声ファイル、または文字起こしテキストから商談・テレアポの記録を残すページです。
+- 音声の場合はAI文字起こしが動きます。文字起こし貼り付けの場合は、貼り付けた本文を整形して保存します。
+- 実施日時、終了時間、商材、商談目的、顧客種別は後の分析に使うため、分かる範囲で入れてください。
+
+商談分析
+- 商談の現在地、温度感、検討度、営業品質、改善点を確認するページです。
+- AIサマリーは文字起こし本文、商材情報、商談目的、顧客種別、マニュアルやスコアルールをもとに生成されます。
+- 根拠となる発話を確認し、重要判断は必ず自分でも見直してください。
+
+テレアポ分析
+- テレアポの受付突破、興味づけ、アポ獲得につながる会話を確認するページです。
+- 冒頭の入り方、断り文句への返答、次回アクションの有無を重点的に見ます。
+- 商談分析と同じく、AIの指摘は根拠発話とセットで確認してください。
+
+打ち合わせ一覧 / テレアポ一覧
+- 保存した記録を一覧で確認し、詳細やAI分析へ移動するページです。
+- メモアイコンから打ち合わせ情報を確認できます。
+- 不要な記録は一覧から削除できます。削除するとadmin側の表示にも反映されます。
+
+ロープレ
+- 登録済みシナリオ、またはAI作成シナリオで練習するページです。
+- 商談とテレアポでシナリオは分かれます。目的に合った方を選んでください。
+- 営業側から話し始め、AIは顧客役として返答します。終了後に採点と改善点を確認できます。
+
+ナレッジ
+- 商材情報、料金、FAQ、反論対応、社内メモを検索するページです。
+- 右下のナレッジチャットからも検索できます。ロープレ中やカレンダー確認中でも使えます。
+- 検索結果は該当ワードが強調されます。料金や競合比較など、商談中にすぐ確認したい情報を探す用途に向いています。
+
+注意点
+- AI分析は補助です。顧客への回答、契約条件、料金判断は必ず公式情報を確認してください。
+- 文字起こしに誤りがあると分析もずれるため、重要発言は原文を見直してください。
+- 個人メモと共有ナレッジを使い分け、チーム全体に必要な情報は管理者に共有してください。`,
+  });
+}
+
+function buildAdminHelpKnowledge() {
+  return buildSystemKnowledgeItem({
+    id: "system-help-admin",
+    title: "使い方",
+    tabTitle: "管理者",
+    description: "管理者画面で見るべき項目、営業への共有、指導時の注意点をまとめた共通ナレッジです。",
+    tags: [
+      "admin",
+      "管理者",
+      "ナレッジ管理",
+      "商材管理",
+      "マニュアル",
+      "ロープレ管理",
+      "営業メンバー",
+      "活動ログ",
+    ],
+    body: `管理者向けの使い方
+
+ダッシュボード
+- チーム全体の活動量、分析状況、要対応の商談を確認します。
+- 個人の評価だけでなく、チーム平均との差、先月比、未分析件数も見てください。
+
+営業メンバー
+- 営業ごとの商談数、スコア、ロープレ回数、指導優先度を確認します。
+- スコアだけで判断せず、未達項目や実施トークの根拠を見てコメントしてください。
+
+商談分析 / テレアポ分析
+- 商談目的や顧客種別ごとに、営業品質と顧客反応を確認します。
+- 指導時は「何が起きたか」「なぜ起きたか」「次に何をするか」の順で見ると整理しやすくなります。
+
+ナレッジ管理
+- 営業が検索で答えに辿り着けるよう、公式ナレッジを整備するページです。
+- よく検索されているワード、検索されているがナレッジがないワードを見て、不足情報を追加してください。
+
+商材管理
+- 商材概要、ターゲット、料金、FAQ、反論、成功トーク、NGトークを登録します。
+- 登録した商材情報は営業側のナレッジ検索にも表示されます。
+
+マニュアル
+- アップロード後のAI分析で使う評価基準やスコアルールを登録します。
+- ロープレシナリオとは別物ですが、採点基準や改善観点として活用できます。
+
+ロープレ管理
+- 管理者が作成したシナリオを営業に配信できます。
+- 営業が実施したロープレ結果は結果詳細から確認し、必要に応じてコメントできます。
+
+注意点
+- AIスコアは指導のきっかけです。最終判断は文字起こし、根拠発話、営業状況を合わせて行ってください。
+- 共有ナレッジは営業の検索結果に出るため、古い料金や条件が残らないように定期的に見直してください。`,
+  });
 }
 
 function mapKnowledgeCategory(snapshot: QueryDocumentSnapshot<DocumentData>): KnowledgeCategory {

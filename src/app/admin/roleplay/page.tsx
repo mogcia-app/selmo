@@ -27,6 +27,7 @@ import {
   type RoleplayDifficulty,
   type RoleplayAssignment,
   type RoleplayScenario,
+  type RoleplayScenarioCustomField,
   type RoleplayTalkGuide,
 } from "@/lib/firebase/roleplay";
 
@@ -588,6 +589,7 @@ function ScenarioCreateDialog({
   const [goal, setGoal] = useState(scenario?.goal ?? "");
   const [objections, setObjections] = useState((scenario?.objections ?? []).join("\n"));
   const [criteria, setCriteria] = useState((scenario?.evaluationCriteria ?? []).join("\n"));
+  const [customFields, setCustomFields] = useState<RoleplayScenarioCustomField[]>(scenario?.customFields ?? []);
   const [difficulty, setDifficulty] = useState<RoleplayDifficulty>(scenario?.difficulty ?? "normal");
   const [isSaving, setIsSaving] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
@@ -634,6 +636,13 @@ function ScenarioCreateDialog({
     setIsSaving(true);
     onError(null);
     try {
+      const normalizedCustomFields = normalizeCustomFields(customFields);
+      if (hasInvalidCustomFields(customFields)) {
+        onError("自由項目は項目名と中身を両方入力してください。");
+        setIsSaving(false);
+        return;
+      }
+
       const payload = {
         companyId,
         title: title.trim() || `${selectedProduct.name} ${scenarioCategory}ロープレ`,
@@ -647,6 +656,7 @@ function ScenarioCreateDialog({
         goal: goal.trim(),
         objections: splitLines(objections),
         evaluationCriteria: splitLines(criteria),
+        customFields: normalizedCustomFields,
         difficulty,
         visibility: scenario?.visibility ?? "draft",
         createdBy: userId,
@@ -729,6 +739,45 @@ function ScenarioCreateDialog({
           <Field label="採点基準" className="md:col-span-1">
             <textarea value={criteria} onChange={(event) => setCriteria(event.target.value)} className="min-h-[120px] w-full resize-y rounded-[14px] border border-[#e4e8ef] bg-white px-4 py-3 text-[14px] leading-7 text-[#171717] outline-none transition focus:border-[#e0bd4b]" placeholder={"1行に1つ\n例：課題を確認できている"} />
           </Field>
+          <div className="md:col-span-2 rounded-[18px] border border-[#eef1f5] bg-[#fcfcfd] px-4 py-4">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <div className="text-[13px] font-bold text-[#343b48]">自由項目</div>
+                <p className="mt-1 text-[12px] text-[#7a808c]">シナリオに必要な項目名と中身を自由に追加できます。</p>
+              </div>
+              <button type="button" onClick={() => setCustomFields((current) => [...current, createCustomField()])} className="inline-flex h-10 items-center justify-center rounded-[12px] border border-[#e4e8ef] bg-white px-4 text-[13px] font-black text-[#343b48]">
+                項目を追加
+              </button>
+            </div>
+            {customFields.length > 0 ? (
+              <div className="mt-4 space-y-3">
+                {customFields.map((field, index) => (
+                  <div key={field.id} className="rounded-[16px] border border-[#e6eaf0] bg-white px-4 py-4">
+                    <div className="mb-3 flex items-center justify-between gap-3">
+                      <div className="text-[12px] font-bold text-[#8a909b]">自由項目 {index + 1}</div>
+                      <button type="button" onClick={() => setCustomFields((current) => current.filter((item) => item.id !== field.id))} className="text-[12px] font-bold text-[#b4232a]">
+                        削除
+                      </button>
+                    </div>
+                    <div className="grid gap-3 md:grid-cols-[220px_minmax(0,1fr)]">
+                      <input
+                        value={field.label}
+                        onChange={(event) => updateCustomField(setCustomFields, field.id, "label", event.target.value)}
+                        className="h-11 rounded-[14px] border border-[#e4e8ef] bg-white px-3 text-[14px] text-[#171717] outline-none transition focus:border-[#e0bd4b]"
+                        placeholder="項目名"
+                      />
+                      <textarea
+                        value={field.value}
+                        onChange={(event) => updateCustomField(setCustomFields, field.id, "value", event.target.value)}
+                        className="min-h-[88px] resize-y rounded-[14px] border border-[#e4e8ef] bg-white px-3 py-3 text-[14px] leading-7 text-[#171717] outline-none transition focus:border-[#e0bd4b]"
+                        placeholder="中身"
+                      />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : null}
+          </div>
         </div>
 
         <div className="mt-6 flex justify-end gap-3">
@@ -754,6 +803,44 @@ function Field({ label, required = false, className = "", children }: { label: s
       {children}
     </label>
   );
+}
+
+function createCustomField(): RoleplayScenarioCustomField {
+  return {
+    id: `custom-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    label: "",
+    value: "",
+  };
+}
+
+function updateCustomField(
+  setCustomFields: React.Dispatch<React.SetStateAction<RoleplayScenarioCustomField[]>>,
+  id: string,
+  key: "label" | "value",
+  value: string,
+) {
+  setCustomFields((current) =>
+    current.map((field) => (field.id === id ? { ...field, [key]: value } : field)),
+  );
+}
+
+function normalizeCustomFields(fields: RoleplayScenarioCustomField[]) {
+  return fields
+    .map((field) => ({
+      id: field.id,
+      label: field.label.trim(),
+      value: field.value.trim(),
+    }))
+    .filter((field) => field.label && field.value)
+    .slice(0, 12);
+}
+
+function hasInvalidCustomFields(fields: RoleplayScenarioCustomField[]) {
+  return fields.some((field) => {
+    const hasLabel = Boolean(field.label.trim());
+    const hasValue = Boolean(field.value.trim());
+    return hasLabel !== hasValue;
+  });
 }
 
 function splitLines(value: string) {

@@ -33,7 +33,7 @@ export default function SalesRoleplayResultDetailPage() {
   }, [companyId, isAdmin, userId]);
 
   return (
-    <main className="overflow-x-hidden bg-transparent px-5 pb-3 pt-4 md:px-8 md:pb-4 md:pt-5">
+    <main className="overflow-x-hidden bg-transparent px-5 pb-0 pt-4 md:px-8 md:pb-0 md:pt-5">
       <div className="mx-auto max-w-[1180px]">
         <RoleplayHeader roleplayType={roleplayType} />
 

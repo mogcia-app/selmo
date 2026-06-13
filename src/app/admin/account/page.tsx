@@ -306,7 +306,7 @@ export default function AdminAccountPage() {
                 <QuickLink href="/admin/dashboard" label="ダッシュボード" body="チーム全体と個人の状況を見る" />
                 <QuickLink href="/admin/members" label="営業メンバー" body="営業マン別の指導状況を見る" />
                 <QuickLink href="/admin/analysis?category=meeting" label="商談分析" body="商談の改善点を確認する" />
-                <QuickLink href="/admin/analysis?category=teleapo" label="テレアポ分析" body="架電の改善点を確認する" />
+                <QuickLink href="/admin/analysis?category=teleapo" label="テレアポ分析" body="テレアポの改善点を確認する" />
               </div>
             </SettingsCard>
 

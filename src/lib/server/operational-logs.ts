@@ -8,7 +8,8 @@ export type AiUsageFeature =
   | "summary"
   | "analysis"
   | "roleplay"
-  | "knowledge_search";
+  | "knowledge_search"
+  | "dashboard_action";
 
 export async function saveAiUsageLog(input: {
   companyId?: string | null;

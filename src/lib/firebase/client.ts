@@ -1,6 +1,6 @@
 import { getApp, getApps, initializeApp } from "firebase/app";
 import { getAuth, inMemoryPersistence, initializeAuth } from "firebase/auth";
-import { getFirestore } from "firebase/firestore";
+import { getFirestore, initializeFirestore } from "firebase/firestore";
 import { getStorage } from "firebase/storage";
 
 import {
@@ -18,7 +18,7 @@ export const firebaseApp =
 
 export const firebaseAuth = firebaseApp ? createFirebaseAuth() : null;
 
-export const firestore = firebaseApp ? getFirestore(firebaseApp) : null;
+export const firestore = firebaseApp ? createFirestore() : null;
 
 export const firebaseStorage = firebaseApp ? getStorage(firebaseApp) : null;
 
@@ -27,6 +27,16 @@ function createFirebaseAuth() {
     return initializeAuth(firebaseApp!, { persistence: inMemoryPersistence });
   } catch {
     return getAuth(firebaseApp!);
+  }
+}
+
+function createFirestore() {
+  try {
+    return initializeFirestore(firebaseApp!, {
+      experimentalForceLongPolling: true,
+    });
+  } catch {
+    return getFirestore(firebaseApp!);
   }
 }
 

@@ -136,9 +136,9 @@ function TalkAnalysisBlock({ analysis }: { analysis: TalkAnalysis }) {
       </div>
 
       <div className="mt-4 rounded-[16px] border border-[#eef1f5] bg-[#fcfcfd] px-4 py-3">
-        <div className="text-[13px] font-black text-[#171717]">口癖チェック</div>
+        <div className="text-[13px] font-black text-[#171717]">頻出ワード</div>
         <p className="mt-1 text-[12px] leading-5 text-[#7a808c]">
-          営業側の実施トークから、繰り返し出ている言葉を抽出しています。
+          実施トーク全体から、繰り返し出ている言葉を機械的に数えています。
         </p>
         {analysis.fillers.length > 0 ? (
           <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
@@ -160,7 +160,7 @@ function TalkAnalysisBlock({ analysis }: { analysis: TalkAnalysis }) {
           </div>
         ) : (
           <div className="mt-3 rounded-[14px] border border-[#e6eaf0] bg-white px-4 py-3 text-[12px] font-bold text-[#7a808c]">
-            繰り返し使われている口癖は検出されませんでした。
+            2回以上出ているワードはありません。
           </div>
         )}
       </div>
@@ -231,7 +231,7 @@ export function buildTalkAnalysis(messages: RoleplayResult["messages"]): TalkAna
       turnLabel: evidenceTurn ? `営業${countSalesTurn(messages, evidenceTurn.index)}回目` : null,
     };
   });
-  const fillers = extractRepeatedWords(salesTurns, messages);
+  const fillers = extractFrequentWords(messages);
 
   return {
     checklist,
@@ -335,92 +335,71 @@ function includesAny(text: string, keywords: readonly string[]) {
   return keywords.some((keyword) => text.includes(keyword));
 }
 
-function extractRepeatedWords(
-  turns: Array<{ message: RoleplayResult["messages"][number]; index: number }>,
+function extractFrequentWords(
   messages: RoleplayResult["messages"],
 ): FillerAnalysisItem[] {
-  const counts = new Map<string, { count: number; firstTurn: typeof turns[number] }>();
+  const stopWords = new Set([
+    "です",
+    "ます",
+    "した",
+    "して",
+    "ある",
+    "いる",
+    "こと",
+    "これ",
+    "それ",
+    "ため",
+    "よう",
+    "はい",
+    "では",
+    "ので",
+    "から",
+    "ですか",
+    "ください",
+    "ありがとう",
+    "ございます",
+  ]);
+  const counts = new Map<string, { count: number; firstMessage: RoleplayResult["messages"][number]; firstIndex: number }>();
 
-  for (const turn of turns) {
-    for (const word of extractCandidateWords(turn.message.content)) {
+  messages.forEach((message, index) => {
+    const matches = message.content.match(/[一-龠ぁ-んァ-ヶA-Za-z0-9ー]{2,}/g) ?? [];
+
+    for (const rawWord of matches) {
+      const word = rawWord.toLowerCase();
+      if (stopWords.has(word)) {
+        continue;
+      }
+
       const current = counts.get(word);
       if (current) {
         counts.set(word, { ...current, count: current.count + 1 });
       } else {
-        counts.set(word, { count: 1, firstTurn: turn });
+        counts.set(word, { count: 1, firstMessage: message, firstIndex: index });
       }
     }
-  }
+  });
 
   return [...counts.entries()]
-    .filter(([word, item]) => item.count >= getRepeatedWordThreshold(word))
+    .filter(([, item]) => item.count >= 2)
     .sort((left, right) => right[1].count - left[1].count || left[0].localeCompare(right[0], "ja"))
-    .slice(0, 8)
+    .slice(0, 12)
     .map(([word, item]) => ({
       label: word,
       count: item.count,
-      evidence: trimEvidence(item.firstTurn.message.content),
-      turnLabel: `営業${countSalesTurn(messages, item.firstTurn.index)}回目`,
+      evidence: trimEvidence(item.firstMessage.content),
+      turnLabel:
+        item.firstMessage.role === "sales"
+          ? `営業${countSalesTurn(messages, item.firstIndex)}回目`
+          : `AI顧客${countCustomerTurn(messages, item.firstIndex)}回目`,
     }));
-}
-
-function extractCandidateWords(text: string) {
-  const normalized = text
-    .replace(/[。、！？!?「」『』（）()\[\]【】,.\n\r]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-  const words: string[] = [];
-
-  for (const pattern of repeatedWordPatterns) {
-    const matches = normalized.match(pattern);
-    if (matches) words.push(...matches);
-  }
-
-  words.push(
-    ...normalized
-      .split(" ")
-      .map((word) => word.trim())
-      .filter((word) => word.length >= 2 && word.length <= 12 && !ignoredRepeatedWords.has(word)),
-  );
-
-  return words.map(normalizeRepeatedWord).filter((word) => word.length >= 2 && !ignoredRepeatedWords.has(word));
-}
-
-const repeatedWordPatterns = [
-  /えー+/g,
-  /あの+/g,
-  /そのー+/g,
-  /まー+/g,
-  /まあ/g,
-  /なんか/g,
-  /ちょっと/g,
-  /えっと/g,
-  /ええと/g,
-  /あー+/g,
-  /はい/g,
-  /ですね/g,
-  /っていう/g,
-  /という/g,
-  /そういった/g,
-  /こちら/g,
-  /効果/g,
-  /集客/g,
-  /改善/g,
-  /分析/g,
-] as const;
-
-const ignoredRepeatedWords = new Set(["ます", "です", "ました", "ください", "ありがとうございます"]);
-
-function normalizeRepeatedWord(word: string) {
-  return word.replace(/^まー+$/, "まあ").replace(/^えー+$/, "えー").replace(/^あー+$/, "あー");
-}
-
-function getRepeatedWordThreshold(word: string) {
-  return word.length <= 3 ? 2 : 3;
 }
 
 function countSalesTurn(messages: RoleplayResult["messages"], targetIndex: number) {
   return messages.slice(0, targetIndex + 1).filter((message) => message.role === "sales").length;
+}
+
+function countCustomerTurn(messages: RoleplayResult["messages"], targetIndex: number) {
+  return messages.slice(0, targetIndex + 1).filter((message) => message.role === "customer").length;
 }
 
 function trimEvidence(text: string) {

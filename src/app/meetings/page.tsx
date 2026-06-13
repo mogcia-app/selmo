@@ -20,13 +20,13 @@ export default function MeetingsPage() {
   const category = searchParams.get("category") === "teleapo" ? "teleapo" : "meeting";
   const copy = category === "teleapo"
     ? {
-        title: "架電一覧",
-        description: "過去のテレアポ・架電ログを検索し、文字起こしや詳細を確認できます。",
-        loading: "架電一覧を読み込み中です。",
-        empty: "条件に一致する架電ログがありません。検索条件を変更してください。",
-        uploadLabel: "架電ログをアップロード",
+        title: "テレアポ一覧",
+        description: "過去のテレアポログを検索し、文字起こしや詳細を確認できます。",
+        loading: "テレアポ一覧を読み込み中です。",
+        empty: "条件に一致するテレアポログがありません。検索条件を変更してください。",
+        uploadLabel: "テレアポログをアップロード",
         searchPlaceholder: "会社名・担当者名・商材で検索",
-        purposeLabel: "架電目的",
+        purposeLabel: "テレアポ目的",
         backLabel: "ダッシュボードへ戻る",
       }
     : {
@@ -120,7 +120,7 @@ export default function MeetingsPage() {
   }, [category, dateFilter, meetings, productFilter, search, statusFilter]);
 
   async function handleDeleteMeeting(meeting: MeetingRecord) {
-    const label = meeting.customerName || (category === "teleapo" ? "この架電ログ" : "この打ち合わせ");
+    const label = meeting.customerName || (category === "teleapo" ? "このテレアポログ" : "この打ち合わせ");
     if (!window.confirm(`${label}を削除します。よろしいですか？`)) {
       return;
     }

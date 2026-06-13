@@ -257,7 +257,7 @@ export async function createMeeting(input: CreateMeetingInput) {
     userId: input.userId,
     type: input.transcriptText?.trim() ? "transcript_pasted" : "meeting_uploaded",
     title: input.transcriptText?.trim() ? "文字起こし貼り付け" : salesDomain === "teleapo" ? "テレアポアップロード" : "商談アップロード",
-    summary: `${input.customerName || (salesDomain === "teleapo" ? "未設定の架電" : "未設定の商談")}を登録しました`,
+    summary: `${input.customerName || (salesDomain === "teleapo" ? "未設定のテレアポ" : "未設定の商談")}を登録しました`,
     detail: [
       `顧客名: ${input.customerName || "未設定"}`,
       `商材: ${input.productType || "未設定"}`,

@@ -21,6 +21,7 @@ type RoleplayScenarioPayload = {
   goal: string;
   objections: string[];
   evaluationCriteria?: string[];
+  customFields?: Array<{ label?: string; value?: string }>;
   difficulty: "easy" | "normal" | "hard";
 };
 
@@ -179,8 +180,20 @@ function buildSystemPrompt(scenario: RoleplayScenarioPayload) {
     `顧客の目的: ${scenario.goal}`,
     `想定反論: ${scenario.objections.join(" / ")}`,
     `採点基準・改善テーマ: ${(scenario.evaluationCriteria ?? []).join(" / ")}`,
+    `追加条件: ${readScenarioCustomFields(scenario.customFields).join(" / ") || "なし"}`,
     `難易度: ${strictness}`,
   ].join("\n");
+}
+
+function readScenarioCustomFields(fields: RoleplayScenarioPayload["customFields"]) {
+  return (fields ?? [])
+    .map((field) => {
+      const label = typeof field.label === "string" ? field.label.trim() : "";
+      const value = typeof field.value === "string" ? field.value.trim() : "";
+      return label && value ? `${label}: ${value}` : "";
+    })
+    .filter(Boolean)
+    .slice(0, 12);
 }
 
 function buildFallbackCustomerReply(scenario: RoleplayScenarioPayload, messages: RoleplayMessage[]) {

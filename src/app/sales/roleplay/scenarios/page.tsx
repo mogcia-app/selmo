@@ -16,6 +16,7 @@ import {
   type RoleplayAssignment,
   type RoleplayDifficulty,
   type RoleplayScenario,
+  type RoleplayScenarioCustomField,
 } from "@/lib/firebase/roleplay";
 
 export default function SalesRoleplayScenariosPage() {
@@ -37,13 +38,11 @@ export default function SalesRoleplayScenariosPage() {
   );
   const visibleScenarios = useMemo(
     () =>
-      scenarios.filter(
-        (scenario) =>
-          scenario.visibility === "all" ||
-          scenario.createdBy === userId ||
-          activeAssignmentScenarioIds.has(scenario.id),
-      ),
-    [activeAssignmentScenarioIds, scenarios, userId],
+      scenarios.filter((scenario) => {
+        if (scenario.roleplayType !== roleplayType) return false;
+        return scenario.visibility === "all" || scenario.createdBy === userId || activeAssignmentScenarioIds.has(scenario.id);
+      }),
+    [activeAssignmentScenarioIds, roleplayType, scenarios, userId],
   );
   const activeScenario = useMemo(
     () => visibleScenarios.find((scenario) => scenario.id === activeScenarioId) ?? visibleScenarios[0] ?? null,
@@ -83,13 +82,9 @@ export default function SalesRoleplayScenariosPage() {
     () => assignments.filter((assignment) => assignment.status === "assigned"),
     [assignments],
   );
-  const recommendedScenarios = useMemo(
-    () => buildRecommendedScenarios(meetings, visibleScenarios),
-    [meetings, visibleScenarios],
-  );
 
   return (
-    <main className="overflow-x-hidden bg-transparent px-5 pb-3 pt-4 md:px-8 md:pb-4 md:pt-5">
+    <main className="overflow-x-hidden bg-transparent px-5 pb-0 pt-4 md:px-8 md:pb-0 md:pt-5">
       <div className="mx-auto max-w-[1380px]">
         <RoleplayHeader activeStep="scenario" roleplayType={roleplayType} />
 
@@ -138,18 +133,6 @@ export default function SalesRoleplayScenariosPage() {
               </section>
             ) : null}
 
-            {recommendedScenarios.length > 0 ? (
-              <section className="mt-6 rounded-[20px] border border-[#e6eaf0] bg-[#fcfcfd] px-4 py-4">
-                <p className="text-[12px] font-black text-[#8a6500]">RECOMMENDED</p>
-                <h3 className="mt-1 text-[18px] font-black text-[#171717]">商談分析からの推奨ロープレ</h3>
-                <div className="mt-3 grid gap-3 md:grid-cols-2">
-                  {recommendedScenarios.map(({ scenario, reason }) => (
-                    <RecommendationCard key={scenario.id} scenario={scenario} reason={reason} roleplayType={roleplayType} />
-                  ))}
-                </div>
-              </section>
-            ) : null}
-
             {visibleScenarios.length > 0 ? (
               <div className="mt-6 grid gap-3 md:grid-cols-2">
                 {visibleScenarios.map((scenario) => (
@@ -192,7 +175,7 @@ export default function SalesRoleplayScenariosPage() {
             )}
           </article>
 
-          <aside className="rounded-[24px] border border-[#e2e6ee] bg-white px-5 py-5 shadow-[0_8px_24px_rgba(17,24,39,0.04)]">
+          <aside className="h-fit rounded-[24px] border border-[#e2e6ee] bg-white px-5 py-5 shadow-[0_8px_24px_rgba(17,24,39,0.04)] xl:sticky xl:top-5">
             <h2 className="text-[18px] font-black text-[#171717]">選択中のAI顧客</h2>
             {activeScenario ? (
               <div className="mt-5 space-y-4">
@@ -203,6 +186,9 @@ export default function SalesRoleplayScenariosPage() {
                 <InfoBlock label="ゴール" value={activeScenario.goal} />
                 <InfoBlock label="想定反論" value={activeScenario.objections.join(" / ") || "未設定"} />
                 <InfoBlock label="採点基準" value={activeScenario.evaluationCriteria.join(" / ") || "未設定"} />
+                {activeScenario.customFields.map((field) => (
+                  <InfoBlock key={field.id} label={field.label} value={field.value} />
+                ))}
                 <button
                   type="button"
                   onClick={() => setEditingScenario(activeScenario)}
@@ -235,6 +221,7 @@ export default function SalesRoleplayScenariosPage() {
           meetings={meetings}
           userId={userId}
           companyId={profile.companyId}
+          roleplayType={roleplayType}
           onClose={() => setDialogOpen(false)}
           onCreated={() => setDialogOpen(false)}
           onError={setError}
@@ -246,6 +233,7 @@ export default function SalesRoleplayScenariosPage() {
           meetings={meetings}
           userId={userId}
           companyId={profile.companyId}
+          roleplayType={roleplayType}
           scenario={editingScenario}
           onClose={() => setEditingScenario(null)}
           onCreated={() => setEditingScenario(null)}
@@ -261,6 +249,7 @@ function ScenarioCreateDialog({
   meetings,
   userId,
   companyId,
+  roleplayType,
   scenario,
   onClose,
   onCreated,
@@ -270,6 +259,7 @@ function ScenarioCreateDialog({
   meetings: MeetingRecord[];
   userId: string;
   companyId: string;
+  roleplayType: RoleplayType;
   scenario?: RoleplayScenario;
   onClose: () => void;
   onCreated: () => void;
@@ -293,6 +283,7 @@ function ScenarioCreateDialog({
   const [goal, setGoal] = useState(scenario?.goal ?? (prefillPurpose ? `${prefillPurpose}の予定に向けて、顧客課題を確認し次回アクションまで進める。` : ""));
   const [objections, setObjections] = useState((scenario?.objections ?? (prefillIssues ? splitLines(prefillIssues) : [])).join("\n"));
   const [criteria, setCriteria] = useState((scenario?.evaluationCriteria ?? []).join("\n"));
+  const [customFields, setCustomFields] = useState<RoleplayScenarioCustomField[]>(scenario?.customFields ?? []);
   const [difficulty, setDifficulty] = useState<RoleplayDifficulty>(scenario?.difficulty ?? "hard");
   const [isSaving, setIsSaving] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
@@ -351,8 +342,16 @@ function ScenarioCreateDialog({
     setIsSaving(true);
     onError(null);
     try {
+      const normalizedCustomFields = normalizeCustomFields(customFields);
+      if (hasInvalidCustomFields(customFields)) {
+        onError("自由項目は項目名と中身を両方入力してください。");
+        setIsSaving(false);
+        return;
+      }
+
       const payload = {
         companyId,
+        roleplayType,
         title: title.trim() || `${selectedProduct.name} ${scenarioCategory}ロープレ`,
         description: description.trim(),
         productId: selectedProduct.id,
@@ -364,6 +363,7 @@ function ScenarioCreateDialog({
         goal: goal.trim(),
         objections: splitLines(objections),
         evaluationCriteria: splitLines(criteria),
+        customFields: normalizedCustomFields,
         difficulty,
         visibility: scenario?.visibility ?? "draft",
         createdBy: userId,
@@ -446,6 +446,45 @@ function ScenarioCreateDialog({
           <Field label="採点基準" className="md:col-span-1">
             <textarea value={criteria} onChange={(event) => setCriteria(event.target.value)} className="min-h-[120px] w-full resize-y rounded-[14px] border border-[#e4e8ef] bg-white px-4 py-3 text-[14px] leading-7 text-[#171717] outline-none transition focus:border-[#e0bd4b]" placeholder={"1行に1つ\n例：課題を確認できている"} />
           </Field>
+          <div className="md:col-span-2 rounded-[18px] border border-[#eef1f5] bg-[#fcfcfd] px-4 py-4">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <div className="text-[13px] font-bold text-[#343b48]">自由項目</div>
+                <p className="mt-1 text-[12px] text-[#7a808c]">シナリオに必要な項目名と中身を自由に追加できます。</p>
+              </div>
+              <button type="button" onClick={() => setCustomFields((current) => [...current, createCustomField()])} className="inline-flex h-10 items-center justify-center rounded-[12px] border border-[#e4e8ef] bg-white px-4 text-[13px] font-black text-[#343b48]">
+                項目を追加
+              </button>
+            </div>
+            {customFields.length > 0 ? (
+              <div className="mt-4 space-y-3">
+                {customFields.map((field, index) => (
+                  <div key={field.id} className="rounded-[16px] border border-[#e6eaf0] bg-white px-4 py-4">
+                    <div className="mb-3 flex items-center justify-between gap-3">
+                      <div className="text-[12px] font-bold text-[#8a909b]">自由項目 {index + 1}</div>
+                      <button type="button" onClick={() => setCustomFields((current) => current.filter((item) => item.id !== field.id))} className="text-[12px] font-bold text-[#b4232a]">
+                        削除
+                      </button>
+                    </div>
+                    <div className="grid gap-3 md:grid-cols-[220px_minmax(0,1fr)]">
+                      <input
+                        value={field.label}
+                        onChange={(event) => updateCustomField(setCustomFields, field.id, "label", event.target.value)}
+                        className="h-11 rounded-[14px] border border-[#e4e8ef] bg-white px-3 text-[14px] text-[#171717] outline-none transition focus:border-[#e0bd4b]"
+                        placeholder="項目名"
+                      />
+                      <textarea
+                        value={field.value}
+                        onChange={(event) => updateCustomField(setCustomFields, field.id, "value", event.target.value)}
+                        className="min-h-[88px] resize-y rounded-[14px] border border-[#e4e8ef] bg-white px-3 py-3 text-[14px] leading-7 text-[#171717] outline-none transition focus:border-[#e0bd4b]"
+                        placeholder="中身"
+                      />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : null}
+          </div>
         </div>
 
         <div className="mt-6 flex justify-end gap-3">
@@ -471,6 +510,44 @@ function Field({ label, required = false, className = "", children }: { label: s
       {children}
     </label>
   );
+}
+
+function createCustomField(): RoleplayScenarioCustomField {
+  return {
+    id: `custom-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    label: "",
+    value: "",
+  };
+}
+
+function updateCustomField(
+  setCustomFields: React.Dispatch<React.SetStateAction<RoleplayScenarioCustomField[]>>,
+  id: string,
+  key: "label" | "value",
+  value: string,
+) {
+  setCustomFields((current) =>
+    current.map((field) => (field.id === id ? { ...field, [key]: value } : field)),
+  );
+}
+
+function normalizeCustomFields(fields: RoleplayScenarioCustomField[]) {
+  return fields
+    .map((field) => ({
+      id: field.id,
+      label: field.label.trim(),
+      value: field.value.trim(),
+    }))
+    .filter((field) => field.label && field.value)
+    .slice(0, 12);
+}
+
+function hasInvalidCustomFields(fields: RoleplayScenarioCustomField[]) {
+  return fields.some((field) => {
+    const hasLabel = Boolean(field.label.trim());
+    const hasValue = Boolean(field.value.trim());
+    return hasLabel !== hasValue;
+  });
 }
 
 function RoleplayHeader({ activeStep, roleplayType }: { activeStep: "scenario" | "practice" | "results"; roleplayType: RoleplayType }) {
@@ -526,23 +603,6 @@ function AssignmentCard({ assignment, roleplayType }: { assignment: RoleplayAssi
   );
 }
 
-function RecommendationCard({ scenario, reason, roleplayType }: { scenario: RoleplayScenario; reason: string; roleplayType: RoleplayType }) {
-  return (
-    <Link
-      href={`/sales/roleplay?category=${roleplayType}&scenarioId=${encodeURIComponent(scenario.id)}`}
-      className="block rounded-[16px] border border-[#e6eaf0] bg-white px-4 py-3 transition hover:border-[#f0c655]"
-    >
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <div className="truncate text-[14px] font-black text-[#171717]">{scenario.title}</div>
-          <p className="mt-1 line-clamp-2 text-[12px] leading-5 text-[#596273]">{reason}</p>
-        </div>
-        <DifficultyBadge difficulty={scenario.difficulty} />
-      </div>
-    </Link>
-  );
-}
-
 function DifficultyBadge({ difficulty }: { difficulty: RoleplayDifficulty }) {
   const label = difficulty === "easy" ? "やさしい" : difficulty === "hard" ? "難しい" : "標準";
   return <span className="shrink-0 rounded-full bg-[#fff3cf] px-2.5 py-1 text-[11px] font-black text-[#9c7600]">{label}</span>;
@@ -550,62 +610,6 @@ function DifficultyBadge({ difficulty }: { difficulty: RoleplayDifficulty }) {
 
 function Pill({ children }: { children: React.ReactNode }) {
   return <span className="rounded-full bg-[#f1f2f5] px-2.5 py-1 text-[11px] font-bold text-[#596273]">{children}</span>;
-}
-
-function buildRecommendedScenarios(meetings: MeetingRecord[], scenarios: RoleplayScenario[]) {
-  const analyzedMeetings = meetings
-    .filter((meeting) => meeting.aiSummary || meeting.status === "lost")
-    .sort((left, right) => (right.recordedAt?.getTime() ?? 0) - (left.recordedAt?.getTime() ?? 0));
-
-  if (analyzedMeetings.length === 0 || scenarios.length === 0) {
-    return [];
-  }
-
-  const recommendations: Array<{ scenario: RoleplayScenario; reason: string; score: number }> = [];
-
-  for (const scenario of scenarios) {
-    const relatedMeeting = analyzedMeetings.find((meeting) => {
-      const haystack = [
-        meeting.productType,
-        meeting.customerName,
-        meeting.aiSummary?.overview,
-        ...(meeting.aiSummary?.bullets ?? []),
-      ].join(" ");
-      const keywords = [
-        scenario.productName,
-        scenario.title,
-        scenario.goal,
-        ...scenario.objections,
-      ].filter(Boolean);
-
-      return keywords.some((keyword) => haystack.includes(keyword.slice(0, Math.min(5, keyword.length))));
-    }) ?? analyzedMeetings[0];
-
-    let score = 0;
-    if (relatedMeeting.productType && scenario.productName && relatedMeeting.productType === scenario.productName) {
-      score += 3;
-    }
-    if (relatedMeeting.status === "lost") {
-      score += 2;
-    }
-    if (relatedMeeting.aiSummary) {
-      score += 1;
-    }
-
-    recommendations.push({
-      scenario,
-      reason:
-        relatedMeeting.status === "lost"
-          ? `${relatedMeeting.customerName || "直近商談"}で失注/要確認があるため、次回商談前の練習におすすめです。`
-          : `${relatedMeeting.customerName || "直近商談"}のAI要約から、近いテーマの練習としておすすめです。`,
-      score,
-    });
-  }
-
-  return recommendations
-    .sort((left, right) => right.score - left.score)
-    .slice(0, 4)
-    .map(({ scenario, reason }) => ({ scenario, reason }));
 }
 
 function splitLines(value: string) {

@@ -46,7 +46,7 @@ const modeCopy: Record<AnalysisMode, {
   teleapo: {
     eyebrow: "TELEAPO ANALYSIS",
     title: "営業マンのテレアポ分析一覧",
-    description: "営業マンごとの架電分析結果を確認し、受付突破・興味づけ・断り理由・次回改善を絞り込みます。",
+    description: "営業マンごとのテレアポ分析結果を確認し、受付突破・興味づけ・断り理由・次回改善を絞り込みます。",
     listTitle: "テレアポ分析一覧",
     successLabel: "アポ獲得",
     pendingLabel: "追客中",
@@ -213,7 +213,7 @@ function AnalysisRow({ meeting, memberName, memberEmail, mode }: { meeting: Meet
   const copy = modeCopy[mode];
   const score = getMeetingScore(meeting);
   const issue = meeting.aiSummary?.manualCompliance?.missingCriteria[0] ?? meeting.aiSummary?.bullets[0] ?? meeting.aiSummary?.overview ?? "分析結果を確認してください";
-  const nextPhrase = meeting.aiSummary?.manualCompliance?.improvementPhrases[0] ?? (mode === "meeting" ? "次回商談で顧客課題を確認" : "次回架電で冒頭の興味づけを改善");
+  const nextPhrase = meeting.aiSummary?.manualCompliance?.improvementPhrases[0] ?? (mode === "meeting" ? "次回商談で顧客課題を確認" : "次回テレアポで冒頭の興味づけを改善");
 
   return (
     <Link href={`/admin/meetings/${meeting.id}`} className="block rounded-[18px] border border-[#eef1f5] bg-[#fcfcfd] px-4 py-4 transition hover:border-[#f0c655] hover:bg-white">

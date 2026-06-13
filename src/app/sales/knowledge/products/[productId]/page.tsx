@@ -2,10 +2,11 @@
 
 import { FirebaseError } from "firebase/app";
 import Link from "next/link";
-import { useParams } from "next/navigation";
+import { useParams, usePathname } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 
 import { useAuth } from "@/features/auth/auth-provider";
+import { getKnowledgeBasePath } from "@/lib/knowledge-paths";
 import {
   addKnowledgeProductTab,
   subscribeToKnowledgeItemsByProduct,
@@ -23,8 +24,10 @@ type ProductSection = {
 
 export default function SalesKnowledgeProductPage() {
   const params = useParams<{ productId: string }>();
+  const pathname = usePathname();
   const { profile } = useAuth();
   const productId = params.productId;
+  const basePath = getKnowledgeBasePath(pathname);
   const userId = profile?.uid;
   const companyId = profile?.companyId;
   const [products, setProducts] = useState<KnowledgeProduct[]>([]);
@@ -73,10 +76,10 @@ export default function SalesKnowledgeProductPage() {
 
   return (
     <main className="overflow-x-hidden bg-transparent">
-      <div className="min-w-0 px-5 pb-3 pt-4 md:px-8 md:pb-4 md:pt-5">
+      <div className="min-w-0 px-5 pb-0 pt-4 md:px-8 md:pb-0 md:pt-5">
         <div className="mx-auto max-w-[1180px] min-w-0">
           <Link
-            href="/sales/knowledge"
+            href={basePath}
             className="inline-flex items-center gap-2 text-[13px] font-semibold text-[#596273] transition hover:text-[#171717]"
           >
             <ArrowLeftIcon />
@@ -109,7 +112,7 @@ export default function SalesKnowledgeProductPage() {
                   商材設定
                 </button>
                 <Link
-                  href={`/sales/knowledge/new?kind=knowledge&scope=personal&productId=${encodeURIComponent(productId)}${
+                  href={`${basePath}/new?kind=knowledge&scope=personal&productId=${encodeURIComponent(productId)}${
                     activeTab !== "all" ? `&tabTitle=${encodeURIComponent(activeTab)}` : ""
                   }`}
                   className="inline-flex h-[46px] items-center gap-2 rounded-[14px] border border-[#f0c655] bg-white px-5 text-[14px] font-bold text-[#171717] shadow-[0_8px_18px_rgba(17,24,39,0.05)]"
@@ -165,7 +168,7 @@ export default function SalesKnowledgeProductPage() {
                 {visibleItems.map((item) => (
                   <Link
                     key={item.id}
-                    href={getKnowledgeDetailHref(item)}
+                    href={getKnowledgeDetailHref(item, basePath)}
                     className="grid gap-4 rounded-[14px] border border-[#e5e9f0] bg-white px-4 py-4 shadow-[0_6px_16px_rgba(17,24,39,0.025)] md:grid-cols-[56px_minmax(0,1fr)_112px]"
                   >
                     <span className="inline-flex h-14 w-14 items-center justify-center rounded-[12px] bg-[#ecefff] text-[#5767c8] [&_svg]:h-6 [&_svg]:w-6">
@@ -206,7 +209,7 @@ export default function SalesKnowledgeProductPage() {
                   商材に紐づけて作成したナレッジやメモが、タブごとに表示されます。
                 </p>
                 <Link
-                  href={`/sales/knowledge/new?kind=knowledge&scope=personal&productId=${encodeURIComponent(productId)}${
+                  href={`${basePath}/new?kind=knowledge&scope=personal&productId=${encodeURIComponent(productId)}${
                     activeTab !== "all" ? `&tabTitle=${encodeURIComponent(activeTab)}` : ""
                   }`}
                   className="mt-5 inline-flex h-11 items-center justify-center rounded-[14px] border border-[#f0c655] bg-white px-5 text-[14px] font-bold text-[#171717]"
@@ -310,8 +313,8 @@ export default function SalesKnowledgeProductPage() {
   );
 }
 
-function getKnowledgeDetailHref(item: KnowledgeItem) {
-  return `/sales/knowledge/categories/${item.categoryId ?? "how-to"}/knowledge/${item.id}`;
+function getKnowledgeDetailHref(item: KnowledgeItem, basePath: string) {
+  return `${basePath}/categories/${item.categoryId ?? "how-to"}/knowledge/${item.id}`;
 }
 
 function buildProductTabs(items: KnowledgeItem[], productTabs: string[], productSections: ProductSection[]) {

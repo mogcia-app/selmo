@@ -2,10 +2,11 @@
 
 import { FirebaseError } from "firebase/app";
 import Link from "next/link";
-import { useParams, useRouter } from "next/navigation";
+import { useParams, usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
 import { useAuth } from "@/features/auth/auth-provider";
+import { getKnowledgeBasePath } from "@/lib/knowledge-paths";
 import {
   deleteKnowledgeItem,
   subscribeToKnowledgeItem,
@@ -15,13 +16,15 @@ import {
 export default function SalesKnowledgeDetailPage() {
   const router = useRouter();
   const params = useParams<{ categoryId: string; knowledgeId: string }>();
+  const pathname = usePathname();
   const { profile } = useAuth();
+  const basePath = getKnowledgeBasePath(pathname);
   const [knowledge, setKnowledge] = useState<KnowledgeItem | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const userId = profile?.uid;
-  const canEdit = Boolean(knowledge && (knowledge.ownerId === userId || profile?.role === "admin"));
+  const canEdit = Boolean(knowledge?.companyId && (knowledge.ownerId === userId || profile?.role === "admin"));
 
   useEffect(() => {
     if (!params.knowledgeId) return;
@@ -41,7 +44,7 @@ export default function SalesKnowledgeDetailPage() {
 
     try {
       await deleteKnowledgeItem(knowledge.id);
-      router.replace(`/sales/knowledge/categories/${params.categoryId}`);
+      router.replace(`${basePath}/categories/${params.categoryId}`);
     } catch (nextError) {
       setError(nextError instanceof Error ? nextError.message : "ナレッジの削除に失敗しました。");
     } finally {
@@ -51,11 +54,11 @@ export default function SalesKnowledgeDetailPage() {
   };
 
   return (
-    <main className="overflow-x-hidden bg-transparent px-5 pb-3 pt-4 md:px-8 md:pb-4 md:pt-5">
+    <main className="overflow-x-hidden bg-transparent px-5 pb-0 pt-4 md:px-8 md:pb-0 md:pt-5">
       <div className="mx-auto max-w-[900px]">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <Link
-            href={`/sales/knowledge/categories/${params.categoryId}`}
+            href={`${basePath}/categories/${params.categoryId}`}
             className="text-[14px] font-semibold text-[#5767c8]"
           >
             ← カテゴリに戻る
@@ -63,7 +66,7 @@ export default function SalesKnowledgeDetailPage() {
           {knowledge && canEdit ? (
             <div className="flex flex-wrap items-center gap-2">
               <Link
-                href={`/sales/knowledge/categories/${params.categoryId}/knowledge/${params.knowledgeId}/edit`}
+                href={`${basePath}/categories/${params.categoryId}/knowledge/${params.knowledgeId}/edit`}
                 className="inline-flex h-10 items-center gap-2 rounded-[13px] border border-[#e6eaf0] bg-white px-4 text-[13px] font-bold text-[#343b48] shadow-[0_6px_16px_rgba(17,24,39,0.04)]"
               >
                 <PenIcon />

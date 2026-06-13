@@ -32,13 +32,13 @@ const modeCopy: Record<AnalysisMode, {
   },
   teleapo: {
     title: "テレアポ分析",
-    description: "架電内容から、受付突破、興味づけ、断り文句、次回改善ポイントを確認できます。",
-    primaryLabel: "分析済み架電",
+    description: "テレアポ内容から、受付突破、興味づけ、断り文句、次回改善ポイントを確認できます。",
+    primaryLabel: "分析済みテレアポ",
     successLabel: "アポ獲得",
     pendingLabel: "追客中",
     lostLabel: "未獲得",
     emptyTitle: "分析済みテレアポはまだありません",
-    nextActionTitle: "次回架電までに見ること",
+    nextActionTitle: "次回テレアポまでに見ること",
   },
 };
 
@@ -111,8 +111,8 @@ export default function SalesAnalysisPage() {
   const lostCount = meetings.filter((meeting) => meeting.status === "lost").length;
 
   return (
-    <main className="overflow-x-hidden bg-transparent px-5 pb-3 pt-4 md:px-8 md:pb-4 md:pt-5">
-      <section className="mb-6 flex flex-col gap-5 xl:flex-row xl:items-start xl:justify-between">
+    <main className="overflow-x-hidden bg-transparent px-5 pb-0 pt-4 md:px-8 md:pb-0 md:pt-4">
+      <section className="mb-4 flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
         <div>
           <div className="text-[12px] font-black uppercase tracking-[0.22em] text-[#b58a00]">
             {mode === "meeting" ? "Meeting Analysis" : "Teleapo Analysis"}
@@ -140,7 +140,7 @@ export default function SalesAnalysisPage() {
       ) : null}
 
       {!canAccessDomain ? (
-        <div className="rounded-[24px] border border-[#f2d6d6] bg-white px-6 py-12 text-center">
+        <div className="rounded-[24px] border border-[#f2d6d6] bg-white px-6 py-8 text-center">
           <h2 className="text-[26px] font-black tracking-[-0.04em] text-[#171717]">この分析は利用できません</h2>
           <p className="mt-3 text-[15px] leading-7 text-[#596273]">
             {mode === "teleapo" ? "テレアポ" : "商談"}の利用権限がありません。必要な場合は管理者に依頼してください。
@@ -153,11 +153,11 @@ export default function SalesAnalysisPage() {
       <section className="grid gap-4 md:grid-cols-4">
         <Metric label={copy.primaryLabel} value={`${analyzedMeetings.length}件`} note={`未分析 ${waitingMeetings.length}件`} />
         <Metric label={copy.successLabel} value={`${wonCount}件`} note={mode === "meeting" ? "成約扱い" : "アポ獲得扱い"} />
-        <Metric label={copy.pendingLabel} value={`${pendingCount}件`} note={mode === "meeting" ? "継続確認" : "再架電候補"} />
+        <Metric label={copy.pendingLabel} value={`${pendingCount}件`} note={mode === "meeting" ? "継続確認" : "再テレアポ候補"} />
         <Metric label={copy.lostLabel} value={`${lostCount}件`} note={mode === "meeting" ? "失注理由を確認" : "断り理由を確認"} />
       </section>
 
-      <section className="mt-6 grid gap-6 xl:grid-cols-[minmax(0,1.25fr)_minmax(340px,0.75fr)]">
+      <section className="mt-4 grid gap-4 xl:grid-cols-[minmax(0,1.25fr)_minmax(340px,0.75fr)]">
         <div className="rounded-[24px] border border-[#eceef4] bg-white p-5 shadow-[0_10px_28px_rgba(17,24,39,0.05)]">
           <div className="mb-4 flex items-center justify-between gap-3">
             <div>
@@ -170,11 +170,11 @@ export default function SalesAnalysisPage() {
           </div>
 
           {isLoading ? (
-            <div className="rounded-[18px] bg-[#fcfcfd] px-4 py-8 text-[14px] text-[#7a808c]">
+            <div className="rounded-[18px] bg-[#fcfcfd] px-4 py-6 text-[14px] text-[#7a808c]">
               分析結果を読み込み中です。
             </div>
           ) : latestAnalyses.length === 0 ? (
-            <div className="rounded-[18px] bg-[#fcfcfd] px-4 py-8 text-[14px] text-[#7a808c]">
+            <div className="rounded-[18px] bg-[#fcfcfd] px-4 py-6 text-[14px] text-[#7a808c]">
               {copy.emptyTitle}。アップロード後にAI分析を実行すると、ここに表示されます。
             </div>
           ) : (
@@ -186,7 +186,7 @@ export default function SalesAnalysisPage() {
           )}
         </div>
 
-        <div className="space-y-6">
+        <div className="space-y-4">
           <div className="rounded-[24px] border border-[#eceef4] bg-white p-5 shadow-[0_10px_28px_rgba(17,24,39,0.05)]">
             <h2 className="text-[18px] font-black text-[#171717]">{copy.nextActionTitle}</h2>
             <div className="mt-4 space-y-3">
@@ -202,9 +202,7 @@ export default function SalesAnalysisPage() {
           <div className="rounded-[24px] border border-[#f0c655] bg-[#fffaf0] p-5 shadow-[0_10px_28px_rgba(245,189,7,0.08)]">
             <h2 className="text-[18px] font-black text-[#171717]">推奨ロープレ</h2>
             <p className="mt-2 text-[13px] leading-6 text-[#6f5a18]">
-              {mode === "meeting"
-                ? "失注理由や顧客の懸念が出ている商談は、次回商談前に関連シナリオで練習しましょう。"
-                : "受付突破、冒頭の興味づけ、断り文句への返答を、次回架電前に練習しましょう。"}
+              {buildRoleplayRecommendation(latestAnalyses, mode)}
             </p>
             <Link
               href={`/sales/roleplay/scenarios?category=${mode}`}
@@ -273,40 +271,156 @@ function StatusPill({ status, mode }: { status: MeetingRecord["status"]; mode: A
 
 function buildActionItems(meetings: MeetingRecord[], mode: AnalysisMode) {
   const latest = meetings[0];
-  const missed = latest?.aiSummary?.manualCompliance?.missingCriteria[0];
-  const phrase = latest?.aiSummary?.manualCompliance?.improvementPhrases[0];
+  const summary = latest?.aiSummary;
 
-  if (mode === "teleapo") {
+  if (!latest || !summary) {
     return [
       {
-        title: "冒頭30秒の興味づけを確認",
-        body: missed ?? "相手が聞く理由を最初に作れているか確認しましょう。",
-      },
-      {
-        title: "断り文句への返答を準備",
-        body: phrase ?? "「必要ないです」に対して、課題確認へ戻す一言を用意しましょう。",
-      },
-      {
-        title: "次回架電前にロープレ",
-        body: "受付突破、担当者接続、日程打診の流れを短く練習しましょう。",
+        title: "分析済みデータがまだありません",
+        body: mode === "teleapo"
+          ? "テレアポログでAI分析を実行すると、次回テレアポ前に確認する項目がここに表示されます。"
+          : "商談ログでAI分析を実行すると、次回商談前に確認する項目がここに表示されます。",
       },
     ];
   }
 
+  const items: Array<{ title: string; body: string }> = [];
+  const missingCriteria = summary.manualCompliance?.missingCriteria ?? [];
+  const improvementPhrases = summary.manualCompliance?.improvementPhrases ?? [];
+  const statusEvidence = summary.diagnosis?.status.evidence ?? [];
+  const temperatureEvidence = summary.diagnosis?.temperature.evidence ?? [];
+  const considerationEvidence = summary.diagnosis?.consideration.evidence ?? [];
+  const lowScoreEvaluation = [...(summary.diagnosis?.salesEvaluation ?? [])].sort((left, right) => left.score - right.score)[0];
+  const evidence = [...statusEvidence, ...temperatureEvidence, ...considerationEvidence];
+
+  if (mode === "teleapo") {
+    if (missingCriteria[0]) {
+      items.push({
+        title: "未達項目を確認",
+        body: missingCriteria[0],
+      });
+    }
+
+    if (improvementPhrases[0]) {
+      items.push({
+        title: "次回使う改善フレーズ",
+        body: improvementPhrases[0],
+      });
+    }
+
+    if (lowScoreEvaluation) {
+      items.push({
+        title: `${lowScoreEvaluation.label}を見直す`,
+        body: lowScoreEvaluation.description || lowScoreEvaluation.evidence[0] || `${lowScoreEvaluation.score}点の評価項目です。`,
+      });
+    }
+
+    if (evidence[0]) {
+      items.push({
+        title: "AI分析の根拠を確認",
+        body: evidence[0],
+      });
+    }
+
+    summary.bullets.forEach((bullet, index) => {
+      if (items.length >= 3) return;
+      items.push({
+        title: `AI抽出ポイント${index + 1}`,
+        body: bullet,
+      });
+    });
+
+    return uniqueActionItems(items, summary.overview).slice(0, 3);
+  }
+
+  if (missingCriteria[0]) {
+    items.push({
+      title: "未達項目を確認",
+      body: missingCriteria[0],
+    });
+  }
+
+  if (improvementPhrases[0]) {
+    items.push({
+      title: "次回使う改善フレーズ",
+      body: improvementPhrases[0],
+    });
+  }
+
+  if (lowScoreEvaluation) {
+    items.push({
+      title: `${lowScoreEvaluation.label}を見直す`,
+      body: lowScoreEvaluation.description || lowScoreEvaluation.evidence[0] || `${lowScoreEvaluation.score}点の評価項目です。`,
+    });
+  }
+
+  if (evidence[0]) {
+    items.push({
+      title: "AI分析の根拠を確認",
+      body: evidence[0],
+    });
+  }
+
+  summary.bullets.forEach((bullet, index) => {
+    if (items.length >= 3) return;
+    items.push({
+      title: `AI抽出ポイント${index + 1}`,
+      body: bullet,
+    });
+  });
+
+  return uniqueActionItems(items, summary.overview).slice(0, 3);
+}
+
+function uniqueActionItems(items: Array<{ title: string; body: string }>, fallbackBody: string) {
+  const seen = new Set<string>();
+  const uniqueItems = items.filter((item) => {
+    const body = item.body.trim();
+    if (!body || seen.has(body)) return false;
+    seen.add(body);
+    return true;
+  });
+
+  if (uniqueItems.length > 0) {
+    return uniqueItems;
+  }
+
   return [
     {
-      title: "顧客課題を言語化",
-      body: missed ?? "相手が困っていることを、提案前に一文で言える状態にしましょう。",
-    },
-    {
-      title: "次回提案の切り返しを準備",
-      body: phrase ?? "価格・競合・導入時期への返答を、次回商談前に準備しましょう。",
-    },
-    {
-      title: "関連ロープレを実施",
-      body: "失注要因や懸念点に近いシナリオを選び、次回商談前に練習しましょう。",
+      title: "最新分析の要約を確認",
+      body: fallbackBody || "AI分析結果を確認してください。",
     },
   ];
+}
+
+function buildRoleplayRecommendation(meetings: MeetingRecord[], mode: AnalysisMode) {
+  const latest = meetings[0];
+  const summary = latest?.aiSummary;
+
+  if (!summary) {
+    return mode === "teleapo"
+      ? "テレアポ分析が完了すると、弱点に合わせたロープレテーマを表示します。"
+      : "商談分析が完了すると、弱点に合わせたロープレテーマを表示します。";
+  }
+
+  const missing = summary.manualCompliance?.missingCriteria[0];
+  const phrase = summary.manualCompliance?.improvementPhrases[0];
+  const lowScoreEvaluation = [...(summary.diagnosis?.salesEvaluation ?? [])].sort((left, right) => left.score - right.score)[0];
+  const product = latest.productType ? `${latest.productType}の` : "";
+
+  if (missing) {
+    return `${product}${mode === "teleapo" ? "テレアポ" : "商談"}で未達だった「${missing}」をテーマに練習しましょう。`;
+  }
+
+  if (lowScoreEvaluation) {
+    return `${product}${mode === "teleapo" ? "テレアポ" : "商談"}で評価が低かった「${lowScoreEvaluation.label}」を重点的に練習しましょう。`;
+  }
+
+  if (phrase) {
+    return `次回は「${phrase}」を自然に使えるようにロープレで確認しましょう。`;
+  }
+
+  return `${product}${mode === "teleapo" ? "テレアポ" : "商談"}の最新分析をもとに、改善ポイントを1つ選んで練習しましょう。`;
 }
 
 function buildFallbackPhrase(mode: AnalysisMode) {

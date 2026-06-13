@@ -163,9 +163,9 @@ async function summarizeTranscript(
   const meetingPurposeLabel = getMeetingPurposeLabel(input.meetingPurpose);
   const customerTypeLabel = input.customerType === "existing" ? "既存" : input.customerType === "new" ? "新規" : "未設定";
   const isTeleapo = input.salesDomain === "teleapo";
-  const domainLabel = isTeleapo ? "テレアポ/架電" : "商談";
-  const statusLabel = isTeleapo ? "架電ステータス" : "商談ステータス";
-  const evaluationLabel = isTeleapo ? "架電評価サマリー" : "商談評価サマリー";
+  const domainLabel = isTeleapo ? "テレアポ" : "商談";
+  const statusLabel = isTeleapo ? "テレアポステータス" : "商談ステータス";
+  const evaluationLabel = isTeleapo ? "テレアポ評価サマリー" : "商談評価サマリー";
   const finalActionLabel = isTeleapo ? "アポ打診" : "クロージング";
   const response = await fetchWithTimeout("https://api.openai.com/v1/chat/completions", {
     method: "POST",
@@ -315,7 +315,7 @@ async function summarizeTranscript(
               "温度感は顧客の前向きさです。顧客質問、課題の具体性、予算/時期/決裁者、次回アクション合意から high/middle/low と1〜5のstarsで評価してください。",
               "検討度は成約確度ではなく、検討の具体度です。課題明確さ、商材マッチ、予算、導入時期、決裁者/意思決定フロー、次回アクションの明確さから0〜100で採点してください。",
               `${evaluationLabel}は営業品質です。ヒアリング、課題深掘り、提案接続、反論対応、${finalActionLabel}を各0〜100で採点し、マニュアル/スコアルールがある場合はそれを優先してください。`,
-              isTeleapo ? "テレアポ/架電では、クロージングではなくアポ打診として、アポイント提案・日程打診・次回接点化の明確さを評価してください。" : "商談では、クロージングとして次回日程・宿題・決裁者確認まで進めているかを評価してください。",
+              isTeleapo ? "テレアポでは、クロージングではなくアポ打診として、アポイント提案・日程打診・次回接点化の明確さを評価してください。" : "商談では、クロージングとして次回日程・宿題・決裁者確認まで進めているかを評価してください。",
               "diagnosis 内の evidence は、必ず文字起こし本文に実在する発話またはそれに非常に近い短い引用にしてください。捏造や一般論は禁止です。",
               "evidence は判定理由が分かるように、商談ステータス・温度感・検討度・各評価項目ごとに1〜3件返してください。",
               "マニュアルがある場合は mode=manual、ない場合は mode=generic にしてください。",

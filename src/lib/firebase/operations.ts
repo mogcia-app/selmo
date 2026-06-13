@@ -33,6 +33,9 @@ export type SystemErrorInput = {
 export type AudioProcessingJobStatus =
   | "waiting"
   | "uploading"
+  | "convert_required"
+  | "converting"
+  | "converted"
   | "transcribing"
   | "analyzing"
   | "completed"

@@ -32,6 +32,21 @@ type DisplayLog = {
   kind: "speech" | "backchannel" | "unknown";
 };
 
+type TranscriptSidebarTab = "keywords" | "focusWords" | "important" | "checkpoints";
+
+type TranscriptFocusWordCategory = {
+  id: "issues" | "concerns" | "value" | "actions";
+  title: string;
+  description: string;
+  words: TranscriptFocusWord[];
+};
+
+type TranscriptFocusWord = {
+  term: string;
+  count: number;
+  evidence: DisplayLog;
+};
+
 type TranscriptReadingBlock = {
   text: string;
   startSec: number | null;
@@ -64,7 +79,7 @@ export function MeetingDetailScreen({
   const [isTranscribing, setIsTranscribing] = useState(false);
   const [logSearch, setLogSearch] = useState("");
   const [transcriptViewMode, setTranscriptViewMode] = useState("all");
-  const [transcriptSidebarTab, setTranscriptSidebarTab] = useState<"keywords" | "important" | "checkpoints">("keywords");
+  const [transcriptSidebarTab, setTranscriptSidebarTab] = useState<TranscriptSidebarTab>("keywords");
   const [selectedTranscriptBlockIndex, setSelectedTranscriptBlockIndex] = useState<number | null>(null);
   const [transcriptionVisualProgress, setTranscriptionVisualProgress] = useState(12);
   const [transcriptScrollbar, setTranscriptScrollbar] = useState<ScrollbarMetrics>({
@@ -108,7 +123,7 @@ export function MeetingDetailScreen({
     }
 
     if (!canUseSalesDomain(profile, meeting.salesDomain)) {
-      setErrorMessage(meeting.salesDomain === "teleapo" ? "この架電データを閲覧する権限がありません。" : "この商談データを閲覧する権限がありません。");
+      setErrorMessage(meeting.salesDomain === "teleapo" ? "このテレアポデータを閲覧する権限がありません。" : "この商談データを閲覧する権限がありません。");
       return;
     }
 
@@ -490,6 +505,7 @@ export function MeetingDetailScreen({
     [editableLogs],
   );
   const transcriptFrequentWords = useMemo(() => buildFrequentWords(editableLogs), [editableLogs]);
+  const transcriptFocusWords = useMemo(() => buildTranscriptFocusWords(editableLogs), [editableLogs]);
   const transcriptAiExtracts = useMemo(
     () => buildGroundedTranscriptExtractLogs(editableLogs).slice(0, 4),
     [editableLogs],
@@ -599,7 +615,7 @@ export function MeetingDetailScreen({
 
   if (isLoading) {
     return (
-      <main className="overflow-x-hidden bg-transparent px-5 pb-3 pt-4 md:px-8 md:pb-4 md:pt-5">
+      <main className="overflow-x-hidden bg-transparent px-5 pb-0 pt-4 md:px-8 md:pb-0 md:pt-5">
         <div className="rounded-[22px] border border-[#eceef4] bg-white p-8 text-[14px] text-[#7a808c] shadow-[0_10px_28px_rgba(17,24,39,0.05)]">
           打ち合わせ詳細を読み込み中です。
         </div>
@@ -609,7 +625,7 @@ export function MeetingDetailScreen({
 
   if (!meeting) {
     return (
-      <main className="overflow-x-hidden bg-transparent px-5 pb-3 pt-4 md:px-8 md:pb-4 md:pt-5">
+      <main className="overflow-x-hidden bg-transparent px-5 pb-0 pt-4 md:px-8 md:pb-0 md:pt-5">
         <div className="rounded-[22px] border border-[#ffd8cc] bg-[#fff4ef] p-8 text-[14px] text-[#cf4b39] shadow-[0_10px_28px_rgba(17,24,39,0.05)]">
           打ち合わせデータが見つかりませんでした。
         </div>
@@ -619,9 +635,9 @@ export function MeetingDetailScreen({
 
   if (!canUseSalesDomain(profile, meeting.salesDomain)) {
     return (
-      <main className="overflow-x-hidden bg-transparent px-5 pb-3 pt-4 md:px-8 md:pb-4 md:pt-5">
+      <main className="overflow-x-hidden bg-transparent px-5 pb-0 pt-4 md:px-8 md:pb-0 md:pt-5">
         <div className="rounded-[22px] border border-[#ffd8cc] bg-[#fff4ef] p-8 text-[14px] text-[#cf4b39] shadow-[0_10px_28px_rgba(17,24,39,0.05)]">
-          {meeting.salesDomain === "teleapo" ? "この架電データを閲覧する権限がありません。" : "この商談データを閲覧する権限がありません。"}
+          {meeting.salesDomain === "teleapo" ? "このテレアポデータを閲覧する権限がありません。" : "この商談データを閲覧する権限がありません。"}
         </div>
       </main>
     );
@@ -630,17 +646,17 @@ export function MeetingDetailScreen({
   const meetingTitle = meeting.customerName || "未設定";
   const isTeleapo = meeting.salesDomain === "teleapo";
   const domainCopy = {
-    statusTitle: isTeleapo ? "架電ステータス" : "商談ステータス",
-    evaluationTitle: isTeleapo ? "架電評価サマリー" : "商談評価サマリー",
-    pointTitle: isTeleapo ? "AIによる架電ポイント分析" : "AIによる商談ポイント分析",
-    metaTitle: isTeleapo ? "架電名" : "商談名",
+    statusTitle: isTeleapo ? "テレアポステータス" : "商談ステータス",
+    evaluationTitle: isTeleapo ? "テレアポ評価サマリー" : "商談評価サマリー",
+    pointTitle: isTeleapo ? "AIによるテレアポポイント分析" : "AIによる商談ポイント分析",
+    metaTitle: isTeleapo ? "テレアポ名" : "商談名",
     manualDescription: isTeleapo
-      ? "管理者が登録した成功基準・商品情報をもとに、次の架電で直すべきポイントを整理しています。"
+      ? "管理者が登録した成功基準・商品情報をもとに、次のテレアポで直すべきポイントを整理しています。"
       : "管理者が登録した成功基準・商品情報をもとに、次の商談で直すべきポイントを整理しています。",
   };
 
   return (
-    <main className="overflow-x-hidden bg-transparent px-5 pb-3 pt-4 md:px-8 md:pb-4 md:pt-5">
+    <main className="overflow-x-hidden bg-transparent px-5 pb-0 pt-4 md:px-8 md:pb-0 md:pt-5">
       <div className="mx-auto max-w-[1540px]">
         {errorMessage ? (
           <div className="mb-5">
@@ -1002,25 +1018,32 @@ export function MeetingDetailScreen({
 
             <aside className="flex h-[760px] flex-col gap-4">
               <div className="flex min-h-0 flex-1 flex-col rounded-[20px] border border-[#eceef4] bg-white p-4">
-                <div className="grid grid-cols-3 gap-2 rounded-[16px] bg-[#faf7ef] p-2 text-[14px] font-semibold text-[#7a808c]">
+                <div className="grid grid-cols-4 gap-1.5 rounded-[16px] bg-[#faf7ef] p-2 text-[12px] font-semibold text-[#7a808c]">
                   <button
                     type="button"
                     onClick={() => setTranscriptSidebarTab("keywords")}
-                    className={`rounded-[12px] px-3 py-2.5 text-center transition ${transcriptSidebarTab === "keywords" ? "bg-[#ffcf33] text-[#5f4700] shadow-[0_4px_10px_rgba(240,180,0,0.18)]" : "text-[#7a808c] hover:bg-white hover:text-[#5f4700]"}`}
+                    className={`rounded-[12px] px-2 py-2.5 text-center transition ${transcriptSidebarTab === "keywords" ? "bg-[#ffcf33] text-[#5f4700] shadow-[0_4px_10px_rgba(240,180,0,0.18)]" : "text-[#7a808c] hover:bg-white hover:text-[#5f4700]"}`}
                   >
                     頻出ワード
                   </button>
                   <button
                     type="button"
+                    onClick={() => setTranscriptSidebarTab("focusWords")}
+                    className={`rounded-[12px] px-2 py-2.5 text-center transition ${transcriptSidebarTab === "focusWords" ? "bg-[#ffcf33] text-[#5f4700] shadow-[0_4px_10px_rgba(240,180,0,0.18)]" : "text-[#7a808c] hover:bg-white hover:text-[#5f4700]"}`}
+                  >
+                    注目ワード
+                  </button>
+                  <button
+                    type="button"
                     onClick={() => setTranscriptSidebarTab("important")}
-                    className={`rounded-[12px] px-3 py-2.5 text-center transition ${transcriptSidebarTab === "important" ? "bg-[#ffcf33] text-[#5f4700] shadow-[0_4px_10px_rgba(240,180,0,0.18)]" : "text-[#7a808c] hover:bg-white hover:text-[#5f4700]"}`}
+                    className={`rounded-[12px] px-2 py-2.5 text-center transition ${transcriptSidebarTab === "important" ? "bg-[#ffcf33] text-[#5f4700] shadow-[0_4px_10px_rgba(240,180,0,0.18)]" : "text-[#7a808c] hover:bg-white hover:text-[#5f4700]"}`}
                   >
                     注目発言
                   </button>
                   <button
                     type="button"
                     onClick={() => setTranscriptSidebarTab("checkpoints")}
-                    className={`rounded-[12px] px-3 py-2.5 text-center transition ${transcriptSidebarTab === "checkpoints" ? "bg-[#ffcf33] text-[#5f4700] shadow-[0_4px_10px_rgba(240,180,0,0.18)]" : "text-[#7a808c] hover:bg-white hover:text-[#5f4700]"}`}
+                    className={`rounded-[12px] px-2 py-2.5 text-center transition ${transcriptSidebarTab === "checkpoints" ? "bg-[#ffcf33] text-[#5f4700] shadow-[0_4px_10px_rgba(240,180,0,0.18)]" : "text-[#7a808c] hover:bg-white hover:text-[#5f4700]"}`}
                   >
                     確認ポイント
                   </button>
@@ -1049,6 +1072,54 @@ export function MeetingDetailScreen({
                       ) : (
                         <div className="rounded-[16px] border border-dashed border-[#d9dee7] px-4 py-8 text-[14px] leading-7 text-[#7a808c]">
                           文字起こし生成後に、よく使われた単語をここに表示します。
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                ) : transcriptSidebarTab === "focusWords" ? (
+                  <div className="flex min-h-0 flex-1 flex-col pt-4">
+                    <div className="min-h-0 flex-1 space-y-4 overflow-y-auto pr-1">
+                      {transcriptFocusWords.some((category) => category.words.length > 0) ? (
+                        transcriptFocusWords.map((category) => (
+                          <section key={category.id} className="rounded-[18px] border border-[#efe5cd] bg-[#fffdfa] p-4 shadow-[0_3px_10px_rgba(17,24,39,0.03)]">
+                            <div className="flex items-start justify-between gap-3">
+                              <div>
+                                <h3 className="text-[13px] font-bold text-[#5f4700]">{category.title}</h3>
+                                <p className="mt-1 text-[11px] leading-5 text-[#8a7a58]">{category.description}</p>
+                              </div>
+                              <span className="shrink-0 rounded-full border border-[#f0dfb0] bg-[#fff6dc] px-2.5 py-1 text-[11px] font-semibold text-[#7a6330]">
+                                {category.words.length}件
+                              </span>
+                            </div>
+                            {category.words.length > 0 ? (
+                              <div className="mt-3 space-y-2">
+                                {category.words.map((word) => (
+                                  <button
+                                    key={`${category.id}-${word.term}-${word.evidence.id}`}
+                                    type="button"
+                                    onClick={() => handleJumpToTranscriptLog(word.evidence)}
+                                    className="block w-full rounded-[14px] border border-[#f4ead0] bg-white px-3 py-3 text-left transition hover:border-[#e3d39a] hover:bg-[#fffdf7]"
+                                  >
+                                    <div className="flex items-center justify-between gap-3">
+                                      <span className="text-[14px] font-semibold text-[#171717]">{word.term}</span>
+                                      <span className="rounded-full bg-[#f7f1df] px-2.5 py-1 text-[11px] font-semibold text-[#7a6330]">{word.count}回</span>
+                                    </div>
+                                    <p className="mt-2 line-clamp-2 text-[12px] leading-6 text-[#596273]">
+                                      {word.evidence.label}: {word.evidence.text}
+                                    </p>
+                                  </button>
+                                ))}
+                              </div>
+                            ) : (
+                              <p className="mt-3 rounded-[14px] border border-dashed border-[#eadfbe] px-3 py-4 text-[12px] leading-6 text-[#8a7a58]">
+                                該当するワードはまだありません。
+                              </p>
+                            )}
+                          </section>
+                        ))
+                      ) : (
+                        <div className="rounded-[16px] border border-dashed border-[#d9dee7] px-4 py-8 text-[14px] leading-7 text-[#7a808c]">
+                          文字起こし本文から、顧客課題・反論/不安・商材/価値・次回アクションに関わるワードを表示します。
                         </div>
                       )}
                     </div>
@@ -2487,6 +2558,169 @@ function buildFrequentWords(logs: DisplayLog[]) {
     .sort((left, right) => right.count - left.count || left.term.localeCompare(right.term))
     .slice(0, 12);
 }
+
+function buildTranscriptFocusWords(logs: DisplayLog[]): TranscriptFocusWordCategory[] {
+  return transcriptFocusWordRules.map((category) => ({
+    id: category.id,
+    title: category.title,
+    description: category.description,
+    words: buildFocusWordsForCategory(logs, category).slice(0, 5),
+  }));
+}
+
+function buildFocusWordsForCategory(
+  logs: DisplayLog[],
+  category: (typeof transcriptFocusWordRules)[number],
+): TranscriptFocusWord[] {
+  const rows = new Map<string, TranscriptFocusWord>();
+  const preferredLogs = logs.filter((log) => shouldUseLogForFocusCategory(log, category.preferredSpeaker));
+  const sourceLogs = preferredLogs.length > 0 ? preferredLogs : logs;
+
+  for (const log of sourceLogs) {
+    const normalizedText = normalizeSearchText(log.text);
+
+    for (const rule of category.rules) {
+      const count = rule.keywords.reduce((sum, keyword) => sum + countTextOccurrences(normalizedText, normalizeSearchText(keyword)), 0);
+      if (count <= 0) {
+        continue;
+      }
+
+      const current = rows.get(rule.label);
+      if (current) {
+        rows.set(rule.label, {
+          ...current,
+          count: current.count + count,
+        });
+      } else {
+        rows.set(rule.label, {
+          term: rule.label,
+          count,
+          evidence: log,
+        });
+      }
+    }
+  }
+
+  return Array.from(rows.values())
+    .sort((left, right) => right.count - left.count || left.term.localeCompare(right.term));
+}
+
+function shouldUseLogForFocusCategory(log: DisplayLog, preferredSpeaker: "customer" | "sales" | "any") {
+  if (preferredSpeaker === "any") {
+    return true;
+  }
+
+  const side = inferConversationSide(log);
+  if (side === "unknown") {
+    return true;
+  }
+
+  return side === preferredSpeaker;
+}
+
+function inferConversationSide(log: DisplayLog): "sales" | "customer" | "unknown" {
+  const label = `${log.label} ${log.text.slice(0, 16)}`;
+
+  if (/営業|担当|弊社|当社|私ども/.test(label)) {
+    return "sales";
+  }
+
+  if (/顧客|お客様|先方|AI顧客|クライアント/.test(label)) {
+    return "customer";
+  }
+
+  if (log.speaker === "speaker_1") {
+    return "sales";
+  }
+
+  if (log.speaker === "speaker_2") {
+    return "customer";
+  }
+
+  return "unknown";
+}
+
+function normalizeSearchText(text: string) {
+  return text.toLowerCase().replace(/\s+/g, "");
+}
+
+function countTextOccurrences(text: string, keyword: string) {
+  if (!text || !keyword) {
+    return 0;
+  }
+
+  let count = 0;
+  let index = text.indexOf(keyword);
+
+  while (index >= 0) {
+    count += 1;
+    index = text.indexOf(keyword, index + keyword.length);
+  }
+
+  return count;
+}
+
+const transcriptFocusWordRules = [
+  {
+    id: "issues",
+    title: "顧客課題",
+    description: "困りごと、現状の負担、解決したい問題",
+    preferredSpeaker: "customer",
+    rules: [
+      { label: "集客", keywords: ["集客", "来店", "問い合わせ", "反響", "リード"] },
+      { label: "更新できない", keywords: ["更新できない", "更新が止ま", "投稿でき", "運用でき", "手が回ら"] },
+      { label: "人手不足", keywords: ["人手不足", "担当者がいない", "担当者不在", "リソース不足", "忙しい"] },
+      { label: "管理負担", keywords: ["管理が大変", "管理負担", "負担", "手間", "時間がかか"] },
+      { label: "属人化", keywords: ["属人化", "属人", "引き継ぎ", "担当者しか"] },
+      { label: "成果不足", keywords: ["効果が出", "成果が出", "伸びない", "つながらない", "失敗"] },
+      { label: "採用", keywords: ["採用", "応募", "求人", "人材"] },
+    ],
+  },
+  {
+    id: "concerns",
+    title: "反論/不安",
+    description: "導入前の懸念、比較、予算、慎重な反応",
+    preferredSpeaker: "customer",
+    rules: [
+      { label: "費用/予算", keywords: ["高い", "費用", "予算", "金額", "価格", "コスト"] },
+      { label: "効果不安", keywords: ["効果が不安", "不安", "本当に", "成果", "実感", "慎重"] },
+      { label: "比較検討", keywords: ["他社", "比較", "相見積", "別の会社", "競合"] },
+      { label: "社内確認", keywords: ["社内", "上司", "決裁", "確認", "稟議"] },
+      { label: "時期未定", keywords: ["今すぐ", "まだ", "時期", "タイミング", "検討します"] },
+      { label: "運用不安", keywords: ["使えるか", "難しい", "定着", "運用できる", "続けられる"] },
+    ],
+  },
+  {
+    id: "value",
+    title: "商材/価値",
+    description: "提案した機能、価値、解決策、差別化",
+    preferredSpeaker: "any",
+    rules: [
+      { label: "AI", keywords: ["ai", "人工知能"] },
+      { label: "分析", keywords: ["分析", "解析", "データ"] },
+      { label: "改善", keywords: ["改善", "pdca", "見直し"] },
+      { label: "自動化", keywords: ["自動", "効率化", "省力化"] },
+      { label: "レポート", keywords: ["レポート", "報告", "可視化"] },
+      { label: "サポート", keywords: ["サポート", "支援", "伴走"] },
+      { label: "事例", keywords: ["事例", "実績", "成功例"] },
+      { label: "料金", keywords: ["料金", "月額", "プラン", "見積"] },
+    ],
+  },
+  {
+    id: "actions",
+    title: "次回アクション",
+    description: "次に進めるための合意、宿題、送付物",
+    preferredSpeaker: "sales",
+    rules: [
+      { label: "次回日程", keywords: ["次回", "日程", "打ち合わせ", "アポイント", "アポ"] },
+      { label: "資料送付", keywords: ["資料", "送付", "お送りします", "共有します"] },
+      { label: "見積提出", keywords: ["見積", "お見積", "提出"] },
+      { label: "社内確認", keywords: ["社内確認", "上司に確認", "確認します", "決裁者"] },
+      { label: "導入時期確認", keywords: ["導入時期", "開始時期", "いつから", "スケジュール"] },
+      { label: "宿題整理", keywords: ["宿題", "整理", "確認事項", "次まで"] },
+    ],
+  },
+] as const;
 
 function buildTranscriptMetrics(logs: DisplayLog[]) {
   const entryCount = logs.length;

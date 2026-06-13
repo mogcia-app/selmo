@@ -3,10 +3,11 @@
 import { FirebaseError } from "firebase/app";
 import Image from "next/image";
 import Link from "next/link";
-import { useParams } from "next/navigation";
+import { useParams, usePathname } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 
 import { useAuth } from "@/features/auth/auth-provider";
+import { getKnowledgeBasePath } from "@/lib/knowledge-paths";
 import {
   subscribeToKnowledgeCategories,
   subscribeToKnowledgeItemsByCategory,
@@ -22,8 +23,11 @@ const DEFAULT_CATEGORY = {
 
 export default function SalesKnowledgeCategoryPage() {
   const params = useParams<{ categoryId: string }>();
+  const pathname = usePathname();
   const { profile } = useAuth();
   const categoryId = params.categoryId;
+  const basePath = getKnowledgeBasePath(pathname);
+  const knowledgeRole = basePath.startsWith("/admin") ? "admin" : "sales";
   const userId = profile?.uid;
   const companyId = profile?.companyId;
   const [categories, setCategories] = useState<KnowledgeCategory[]>([]);
@@ -40,11 +44,11 @@ export default function SalesKnowledgeCategoryPage() {
     if (!userId || !companyId || !categoryId) return;
 
     return subscribeToKnowledgeItemsByCategory(
-      { categoryId, userId, companyId },
+      { categoryId, userId, companyId, role: knowledgeRole },
       setItems,
       (nextError: FirebaseError) => setError(nextError.message),
     );
-  }, [categoryId, companyId, userId]);
+  }, [categoryId, companyId, knowledgeRole, userId]);
 
   const category = useMemo(
     () =>
@@ -63,11 +67,11 @@ export default function SalesKnowledgeCategoryPage() {
   );
 
   return (
-    <main className="overflow-x-hidden bg-transparent">
-      <div className="min-w-0 px-5 pb-3 pt-4 md:px-8 md:pb-4 md:pt-5">
+    <main className="min-h-screen overflow-x-hidden bg-white">
+      <div className="min-w-0 px-5 pb-0 pt-4 md:px-8 md:pb-0 md:pt-5">
         <div className="mx-auto max-w-[1180px] min-w-0">
           <Link
-            href="/sales/knowledge"
+            href={basePath}
             className="inline-flex items-center gap-2 text-[13px] font-semibold text-[#596273] transition hover:text-[#171717]"
           >
             <ArrowLeftIcon />
@@ -137,7 +141,7 @@ export default function SalesKnowledgeCategoryPage() {
                 {items.map((item) => (
                   <Link
                     key={item.id}
-                    href={`/sales/knowledge/categories/${categoryId}/knowledge/${item.id}`}
+                    href={`${basePath}/categories/${categoryId}/knowledge/${item.id}`}
                     className="grid gap-4 rounded-[14px] border border-[#e5e9f0] bg-white px-4 py-4 shadow-[0_6px_16px_rgba(17,24,39,0.025)] md:grid-cols-[56px_minmax(0,1fr)_112px]"
                   >
                     <span className="inline-flex h-14 w-14 items-center justify-center rounded-[12px] bg-[#ecefff] text-[#5767c8] [&_svg]:h-6 [&_svg]:w-6">
@@ -176,7 +180,7 @@ export default function SalesKnowledgeCategoryPage() {
             )}
 
             <Link
-              href={`/sales/knowledge/new?kind=knowledge&scope=personal&categoryId=${encodeURIComponent(categoryId)}`}
+              href={`${basePath}/new?kind=knowledge&scope=personal&categoryId=${encodeURIComponent(categoryId)}`}
               className="mt-5 inline-flex min-h-[54px] w-full items-center justify-center gap-2 rounded-[14px] border border-dashed border-[#f0c655] bg-white text-[15px] font-bold text-[#171717] hover:bg-[#fffdf7]"
             >
               <PlusIcon />

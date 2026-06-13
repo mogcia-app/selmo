@@ -24,6 +24,8 @@ import {
   missingFirebaseEnvKeys,
 } from "@/lib/firebase/env";
 
+export const authSessionDurationMs = 4 * 60 * 60 * 1000;
+
 type AuthContextValue = {
   isLoading: boolean;
   isFirebaseReady: boolean;
@@ -40,6 +42,7 @@ type AuthContextValue = {
     companyName?: string;
   }) => Promise<AppUserProfile | null>;
   signOut: () => Promise<void>;
+  sessionExpiresAt: number | null;
 };
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -47,6 +50,7 @@ const AuthContext = createContext<AuthContextValue | null>(null);
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [profile, setProfile] = useState<AppUserProfile | null>(null);
   const [isLoading, setIsLoading] = useState(isFirebaseConfigured);
+  const [sessionStartedAt, setSessionStartedAt] = useState<number | null>(null);
 
   useEffect(() => {
     if (!isFirebaseConfigured) {
@@ -69,6 +73,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           }
 
           setProfile(nextProfile);
+          setSessionStartedAt(nextProfile ? Date.now() : null);
           setIsLoading(false);
         });
       })
@@ -78,6 +83,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         }
 
         setProfile(null);
+        setSessionStartedAt(null);
         setIsLoading(false);
       });
 
@@ -95,11 +101,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       missingEnvKeys: missingFirebaseEnvKeys,
       isAuthenticated: Boolean(profile),
       profile,
+      sessionExpiresAt: sessionStartedAt ? sessionStartedAt + authSessionDurationMs : null,
       signIn: async (email, password) => {
         setIsLoading(true);
         try {
           const result = await signInWithEmail(email, password);
           setProfile(result.profile);
+          setSessionStartedAt(Date.now());
           return result.profile;
         } finally {
           setIsLoading(false);
@@ -110,6 +118,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         try {
           const result = await registerUser(input);
           setProfile(result.profile);
+          setSessionStartedAt(Date.now());
           return result.profile;
         } finally {
           setIsLoading(false);
@@ -120,12 +129,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         try {
           await signOutUser();
           setProfile(null);
+          setSessionStartedAt(null);
         } finally {
           setIsLoading(false);
         }
       },
     }),
-    [isLoading, profile],
+    [isLoading, profile, sessionStartedAt],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

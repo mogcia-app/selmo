@@ -7,12 +7,15 @@ import { useEffect, useState } from "react";
 
 import { useAuth } from "@/features/auth/auth-provider";
 import type { AppUserProfile } from "@/lib/firebase/auth";
+import { subscribeToMeetings } from "@/lib/firebase/meetings";
 import {
   markAppNotificationRead,
   subscribeToAppNotifications,
   type AppNotification,
 } from "@/lib/firebase/notifications";
+import { subscribeToRoleplayResults } from "@/lib/firebase/roleplay";
 import { canUseSalesDomain } from "@/lib/sales-domains";
+import { SalesKnowledgeChatWidget } from "@/components/sales-knowledge-chat-widget";
 
 type DashboardShellProps = {
   children: React.ReactNode;
@@ -23,6 +26,13 @@ type NavItem = {
   href: string;
   label: string;
   num: string;
+};
+
+type AiUsageState = {
+  used: number;
+  uploadCount: number;
+  roleplayCount: number;
+  isLoading: boolean;
 };
 
 const adminSections: Array<{ label: string; items: NavItem[] }> = [
@@ -42,7 +52,7 @@ const adminSections: Array<{ label: string; items: NavItem[] }> = [
   {
     label: "02 — Enablement",
     items: [
-      { href: "/admin/knowledge", label: "ナレッジ管理", num: "09" },
+      { href: "/admin/knowledge", label: "ナレッジ", num: "09" },
       { href: "/admin/roleplay", label: "ロープレ管理", num: "10" },
       { href: "/admin/products", label: "商材管理", num: "11" },
       { href: "/admin/manuals", label: "マニュアル", num: "12" },
@@ -62,30 +72,31 @@ const salesSections: Array<{ label: string; items: NavItem[] }> = [
     items: [
       { href: "/sales/dashboard", label: "ダッシュボード", num: "01" },
       { href: "/sales/calendar", label: "カレンダー", num: "02" },
+      // { href: "/sales/reports", label: "レポート", num: "03" },
     ],
   },
   {
     label: "02 — 商談",
     items: [
-      { href: "/meetings/upload?category=meeting", label: "アップロード", num: "03" },
-      { href: "/sales/analysis?category=meeting", label: "商談分析", num: "04" },
-      { href: "/meetings?category=meeting", label: "打ち合わせ一覧", num: "05" },
-      { href: "/sales/roleplay/scenarios?category=meeting", label: "ロープレ", num: "06" },
+      { href: "/meetings/upload?category=meeting", label: "アップロード", num: "04" },
+      { href: "/sales/analysis?category=meeting", label: "商談分析", num: "05" },
+      { href: "/meetings?category=meeting", label: "打ち合わせ一覧", num: "06" },
+      { href: "/sales/roleplay/scenarios?category=meeting", label: "ロープレ", num: "07" },
     ],
   },
   {
     label: "03 — テレアポ",
     items: [
-      { href: "/meetings/upload?category=teleapo", label: "アップロード", num: "07" },
-      { href: "/sales/analysis?category=teleapo", label: "テレアポ分析", num: "08" },
-      { href: "/meetings?category=teleapo", label: "架電一覧", num: "09" },
-      { href: "/sales/roleplay/scenarios?category=teleapo", label: "ロープレ", num: "10" },
+      { href: "/meetings/upload?category=teleapo", label: "アップロード", num: "08" },
+      { href: "/sales/analysis?category=teleapo", label: "テレアポ分析", num: "09" },
+      { href: "/meetings?category=teleapo", label: "テレアポ一覧", num: "10" },
+      { href: "/sales/roleplay/scenarios?category=teleapo", label: "ロープレ", num: "11" },
     ],
   },
   {
     label: "04 — Knowledge",
     items: [
-      { href: "/sales/knowledge", label: "ナレッジ", num: "11" },
+      { href: "/sales/knowledge", label: "ナレッジ", num: "12" },
     ],
   },
 ];
@@ -96,10 +107,17 @@ export function DashboardShell({ children, variant }: DashboardShellProps) {
   const { profile } = useAuth();
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
   const [isNotificationOpen, setIsNotificationOpen] = useState(false);
+  const [aiUsage, setAiUsage] = useState<AiUsageState>({
+    used: 0,
+    uploadCount: 0,
+    roleplayCount: 0,
+    isLoading: true,
+  });
   const sections = variant === "admin" ? adminSections : filterSalesSections(salesSections, profile);
   const initials = (profile?.name ?? profile?.email ?? "S").slice(0, 1);
   const unreadNotificationCount = notifications.filter((notification) => !notification.read).length;
   const currentLabel = resolveCurrentLabel(pathname, searchParams, sections);
+  const shouldShowKnowledgeChat = variant === "sales" && !pathname.startsWith("/sales/knowledge");
   const nowLabel = new Intl.DateTimeFormat("ja-JP", {
     year: "numeric",
     month: "2-digit",
@@ -123,15 +141,68 @@ export function DashboardShell({ children, variant }: DashboardShellProps) {
     );
   }, [profile?.companyId, profile?.uid, variant]);
 
+  useEffect(() => {
+    if (!profile?.companyId || !profile.uid) {
+      setAiUsage({ used: 0, uploadCount: 0, roleplayCount: 0, isLoading: false });
+      return;
+    }
+
+    setAiUsage((current) => ({ ...current, isLoading: true }));
+    let uploadCount = 0;
+    let roleplayCount = 0;
+    let meetingsLoaded = false;
+    let roleplayLoaded = false;
+
+    const publish = () => {
+      setAiUsage({
+        used: uploadCount + roleplayCount,
+        uploadCount,
+        roleplayCount,
+        isLoading: !(meetingsLoaded && roleplayLoaded),
+      });
+    };
+
+    const unsubscribers = [
+      subscribeToMeetings(
+        { role: profile.role, userId: profile.uid, companyId: profile.companyId },
+        (meetings) => {
+          uploadCount = meetings.filter((meeting) => isCurrentMonth(meeting.recordedAt)).length;
+          meetingsLoaded = true;
+          publish();
+        },
+        () => {
+          meetingsLoaded = true;
+          publish();
+        },
+      ),
+      subscribeToRoleplayResults(
+        { userId: profile.uid, companyId: profile.companyId, isAdmin: profile.role === "admin" },
+        (results) => {
+          roleplayCount = results.filter((result) => isCurrentMonth(result.createdAt)).length;
+          roleplayLoaded = true;
+          publish();
+        },
+        () => {
+          roleplayLoaded = true;
+          publish();
+        },
+      ),
+    ];
+
+    return () => unsubscribers.forEach((unsubscribe) => unsubscribe());
+  }, [profile?.companyId, profile?.role, profile?.uid]);
+
   return (
     <div
-      className={`mx-auto grid min-h-screen max-w-[1680px] ${
-        variant === "sales" ? "bg-[#f5f5f6] md:grid-cols-[260px_1fr]" : "md:grid-cols-[240px_1fr]"
-      }`}
+      className={
+        variant === "sales"
+          ? "mx-auto max-w-[1680px] bg-white md:block"
+          : "mx-auto grid min-h-screen max-w-[1680px] md:grid-cols-[240px_1fr]"
+      }
     >
       {variant === "sales" ? (
         <>
-          <aside className="relative border-b border-[#eceef4] bg-white px-5 py-8 md:min-h-screen md:border-b-0 md:border-r">
+          <aside className="always-visible-scrollbar relative border-b border-[#eceef4] bg-white px-5 py-8 md:fixed md:bottom-0 md:left-[max(0px,calc((100vw-1680px)/2))] md:top-0 md:w-[260px] md:overflow-y-auto md:border-b-0 md:border-r">
             <div className="text-[13px] font-semibold tracking-[0.34em] text-[#171717]">
               selmo<span className="text-[#ffc400]">.</span>
             </div>
@@ -223,7 +294,7 @@ export function DashboardShell({ children, variant }: DashboardShellProps) {
             </Link>
           </aside>
 
-          <div className="min-w-0 bg-[#f5f5f6]">
+          <div className="min-w-0 bg-[#f5f5f6] md:ml-[260px] md:min-h-screen">
             <header className="sticky top-0 z-20 flex flex-col gap-4 border-b border-[#eceef4] bg-white/92 px-5 py-4 backdrop-blur md:flex-row md:items-center md:justify-between md:px-8">
               <div className="flex items-center gap-2 text-[12px] font-semibold uppercase tracking-[0.18em] text-[#9aa1ad]">
                 <span>selmo<span className="text-[#ffc400]">.</span></span>
@@ -232,6 +303,7 @@ export function DashboardShell({ children, variant }: DashboardShellProps) {
               </div>
 
               <div className="flex flex-wrap items-center gap-3 md:gap-[14px]">
+                <AiUsageGauge profile={profile} usage={aiUsage} />
                 <span className="rounded-full border border-[#e8ebf0] bg-[#f7f7fa] px-3 py-2 text-[12px] font-semibold text-[#7d8490]">
                   {nowLabel}
                 </span>
@@ -293,11 +365,12 @@ export function DashboardShell({ children, variant }: DashboardShellProps) {
             </header>
 
             {children}
+            {shouldShowKnowledgeChat ? <SalesKnowledgeChatWidget /> : null}
           </div>
         </>
       ) : (
         <>
-      <aside className="relative border-b border-[#eceef4] bg-white px-5 py-8 md:min-h-screen md:border-b-0 md:border-r">
+      <aside className="always-visible-scrollbar relative border-b border-[#eceef4] bg-white px-5 py-8 md:min-h-screen md:overflow-y-auto md:border-b-0 md:border-r">
         <div className="text-[13px] font-semibold tracking-[0.34em] text-[#171717]">
           selmo<span className="text-[#ffc400]">.</span>
         </div>
@@ -392,6 +465,7 @@ export function DashboardShell({ children, variant }: DashboardShellProps) {
           </div>
 
           <div className="flex flex-wrap items-center gap-3 md:gap-[14px]">
+            <AiUsageGauge profile={profile} usage={aiUsage} />
             <span className="rounded-full border border-[#e8ebf0] bg-[#f7f7fa] px-3 py-2 text-[12px] font-semibold text-[#7d8490]">
               {nowLabel}
             </span>
@@ -437,7 +511,7 @@ function resolveCurrentLabel(
 }
 
 function getCategoryLabel(searchParams: { get: (name: string) => string | null }, suffix: string) {
-  return searchParams.get("category") === "teleapo" ? `架電${suffix}` : `商談${suffix}`;
+  return searchParams.get("category") === "teleapo" ? `テレアポ${suffix}` : `商談${suffix}`;
 }
 
 function isNavItemActive(pathname: string, href: string, searchParams: { get: (name: string) => string | null }) {
@@ -496,6 +570,57 @@ function filterSalesSections(
       };
     })
     .filter((section): section is Array<{ label: string; items: NavItem[] }>[number] => Boolean(section));
+}
+
+function AiUsageGauge({ profile, usage }: { profile: AppUserProfile | null; usage: AiUsageState }) {
+  if (!profile) {
+    return null;
+  }
+
+  const quota = resolveMonthlyAiQuota(profile);
+  const percent = quota && quota > 0 ? Math.min(100, Math.round((usage.used / quota) * 100)) : 0;
+  const barColor = percent >= 100 ? "bg-[#ef4444]" : percent >= 80 ? "bg-[#f59e0b]" : "bg-[#ffc400]";
+  const label = quota ? `${usage.used} / ${quota}回` : `${usage.used}回 / 無制限`;
+
+  return (
+    <div
+      className="min-w-[168px] px-1 py-1"
+      title={`今月のアップロード ${usage.uploadCount}件 / ロープレ ${usage.roleplayCount}回`}
+    >
+      <div className="flex items-center justify-between gap-3">
+        <span className="text-[11px] font-black text-[#8a6500]">AI回数</span>
+        <span className="text-[12px] font-black text-[#171717]">
+          {usage.isLoading ? "集計中" : label}
+        </span>
+      </div>
+      <div className="mt-2 h-2 overflow-hidden rounded-full bg-white">
+        <div
+          className={`h-full rounded-full transition-all ${barColor}`}
+          style={{ width: usage.isLoading ? "28%" : quota ? `${percent}%` : "100%" }}
+        />
+      </div>
+    </div>
+  );
+}
+
+function resolveMonthlyAiQuota(profile: AppUserProfile) {
+  const transcriptionQuota = profile.monthlyTranscriptionQuota;
+  const roleplayQuota = profile.monthlyRoleplayQuota;
+
+  if (transcriptionQuota === null || roleplayQuota === null) {
+    return null;
+  }
+
+  return Math.min(transcriptionQuota, roleplayQuota);
+}
+
+function isCurrentMonth(date: Date | null) {
+  if (!date) {
+    return false;
+  }
+
+  const now = new Date();
+  return date.getFullYear() === now.getFullYear() && date.getMonth() === now.getMonth();
 }
 
 function getDefaultSalesCategory(pathname: string) {

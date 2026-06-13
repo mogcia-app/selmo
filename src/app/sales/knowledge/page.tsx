@@ -3,20 +3,18 @@
 import { FirebaseError } from "firebase/app";
 import Image from "next/image";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { FormEvent, useEffect, useMemo, useState, type ReactNode } from "react";
 
 import { useAuth } from "@/features/auth/auth-provider";
+import { getKnowledgeBasePath } from "@/lib/knowledge-paths";
 import {
-  createKnowledgeCategory,
   createKnowledgeProduct,
-  subscribeToKnowledgeCategories,
   subscribeToKnowledgeProducts,
   subscribeToRecentKnowledgeSearches,
   subscribeToVisibleKnowledgeItems,
   updateKnowledgeProduct,
   uploadKnowledgeProductLogo,
-  type KnowledgeCategory,
   type KnowledgeItem,
   type KnowledgeProduct,
   type KnowledgeSearchHistory,
@@ -24,14 +22,15 @@ import {
 
 export default function SalesKnowledgePage() {
   const router = useRouter();
+  const pathname = usePathname();
   const { profile } = useAuth();
+  const basePath = getKnowledgeBasePath(pathname);
+  const knowledgeRole = basePath.startsWith("/admin") ? "admin" : "sales";
   const [searchTerm, setSearchTerm] = useState("");
-  const [categories, setCategories] = useState<KnowledgeCategory[]>([]);
   const [products, setProducts] = useState<KnowledgeProduct[]>([]);
   const [items, setItems] = useState<KnowledgeItem[]>([]);
   const [searchHistory, setSearchHistory] = useState<KnowledgeSearchHistory[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const [categoryDialogOpen, setCategoryDialogOpen] = useState(false);
   const [productDialogOpen, setProductDialogOpen] = useState(false);
   const userId = profile?.uid;
   const companyId = profile?.companyId;
@@ -44,45 +43,29 @@ export default function SalesKnowledgePage() {
       setError(nextError.message);
     };
     const unsubscribers = [
-      subscribeToKnowledgeCategories(companyId, setCategories, handleError),
       subscribeToKnowledgeProducts(companyId, setProducts, handleError),
-      subscribeToVisibleKnowledgeItems({ userId, companyId }, setItems, handleError),
+      subscribeToVisibleKnowledgeItems({ userId, companyId, role: knowledgeRole }, setItems, handleError),
       subscribeToRecentKnowledgeSearches(userId, setSearchHistory, handleError),
     ];
 
     return () => {
       unsubscribers.forEach((unsubscribe) => unsubscribe());
     };
-  }, [companyId, userId]);
+  }, [companyId, knowledgeRole, userId]);
 
   const personalItems = useMemo(
     () => items.filter((item) => item.ownerId === userId && item.scope === "personal").slice(0, 3),
     [items, userId],
   );
   const sharedItems = useMemo(
-    () => items.filter((item) => item.scope === "shared").slice(0, 3),
+    () => items.filter((item) => item.scope === "shared" && item.categoryId !== "how-to").slice(0, 3),
     [items],
   );
-  const visibleCategories = useMemo(
-    () => categories.filter((category) => category.id !== "how-to").slice(0, 4),
-    [categories],
-  );
-
   const handleSearch = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const term = searchTerm.trim();
     const query = term ? `?q=${encodeURIComponent(term)}` : "";
-    router.push(`/sales/knowledge/search${query}`);
-  };
-
-  const handleCreateCategory = async (input: { title: string; description?: string }) => {
-    if (!userId || !companyId) return;
-    await createKnowledgeCategory({
-      title: input.title,
-      description: input.description,
-      userId,
-      companyId,
-    });
+    router.push(`${basePath}/search${query}`);
   };
 
   const handleCreateProduct = async (input: { name: string; logoFile?: File | null }) => {
@@ -115,13 +98,13 @@ export default function SalesKnowledgePage() {
     if (input?.categoryId) {
       params.set("categoryId", input.categoryId);
     }
-    router.push(`/sales/knowledge/new?${params.toString()}`);
+    router.push(`${basePath}/new?${params.toString()}`);
   };
 
   return (
-    <main className="overflow-x-hidden bg-transparent px-5 pb-3 pt-4 md:px-8 md:pb-4">
+    <main className="overflow-x-hidden bg-transparent px-5 pb-0 pt-4 md:px-8 md:pb-0">
       <div className="mx-auto max-w-[1500px]">
-        <header className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_440px]">
+        <header className="grid gap-5">
           <section className="rounded-[28px] border border-[#eceef4] bg-white p-5 shadow-[0_12px_34px_rgba(17,24,39,0.04)] md:p-7">
             <div className="flex flex-wrap items-start justify-between gap-5">
               <div className="min-w-0">
@@ -141,6 +124,13 @@ export default function SalesKnowledgePage() {
                 </p>
               </div>
               <div className="flex flex-wrap gap-3">
+                <Link
+                  href={`${basePath}/categories/how-to`}
+                  className="inline-flex h-11 items-center gap-2 rounded-[14px] border border-[#e6eaf0] bg-white px-4 text-[13px] font-bold text-[#343b48] shadow-[0_8px_18px_rgba(17,24,39,0.05)] transition hover:border-[#f0c655] hover:bg-[#fffdf7]"
+                >
+                  <GuideIcon />
+                  使い方
+                </Link>
                 {canCreateShared ? (
                   <button
                     type="button"
@@ -194,7 +184,7 @@ export default function SalesKnowledgePage() {
                 {searchHistory.slice(0, 4).map((history) => (
                   <Link
                     key={history.id}
-                    href={{ pathname: "/sales/knowledge/search", query: { q: history.term } }}
+                    href={{ pathname: `${basePath}/search`, query: { q: history.term } }}
                     className="rounded-full border border-[#e6eaf0] bg-white px-3 py-1.5 text-[12px] font-bold text-[#596273] transition hover:border-[#e0bd4b] hover:text-[#171717]"
                   >
                     {history.term}
@@ -204,16 +194,6 @@ export default function SalesKnowledgePage() {
             ) : null}
           </section>
 
-          <aside className="flex items-start justify-center">
-            <Image
-              src="/tukaikata.png"
-              alt="使い方"
-              width={720}
-              height={720}
-              className="aspect-square h-auto w-full rounded-none object-contain"
-              priority
-            />
-          </aside>
         </header>
 
       {error ? (
@@ -225,7 +205,7 @@ export default function SalesKnowledgePage() {
       <section className="mt-6 rounded-[28px] border border-[#eceef4] bg-white p-5 shadow-[0_12px_34px_rgba(17,24,39,0.04)] md:p-6">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <h2 className="text-[28px] font-bold tracking-[-0.04em] text-[#171717]">商材別ナレッジ</h2>
+            <h2 className="text-[28px] font-bold tracking-[-0.04em] text-[#171717]">ナレッジ一覧</h2>
             <p className="mt-1 text-[14px] text-[#7a808c]">商材ごとの概要、料金、機能、フロー、Q&Aを確認できます。</p>
           </div>
           <button
@@ -238,12 +218,12 @@ export default function SalesKnowledgePage() {
           </button>
         </div>
 
-        <div className="mt-5 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+        <div className="mt-5 flex gap-4 overflow-x-auto pb-2">
           {products.map((product) => (
             <Link
               key={product.id}
-              href={`/sales/knowledge/products/${product.id}`}
-              className="min-w-0 rounded-[20px] border border-[#eceef4] bg-[#fcfcfd] px-5 py-5 transition hover:border-[#ead8a8] hover:bg-[#fffdf7]"
+              href={`${basePath}/products/${product.id}`}
+              className="min-w-[240px] shrink-0 basis-[calc(50%_-_8px)] rounded-[20px] border border-[#eceef4] bg-[#fcfcfd] px-5 py-5 transition hover:border-[#ead8a8] hover:bg-[#fffdf7] xl:basis-[calc(25%_-_12px)]"
             >
               <ProductLogo product={product} />
               <h3 className="mt-4 truncate text-[22px] font-bold text-[#171717]">{product.name}</h3>
@@ -257,7 +237,7 @@ export default function SalesKnowledgePage() {
         </div>
       </section>
 
-      <section className="mt-6 grid gap-5 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_360px]">
+      <section className="mt-6 grid gap-5 xl:grid-cols-2">
         <KnowledgePanel
           title="自分のナレッジ"
           description="商談メモや、自分用にアレンジした内容"
@@ -266,6 +246,7 @@ export default function SalesKnowledgePage() {
           emptyBody="商材に紐づかないメモも保存できます"
           actionLabel="メモを作成"
           onAction={() => openCreateDialog({ kind: "memo", scope: "personal" })}
+          basePath={basePath}
         />
 
         <KnowledgePanel
@@ -280,41 +261,10 @@ export default function SalesKnowledgePage() {
               ? () => openCreateDialog({ kind: "knowledge", scope: "shared" })
               : undefined
           }
+          basePath={basePath}
         />
-
-        <article className="min-w-0 rounded-[24px] border border-[#eceef4] bg-white px-5 py-6 shadow-[0_8px_20px_rgba(17,24,39,0.04)] sm:px-6">
-          <div className="flex items-center justify-between gap-3">
-            <div>
-              <h2 className="text-[22px] font-bold text-[#171717]">補助カテゴリ</h2>
-              <p className="mt-1 text-[13px] text-[#7a808c]">商材に紐づかない使い方や社内メモ</p>
-            </div>
-            <button
-              type="button"
-              onClick={() => setCategoryDialogOpen(true)}
-              className="inline-flex h-9 w-9 items-center justify-center rounded-[12px] border border-[#e4e8ef] bg-white text-[#8a6500]"
-              aria-label="カテゴリを追加"
-            >
-              <PlusIcon />
-            </button>
-          </div>
-          <div className="mt-5 space-y-2">
-            {visibleCategories.map((category) => (
-              <CategoryRow key={category.id} category={category} />
-            ))}
-            {visibleCategories.length === 0 ? (
-              <div className="rounded-[14px] border border-dashed border-[#d7dde8] bg-[#fcfcfd] px-4 py-5 text-center text-[13px] text-[#7a808c]">
-                補助カテゴリはまだありません
-              </div>
-            ) : null}
-          </div>
-        </article>
       </section>
 
-      <CategoryCreateDialog
-        open={categoryDialogOpen}
-        onClose={() => setCategoryDialogOpen(false)}
-        onSubmit={handleCreateCategory}
-      />
       <ProductCreateDialog
         open={productDialogOpen}
         onClose={() => setProductDialogOpen(false)}
@@ -322,79 +272,6 @@ export default function SalesKnowledgePage() {
       />
       </div>
     </main>
-  );
-}
-
-function CategoryCreateDialog({
-  open,
-  onClose,
-  onSubmit,
-}: {
-  open: boolean;
-  onClose: () => void;
-  onSubmit: (input: { title: string; description?: string }) => Promise<void>;
-}) {
-  const [title, setTitle] = useState("");
-  const [description, setDescription] = useState("");
-  const [isSaving, setIsSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (!open) return;
-    setTitle("");
-    setDescription("");
-    setError(null);
-    setIsSaving(false);
-  }, [open]);
-
-  if (!open) return null;
-
-  return (
-    <SimpleDialogFrame
-      title="カテゴリを追加"
-      description="ナレッジを整理するカテゴリを作成します。"
-      error={error}
-      isSaving={isSaving}
-      submitLabel="追加する"
-      onClose={onClose}
-      onSubmit={async (event) => {
-        event.preventDefault();
-        if (!title.trim()) {
-          setError("カテゴリ名を入力してください。");
-          return;
-        }
-        setIsSaving(true);
-        setError(null);
-        try {
-          await onSubmit({ title: title.trim(), description: description.trim() });
-          onClose();
-        } catch (nextError) {
-          setError(nextError instanceof Error ? nextError.message : "カテゴリの追加に失敗しました。");
-        } finally {
-          setIsSaving(false);
-        }
-      }}
-    >
-      <label>
-        <span className="text-[13px] font-bold text-[#343b48]">カテゴリ名</span>
-        <input
-          value={title}
-          onChange={(event) => setTitle(event.target.value)}
-          placeholder="例：価格交渉"
-          className="mt-2 h-12 w-full rounded-[14px] border border-[#e4e8ef] bg-white px-4 text-[14px] text-[#171717] outline-none transition focus:border-[#e0bd4b]"
-          autoFocus
-        />
-      </label>
-      <label className="mt-4 block">
-        <span className="text-[13px] font-bold text-[#343b48]">説明</span>
-        <input
-          value={description}
-          onChange={(event) => setDescription(event.target.value)}
-          placeholder="一覧に表示する短い説明"
-          className="mt-2 h-12 w-full rounded-[14px] border border-[#e4e8ef] bg-white px-4 text-[14px] text-[#171717] outline-none transition focus:border-[#e0bd4b]"
-        />
-      </label>
-    </SimpleDialogFrame>
   );
 }
 
@@ -553,6 +430,7 @@ function KnowledgePanel({
   emptyBody,
   actionLabel,
   onAction,
+  basePath,
 }: {
   title: string;
   description: string;
@@ -561,6 +439,7 @@ function KnowledgePanel({
   emptyBody: string;
   actionLabel?: string;
   onAction?: () => void;
+  basePath: string;
 }) {
   return (
     <article className="min-w-0 rounded-[24px] border border-[#eceef4] bg-white px-6 py-6 shadow-[0_8px_20px_rgba(17,24,39,0.04)]">
@@ -570,15 +449,25 @@ function KnowledgePanel({
       </div>
 
       {items.length > 0 ? (
-        <div className="mt-5 space-y-3">
+        <div className="mt-5 grid gap-3">
           {items.map((item) => (
             <Link
               key={item.id}
-              href={getKnowledgeDetailHref(item)}
-              className="rounded-[16px] border border-[#eef1f5] bg-[#fcfcfd] px-4 py-4"
+              href={getKnowledgeDetailHref(item, basePath)}
+              className="block w-full min-w-0 rounded-[16px] border border-[#eef1f5] bg-[#fcfcfd] px-4 py-4 transition hover:border-[#ead8a8] hover:bg-[#fffdf7]"
             >
-              <div className="truncate text-[15px] font-semibold text-[#171717]">{item.title}</div>
-              <div className="mt-1 text-[12px] text-[#8a909b]">更新：{formatDate(item.updatedAt)}</div>
+              <div className="min-w-0">
+                <div className="truncate text-[15px] font-semibold text-[#171717]">{item.title}</div>
+                <div className="mt-1 truncate text-[12px] leading-5 text-[#7a808c]">
+                  {item.description || item.body || "本文未入力"}
+                </div>
+              </div>
+              <div className="mt-3 flex flex-wrap items-center gap-2 text-[11px] font-bold text-[#8a909b]">
+                {item.tabTitle ? (
+                  <span className="rounded-full bg-[#fff3cf] px-2 py-0.5 text-[#8a6500]">{item.tabTitle}</span>
+                ) : null}
+                <span>更新：{formatDate(item.updatedAt)}</span>
+              </div>
             </Link>
           ))}
         </div>
@@ -606,23 +495,8 @@ function KnowledgePanel({
   );
 }
 
-function CategoryRow({ category }: { category: Pick<KnowledgeCategory, "id" | "title" | "knowledgeCount"> }) {
-  return (
-    <Link
-      href={`/sales/knowledge/categories/${category.id}`}
-      className="flex items-center gap-3 rounded-[14px] border border-[#eef1f5] bg-[#fcfcfd] px-3 py-3 transition hover:border-[#ead8a8] hover:bg-[#fffdf7]"
-    >
-      <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-[12px] bg-white text-[#8a6500]">
-        <CategoryIcon />
-      </span>
-      <span className="min-w-0 flex-1 truncate text-[13px] font-bold text-[#171717]">{category.title}</span>
-      <span className="text-[12px] font-medium text-[#8a909b]">{category.knowledgeCount}件</span>
-    </Link>
-  );
-}
-
-function getKnowledgeDetailHref(item: KnowledgeItem) {
-  return `/sales/knowledge/categories/${item.categoryId ?? "how-to"}/knowledge/${item.id}`;
+function getKnowledgeDetailHref(item: KnowledgeItem, basePath: string) {
+  return `${basePath}/categories/${item.categoryId ?? "how-to"}/knowledge/${item.id}`;
 }
 
 function AddCard({ title, count, onClick }: { title: string; count: string; onClick: () => void }) {
@@ -630,7 +504,7 @@ function AddCard({ title, count, onClick }: { title: string; count: string; onCl
     <button
       type="button"
       onClick={onClick}
-      className="min-h-[126px] rounded-[20px] border border-dashed border-[#e0c36b] bg-[#fffdf7] px-6 py-5 text-left transition hover:border-[#d7ad35] hover:bg-[#fff9e8]"
+      className="min-h-[126px] min-w-[240px] shrink-0 basis-[calc(50%_-_8px)] rounded-[20px] border border-dashed border-[#e0c36b] bg-[#fffdf7] px-6 py-5 text-left transition hover:border-[#d7ad35] hover:bg-[#fff9e8] xl:basis-[calc(25%_-_12px)]"
     >
       <span className="inline-flex h-11 w-11 items-center justify-center rounded-[14px] bg-white text-[#9c7600] shadow-[0_6px_14px_rgba(17,24,39,0.05)]">
         <PlusIcon />
@@ -667,11 +541,12 @@ function PlusIcon() {
   );
 }
 
-function CategoryIcon() {
+function GuideIcon() {
   return (
-    <svg viewBox="0 0 24 24" aria-hidden="true" className="h-6 w-6 fill-none stroke-current stroke-[1.9]">
-      <circle cx="12" cy="12" r="7.5" />
-      <path d="M12 7.5v9M8 11.5h8" />
+    <svg viewBox="0 0 24 24" aria-hidden="true" className="h-4 w-4 fill-none stroke-current stroke-[2]">
+      <path d="M5 5.5A2.5 2.5 0 0 1 7.5 3H20v15H7.5A2.5 2.5 0 0 0 5 20.5v-15Z" />
+      <path d="M5 5.5A2.5 2.5 0 0 1 7.5 8H20" />
+      <path d="M9 12h7M9 15h5" />
     </svg>
   );
 }

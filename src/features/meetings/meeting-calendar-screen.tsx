@@ -17,6 +17,9 @@ import type { MeetingPurpose } from "@/types/domain";
 
 type CalendarVariant = "admin" | "sales";
 type DomainFilter = "all" | SalesDomain;
+type CalendarDetailSelection =
+  | { type: "event"; event: CalendarEvent }
+  | { type: "meeting"; meeting: MeetingRecord };
 
 export function MeetingCalendarScreen({ variant }: { variant: CalendarVariant }) {
   const { profile } = useAuth();
@@ -28,6 +31,7 @@ export function MeetingCalendarScreen({ variant }: { variant: CalendarVariant })
   const [isSavingEvent, setIsSavingEvent] = useState(false);
   const [viewDate, setViewDate] = useState(() => startOfMonth(new Date()));
   const [selectedDate, setSelectedDate] = useState(() => startOfDay(new Date()));
+  const [detailSelection, setDetailSelection] = useState<CalendarDetailSelection | null>(null);
   const canUseMeeting = variant === "admin" || !profile || canUseSalesDomain(profile, "meeting");
   const canUseTeleapo = variant === "admin" || !profile || canUseSalesDomain(profile, "teleapo");
   const defaultDomain: DomainFilter = canUseMeeting && canUseTeleapo ? "all" : canUseTeleapo ? "teleapo" : "meeting";
@@ -39,7 +43,12 @@ export function MeetingCalendarScreen({ variant }: { variant: CalendarVariant })
 
   useEffect(() => {
     if (!profile?.uid || !profile.companyId || !profile.role) return;
-    const handleError = () => setErrorMessage("カレンダー情報の読み込みに失敗しました。");
+    const handleMeetingsError = () => setErrorMessage("商談・テレアポの読み込みに失敗しました。");
+    const handleEventsError = () => setErrorMessage("予定の読み込みに失敗しました。");
+    const enabledDomains: SalesDomain[] = [
+      ...(canUseMeeting ? (["meeting"] as const) : []),
+      ...(canUseTeleapo ? (["teleapo"] as const) : []),
+    ];
     const unsubscribers = [
       subscribeToMeetings(
         { role: profile.role, userId: profile.uid, companyId: profile.companyId },
@@ -47,18 +56,27 @@ export function MeetingCalendarScreen({ variant }: { variant: CalendarVariant })
           setMeetings(nextMeetings);
           setErrorMessage(null);
         },
-        handleError,
+        handleMeetingsError,
       ),
       subscribeToCalendarEvents(
-        { companyId: profile.companyId, userId: profile.uid, isAdmin: variant === "admin" },
-        setCalendarEvents,
-        handleError,
+        { companyId: profile.companyId, userId: profile.uid, isAdmin: variant === "admin", salesDomains: enabledDomains },
+        (nextEvents) => {
+          setCalendarEvents(nextEvents);
+          setErrorMessage(null);
+        },
+        handleEventsError,
       ),
-      subscribeToKnowledgeProducts(profile.companyId, setProducts, handleError),
+      subscribeToKnowledgeProducts(
+        profile.companyId,
+        setProducts,
+        () => {
+          setProducts([]);
+        },
+      ),
     ];
 
     return () => unsubscribers.forEach((unsubscribe) => unsubscribe());
-  }, [profile?.companyId, profile?.role, profile?.uid, variant]);
+  }, [canUseMeeting, canUseTeleapo, profile?.companyId, profile?.role, profile?.uid, variant]);
 
   const availableMeetings = useMemo(
     () =>
@@ -121,7 +139,7 @@ export function MeetingCalendarScreen({ variant }: { variant: CalendarVariant })
   const meetingsByDate = useMemo(() => groupMeetingsByDate(monthMeetings), [monthMeetings]);
   const eventsByDate = useMemo(() => groupEventsByDate(monthEvents), [monthEvents]);
   const calendarDays = useMemo(() => buildCalendarDays(viewDate), [viewDate]);
-  const domainLabel = domainFilter === "teleapo" ? "架電" : domainFilter === "meeting" ? "商談" : "すべて";
+  const domainLabel = domainFilter === "teleapo" ? "テレアポ" : domainFilter === "meeting" ? "商談" : "すべて";
   const plannedCount = monthMeetings.length + monthEvents.length;
 
   async function handleCreateEvent(input: CalendarEventFormState) {
@@ -159,7 +177,7 @@ export function MeetingCalendarScreen({ variant }: { variant: CalendarVariant })
   }
 
   return (
-    <main className="overflow-x-hidden bg-transparent px-5 pb-3 pt-4 md:px-8 md:pb-4 md:pt-5">
+    <main className="overflow-x-hidden bg-transparent px-5 pb-0 pt-4 md:px-8 md:pb-0 md:pt-5">
       <div className="mx-auto max-w-[1380px] space-y-4">
         <section className="rounded-[24px] border border-[#e2e6ee] bg-white px-5 py-5 shadow-[0_8px_24px_rgba(17,24,39,0.04)] md:px-6">
           <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
@@ -167,7 +185,7 @@ export function MeetingCalendarScreen({ variant }: { variant: CalendarVariant })
               <p className="text-[12px] font-bold uppercase tracking-[0.18em] text-[#b48600]">Calendar</p>
               <h1 className="mt-1 text-[26px] font-black tracking-[-0.03em] text-[#171717]">カレンダー</h1>
               <p className="mt-2 text-[13px] leading-6 text-[#707783]">
-                {variant === "admin" ? "チーム全体の商談・架電を日付別に確認できます。" : "自分の商談・架電を日付別に確認できます。"}
+                {variant === "admin" ? "チーム全体の商談・テレアポを日付別に確認できます。" : "自分の商談・テレアポを日付別に確認できます。"}
               </p>
             </div>
             <div className="flex flex-wrap gap-2">
@@ -182,7 +200,7 @@ export function MeetingCalendarScreen({ variant }: { variant: CalendarVariant })
               ) : null}
               {canUseMeeting && canUseTeleapo ? <FilterButton active={domainFilter === "all"} onClick={() => setDomainFilter("all")}>すべて</FilterButton> : null}
               {canUseMeeting ? <FilterButton active={domainFilter === "meeting"} onClick={() => setDomainFilter("meeting")}>商談</FilterButton> : null}
-              {canUseTeleapo ? <FilterButton active={domainFilter === "teleapo"} onClick={() => setDomainFilter("teleapo")}>架電</FilterButton> : null}
+              {canUseTeleapo ? <FilterButton active={domainFilter === "teleapo"} onClick={() => setDomainFilter("teleapo")}>テレアポ</FilterButton> : null}
             </div>
           </div>
         </section>
@@ -211,7 +229,35 @@ export function MeetingCalendarScreen({ variant }: { variant: CalendarVariant })
                 <h2 className="text-[22px] font-black text-[#171717]">{formatMonth(viewDate)}</h2>
                 <p className="mt-1 text-[13px] text-[#7a808c]">{domainLabel}の予定 {plannedCount}件</p>
               </div>
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
+                <select
+                  value={viewDate.getFullYear()}
+                  onChange={(event) => {
+                    const nextDate = new Date(Number(event.target.value), viewDate.getMonth(), 1);
+                    setViewDate(nextDate);
+                    setSelectedDate(startOfDay(nextDate));
+                  }}
+                  className="h-10 rounded-[12px] border border-[#e4e8ef] bg-white px-3 text-[13px] font-black text-[#343b48] outline-none transition focus:border-[#f0c655]"
+                  aria-label="対象年"
+                >
+                  {buildYearOptions(viewDate).map((year) => (
+                    <option key={year} value={year}>{year}年</option>
+                  ))}
+                </select>
+                <select
+                  value={viewDate.getMonth()}
+                  onChange={(event) => {
+                    const nextDate = new Date(viewDate.getFullYear(), Number(event.target.value), 1);
+                    setViewDate(nextDate);
+                    setSelectedDate(startOfDay(nextDate));
+                  }}
+                  className="h-10 rounded-[12px] border border-[#e4e8ef] bg-white px-3 text-[13px] font-black text-[#343b48] outline-none transition focus:border-[#f0c655]"
+                  aria-label="対象月"
+                >
+                  {Array.from({ length: 12 }, (_, index) => (
+                    <option key={index} value={index}>{index + 1}月</option>
+                  ))}
+                </select>
                 <button type="button" onClick={() => setViewDate(addMonths(viewDate, -1))} className="h-10 rounded-[12px] border border-[#e4e8ef] bg-white px-3 text-[13px] font-black text-[#343b48]">前月</button>
                 <button
                   type="button"
@@ -241,10 +287,16 @@ export function MeetingCalendarScreen({ variant }: { variant: CalendarVariant })
                 const isSelected = isSameDay(day.date, selectedDate);
                 const isToday = isSameDay(day.date, new Date());
                 return (
-                  <button
+                  <div
                     key={day.date.toISOString()}
-                    type="button"
                     onClick={() => setSelectedDate(day.date)}
+                    onKeyDown={(event) => {
+                      if (event.key !== "Enter" && event.key !== " ") return;
+                      event.preventDefault();
+                      setSelectedDate(day.date);
+                    }}
+                    role="button"
+                    tabIndex={0}
                     className={`min-h-[112px] rounded-[16px] border p-2 text-left transition ${
                       isSelected
                         ? "border-[#f0c655] bg-[#fff9e6] shadow-[0_8px_20px_rgba(245,189,7,0.12)]"
@@ -261,18 +313,52 @@ export function MeetingCalendarScreen({ variant }: { variant: CalendarVariant })
                     </div>
                     <div className="mt-2 space-y-1">
                       {dayEvents.slice(0, 2).map((event) => (
-                        <div key={event.id} className="truncate rounded-[10px] bg-[#fff4d6] px-2 py-1 text-[11px] font-bold text-[#6f5500]">
+                        <span
+                          key={event.id}
+                          role="button"
+                          tabIndex={0}
+                          onClick={(clickEvent) => {
+                            clickEvent.stopPropagation();
+                            setSelectedDate(day.date);
+                            setDetailSelection({ type: "event", event });
+                          }}
+                          onKeyDown={(keyEvent) => {
+                            if (keyEvent.key !== "Enter" && keyEvent.key !== " ") return;
+                            keyEvent.preventDefault();
+                            keyEvent.stopPropagation();
+                            setSelectedDate(day.date);
+                            setDetailSelection({ type: "event", event });
+                          }}
+                          className="block truncate rounded-[10px] bg-[#ffd12f] px-2 py-1 text-[11px] font-black text-[#171717] shadow-[0_2px_6px_rgba(245,189,7,0.18)] transition hover:bg-[#ffc400]"
+                        >
                           {formatTime(event.scheduledAt)} {event.customerName || getDomainLabel(event.salesDomain)}
-                        </div>
+                        </span>
                       ))}
                       {dayMeetings.slice(0, 2).map((meeting) => (
-                        <div key={meeting.id} className="truncate rounded-[10px] bg-white px-2 py-1 text-[11px] font-bold text-[#4c5565]">
+                        <span
+                          key={meeting.id}
+                          role="button"
+                          tabIndex={0}
+                          onClick={(clickEvent) => {
+                            clickEvent.stopPropagation();
+                            setSelectedDate(day.date);
+                            setDetailSelection({ type: "meeting", meeting });
+                          }}
+                          onKeyDown={(keyEvent) => {
+                            if (keyEvent.key !== "Enter" && keyEvent.key !== " ") return;
+                            keyEvent.preventDefault();
+                            keyEvent.stopPropagation();
+                            setSelectedDate(day.date);
+                            setDetailSelection({ type: "meeting", meeting });
+                          }}
+                          className="block truncate rounded-[10px] bg-[#ffd12f] px-2 py-1 text-[11px] font-black text-[#171717] shadow-[0_2px_6px_rgba(245,189,7,0.18)] transition hover:bg-[#ffc400]"
+                        >
                           {formatTime(meeting.recordedAt)} {meeting.customerName || getDomainLabel(meeting.salesDomain)}
-                        </div>
+                        </span>
                       ))}
                       {dayItemCount > 4 ? <div className="px-1 text-[11px] font-bold text-[#8f96a3]">+{dayItemCount - 4}件</div> : null}
                     </div>
-                  </button>
+                  </div>
                 );
               })}
             </div>
@@ -315,6 +401,13 @@ export function MeetingCalendarScreen({ variant }: { variant: CalendarVariant })
           </aside>
         </section>
       </div>
+      {detailSelection ? (
+        <CalendarDetailModal
+          selection={detailSelection}
+          variant={variant}
+          onClose={() => setDetailSelection(null)}
+        />
+      ) : null}
     </main>
   );
 }
@@ -338,6 +431,132 @@ function MeetingCalendarCard({ meeting, variant, compact = false }: { meeting: M
         </span>
       </div>
     </Link>
+  );
+}
+
+function CalendarDetailModal({
+  selection,
+  variant,
+  onClose,
+}: {
+  selection: CalendarDetailSelection;
+  variant: CalendarVariant;
+  onClose: () => void;
+}) {
+  const isEvent = selection.type === "event";
+  const title = isEvent
+    ? selection.event.customerName || "予定詳細"
+    : selection.meeting.customerName || `${getDomainLabel(selection.meeting.salesDomain)}詳細`;
+  const domain = isEvent ? selection.event.salesDomain : selection.meeting.salesDomain;
+  const productName = isEvent ? selection.event.productName : selection.meeting.productType;
+  const scheduledAt = isEvent ? selection.event.scheduledAt : selection.meeting.recordedAt;
+  const purpose = isEvent ? selection.event.meetingPurpose : selection.meeting.meetingPurpose;
+  const meetingHref = !isEvent
+    ? variant === "admin"
+      ? `/admin/meetings/${selection.meeting.id}`
+      : `/meetings/${selection.meeting.id}`
+    : null;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#171717]/35 px-4 py-6">
+      <section className="max-h-[min(720px,calc(100vh-48px))] w-full max-w-[560px] overflow-hidden rounded-[24px] border border-[#f0c655] bg-white shadow-[0_24px_70px_rgba(17,24,39,0.22)]">
+        <div className="border-b border-[#f1dfaa] bg-[#fff4c2] px-5 py-4">
+          <div className="flex items-start justify-between gap-4">
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="rounded-full bg-[#171717] px-2.5 py-1 text-[11px] font-black text-white">
+                  {isEvent ? "予定" : "アップロード済み"}
+                </span>
+                <span className="rounded-full bg-white px-2.5 py-1 text-[11px] font-black text-[#8a6500]">
+                  {getDomainLabel(domain)}
+                </span>
+              </div>
+              <h2 className="mt-3 truncate text-[20px] font-black text-[#171717]">{title}</h2>
+              <p className="mt-1 text-[13px] font-bold text-[#6f5500]">
+                {formatFullDate(scheduledAt ?? new Date())} {formatTime(scheduledAt)}
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={onClose}
+              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-[#f0c655] bg-white text-[20px] leading-none text-[#8a6500] transition hover:bg-[#fffaf0]"
+              aria-label="詳細を閉じる"
+            >
+              ×
+            </button>
+          </div>
+        </div>
+
+        <div className="max-h-[calc(100vh-220px)] overflow-y-auto px-5 py-5">
+          <div className="grid gap-3 sm:grid-cols-2">
+            <CalendarDetailRow label="商材" value={productName || "未設定"} />
+            <CalendarDetailRow label="目的" value={getPurposeLabel(purpose)} />
+            <CalendarDetailRow
+              label="顧客種別"
+              value={
+                isEvent
+                  ? selection.event.customerType === "new" ? "新規" : "既存"
+                  : selection.meeting.customerType === "new" ? "新規" : "既存"
+              }
+            />
+            <CalendarDetailRow
+              label="場所 / URL"
+              value={isEvent ? selection.event.location || "未設定" : selection.meeting.location || "未設定"}
+            />
+          </div>
+
+          {isEvent ? (
+            <div className="mt-4 space-y-3">
+              <CalendarDetailBlock label="ターゲット層" value={selection.event.targetSegment || "未登録"} />
+              <CalendarDetailBlock label="話すこと" value={selection.event.agenda || "未登録"} />
+              <CalendarDetailBlock label="想定課題・不安" value={selection.event.customerIssues || "未登録"} />
+              <CalendarDetailBlock label="事前準備メモ" value={selection.event.preparationMemo || "未登録"} />
+            </div>
+          ) : (
+            <div className="mt-4 space-y-3">
+              <CalendarDetailBlock label="メモ" value={selection.meeting.memo || "未登録"} />
+              <CalendarDetailBlock label="ステータス" value={getMeetingStatusLabel(selection.meeting.status)} />
+              <CalendarDetailBlock label="処理状況" value={String(selection.meeting.processingStatus || "未設定")} />
+            </div>
+          )}
+        </div>
+
+        <div className="flex flex-wrap justify-end gap-2 border-t border-[#eef1f5] px-5 py-4">
+          {isEvent ? (
+            <>
+              <Link href={buildPreRoleplayHref(selection.event)} className="inline-flex h-10 items-center justify-center rounded-[14px] bg-[#171717] px-4 text-[13px] font-black text-white">
+                事前ロープレ
+              </Link>
+              <Link href={buildUploadHref(selection.event)} className="inline-flex h-10 items-center justify-center rounded-[14px] border border-[#e4e8ef] bg-white px-4 text-[13px] font-black text-[#343b48]">
+                アップロード
+              </Link>
+            </>
+          ) : meetingHref ? (
+            <Link href={meetingHref} className="inline-flex h-10 items-center justify-center rounded-[14px] bg-[#171717] px-4 text-[13px] font-black text-white">
+              詳細を見る
+            </Link>
+          ) : null}
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function CalendarDetailRow({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-[16px] border border-[#eef1f5] bg-[#fcfcfd] px-4 py-3">
+      <div className="text-[11px] font-black text-[#8d94a1]">{label}</div>
+      <div className="mt-1 text-[13px] font-bold leading-5 text-[#20242c]">{value}</div>
+    </div>
+  );
+}
+
+function CalendarDetailBlock({ label, value }: { label: string; value: string }) {
+  return (
+    <section className="rounded-[16px] border border-[#eef1f5] bg-[#fcfcfd] px-4 py-3">
+      <div className="text-[11px] font-black text-[#8d94a1]">{label}</div>
+      <p className="mt-2 whitespace-pre-wrap text-[13px] font-semibold leading-6 text-[#343b48]">{value}</p>
+    </section>
   );
 }
 
@@ -479,19 +698,19 @@ function CalendarEventCard({ event, compact = false }: { event: CalendarEvent; c
   const uploadHref = buildUploadHref(event);
 
   return (
-    <div className="rounded-[18px] border border-[#f1dfaa] bg-[#fffdf7] px-4 py-3">
+    <div className="rounded-[18px] border border-[#f0c655] bg-[#fff4c2] px-4 py-3 shadow-[0_8px_18px_rgba(245,189,7,0.14)]">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
-            <span className="rounded-full bg-white px-2.5 py-1 text-[11px] font-black text-[#8a6500]">予定</span>
+            <span className="rounded-full bg-[#171717] px-2.5 py-1 text-[11px] font-black text-white">予定</span>
             <span className="rounded-full bg-white px-2.5 py-1 text-[11px] font-black text-[#8a6500]">{getDomainLabel(event.salesDomain)}</span>
-            <span className="text-[12px] font-bold text-[#7a808c]">{formatTime(event.scheduledAt)}</span>
+            <span className="text-[12px] font-black text-[#6f5500]">{formatTime(event.scheduledAt)}</span>
           </div>
           <h3 className="mt-2 truncate text-[14px] font-black text-[#171717]">{event.customerName || "顧客名未設定"}</h3>
-          <p className="mt-1 truncate text-[12px] font-bold text-[#7a808c]">{event.productName || "商材未設定"} / {event.customerType === "new" ? "新規" : "既存"}</p>
+          <p className="mt-1 truncate text-[12px] font-bold text-[#6f5500]">{event.productName || "商材未設定"} / {event.customerType === "new" ? "新規" : "既存"}</p>
           {!compact && event.agenda ? <p className="mt-2 line-clamp-2 text-[12px] leading-5 text-[#596273]">{event.agenda}</p> : null}
         </div>
-        <span className="shrink-0 rounded-full border border-[#e4e8ef] bg-white px-2.5 py-1 text-[11px] font-black text-[#596273]">
+        <span className="shrink-0 rounded-full border border-[#f0c655] bg-white px-2.5 py-1 text-[11px] font-black text-[#6f5500]">
           {getPurposeLabel(event.meetingPurpose)}
         </span>
       </div>
@@ -617,6 +836,14 @@ function addMonths(date: Date, amount: number) {
   return new Date(date.getFullYear(), date.getMonth() + amount, 1);
 }
 
+function buildYearOptions(viewDate: Date) {
+  const currentYear = new Date().getFullYear();
+  const centerYear = viewDate.getFullYear();
+  const startYear = Math.min(currentYear, centerYear) - 5;
+  const endYear = Math.max(currentYear, centerYear) + 5;
+  return Array.from({ length: endYear - startYear + 1 }, (_, index) => startYear + index);
+}
+
 function startOfMonth(date: Date) {
   return new Date(date.getFullYear(), date.getMonth(), 1);
 }
@@ -660,7 +887,7 @@ function formatTimeRange(date: Date | null, durationSec: number | null) {
 }
 
 function getDomainLabel(domain: SalesDomain) {
-  return domain === "teleapo" ? "架電" : "商談";
+  return domain === "teleapo" ? "テレアポ" : "商談";
 }
 
 function getPurposeLabel(purpose: MeetingPurpose) {
@@ -675,4 +902,10 @@ function getPurposeLabel(purpose: MeetingPurpose) {
     retention: "継続支援",
   };
   return labels[purpose] ?? "目的未設定";
+}
+
+function getMeetingStatusLabel(status: MeetingRecord["status"]) {
+  if (status === "won") return "成約";
+  if (status === "lost") return "失注";
+  return "検討中";
 }

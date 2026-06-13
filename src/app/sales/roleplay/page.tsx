@@ -31,7 +31,6 @@ export default function SalesRoleplayPage() {
   const [scenarios, setScenarios] = useState<RoleplayScenario[]>([]);
   const [assignments, setAssignments] = useState<RoleplayAssignment[]>([]);
   const [messages, setMessages] = useState<RoleplayMessage[]>([]);
-  const [recordedPreview, setRecordedPreview] = useState("");
   const [recordingElapsedSec, setRecordingElapsedSec] = useState(0);
   const [isRecording, setIsRecording] = useState(false);
   const [isTranscribing, setIsTranscribing] = useState(false);
@@ -42,6 +41,7 @@ export default function SalesRoleplayPage() {
   const [voicePreference, setVoicePreference] = useState<VoicePreference>("female");
   const [speechSpeed, setSpeechSpeed] = useState<SpeechSpeed>("normal");
   const [availableVoices, setAvailableVoices] = useState<SpeechSynthesisVoice[]>([]);
+  const [activeModal, setActiveModal] = useState<"customer" | "voice" | null>(null);
   const recorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<BlobPart[]>([]);
   const recordingStartedAtRef = useRef<number | null>(null);
@@ -54,13 +54,11 @@ export default function SalesRoleplayPage() {
   );
   const visibleScenarios = useMemo(
     () =>
-      scenarios.filter(
-        (item) =>
-          item.visibility === "all" ||
-          item.createdBy === userId ||
-          activeAssignmentScenarioIds.has(item.id),
-      ),
-    [activeAssignmentScenarioIds, scenarios, userId],
+      scenarios.filter((item) => {
+        if (item.roleplayType !== roleplayType) return false;
+        return item.visibility === "all" || item.createdBy === userId || activeAssignmentScenarioIds.has(item.id);
+      }),
+    [activeAssignmentScenarioIds, roleplayType, scenarios, userId],
   );
   const scenario = useMemo(
     () => visibleScenarios.find((item) => item.id === scenarioId) ?? null,
@@ -83,7 +81,6 @@ export default function SalesRoleplayPage() {
   useEffect(() => {
     if (!scenario) return;
     setMessages([]);
-    setRecordedPreview("");
     setRecordingElapsedSec(0);
   }, [scenario]);
 
@@ -126,7 +123,6 @@ export default function SalesRoleplayPage() {
     }
 
     setError(null);
-    setRecordedPreview("");
     if ("speechSynthesis" in window) {
       window.speechSynthesis.cancel();
       setIsSpeaking(false);
@@ -202,7 +198,6 @@ export default function SalesRoleplayPage() {
       if (!text) {
         throw new Error("発話を認識できませんでした。もう少しはっきり話して再録音してください。");
       }
-      setRecordedPreview(text);
       await sendSalesMessage(text);
     } catch (nextError) {
       setError(nextError instanceof Error ? nextError.message : "音声ロープレの送信に失敗しました。");
@@ -295,7 +290,7 @@ export default function SalesRoleplayPage() {
   };
 
   return (
-    <main className="overflow-x-hidden bg-transparent px-4 pb-4 pt-4 md:px-8 md:pb-5 md:pt-5">
+    <main className="overflow-x-hidden bg-transparent px-4 pb-0 pt-4 md:px-8 md:pb-0 md:pt-5">
       <div className="mx-auto max-w-[1500px]">
         <RoleplayHeader activeStep="practice" roleplayType={roleplayType} />
 
@@ -306,23 +301,32 @@ export default function SalesRoleplayPage() {
         ) : null}
 
         {scenario ? (
-          <section className="mt-3 grid gap-4 2xl:grid-cols-[minmax(0,1fr)_320px]">
-            <article className="flex min-h-[calc(100vh-150px)] flex-col rounded-[24px] border border-[#e2e6ee] bg-white shadow-[0_8px_24px_rgba(17,24,39,0.04)]">
+          <section className="mt-3">
+            <article className="flex flex-col rounded-[24px] border border-[#e2e6ee] bg-white shadow-[0_8px_24px_rgba(17,24,39,0.04)]">
               <div className="border-b border-[#eef1f5] px-5 py-4">
-                <p className="text-[12px] font-bold text-[#8a6500]">{scenario.productName || "商材未設定"}</p>
-                <h1 className="mt-1 text-[24px] font-black tracking-[-0.03em] text-[#171717]">{scenario.title}</h1>
-                <p className="mt-2 text-[13px] leading-6 text-[#707783]">
-                  下の操作バーからいつでも録音できます。録音停止後に文字起こしし、AI顧客が音声で返答します。
-                </p>
-                {recordedPreview ? (
-                  <div className="mt-4 rounded-[18px] border border-[#e6eaf0] bg-white px-4 py-3">
-                    <div className="text-[12px] font-black text-[#8a909b]">直前の文字起こし</div>
-                    <p className="mt-1 text-[13px] leading-6 text-[#343b48]">{recordedPreview}</p>
+                <div className="flex flex-wrap items-start justify-between gap-4">
+                  <div className="min-w-0 flex-1">
+                    <p className="text-[12px] font-bold text-[#8a6500]">{scenario.productName || "商材未設定"}</p>
+                    <h1 className="mt-1 text-[24px] font-black tracking-[-0.03em] text-[#171717]">{scenario.title}</h1>
+                    <p className="mt-2 text-[13px] leading-6 text-[#707783]">
+                      下の操作バーからいつでも録音できます。録音停止後に文字起こしし、AI顧客が音声で返答します。
+                    </p>
                   </div>
-                ) : null}
+                  <div className="flex shrink-0 items-center gap-2">
+                    <IconButton label="AI顧客情報" onClick={() => setActiveModal("customer")}>
+                      <CustomerIcon />
+                    </IconButton>
+                    <IconButton label="AI音声設定" onClick={() => setActiveModal("voice")}>
+                      <VoiceSettingsIcon />
+                    </IconButton>
+                    <Link href={`/sales/roleplay/scenarios?category=${roleplayType}`} className="inline-flex h-11 items-center justify-center rounded-[14px] border border-[#e2e6ee] bg-white px-4 text-[13px] font-bold text-[#3d4350]">
+                      シナリオ変更
+                    </Link>
+                  </div>
+                </div>
               </div>
 
-              <div className="flex-1 space-y-4 px-4 py-5 sm:px-5">
+              <div className="space-y-4 px-4 py-5 sm:px-5">
                 {messages.length > 0 ? (
                   messages.map((message, index) => (
                     <MessageBubble key={`${message.createdAt}-${index}`} message={message} />
@@ -331,7 +335,7 @@ export default function SalesRoleplayPage() {
                   <div className="rounded-[20px] border border-dashed border-[#dfe4ec] bg-[#fcfcfd] px-5 py-8 text-center">
                     <h3 className="text-[18px] font-black text-[#171717]">営業側から開始</h3>
                     <p className="mx-auto mt-2 max-w-[520px] text-[13px] leading-6 text-[#7a808c]">
-                      下の録音ボタンを押して、いつもの架電・商談のように最初の挨拶から話してください。AIは顧客役として返答します。
+                      下の録音ボタンを押して、いつものテレアポ・商談のように最初の挨拶から話してください。AIは顧客役として返答します。
                     </p>
                   </div>
                 )}
@@ -354,7 +358,7 @@ export default function SalesRoleplayPage() {
                     <CompactStatus label="状態" value={buildVoiceStatus({ isRecording, isTranscribing, isThinking, isSpeaking })} />
                     <CompactStatus label="発話" value={`${messages.filter((message) => message.role === "sales").length}回`} />
                   </div>
-                  <div className="grid min-w-0 grid-cols-1 gap-2 sm:grid-cols-2 xl:w-[320px] xl:shrink-0">
+                  <div className="grid min-w-0 grid-cols-1 gap-2 sm:grid-cols-2 xl:w-[380px] xl:shrink-0">
                     <button
                       type="button"
                       onClick={isRecording ? handleStopRecording : () => void handleStartRecording()}
@@ -368,80 +372,25 @@ export default function SalesRoleplayPage() {
                     </button>
                     <button
                       type="button"
-                      onClick={() => {
-                        const lastCustomer = [...messages].reverse().find((message) => message.role === "customer");
-                        if (lastCustomer) {
-                          speakText(lastCustomer.content, setIsSpeaking, {
-                            voicePreference,
-                            speechSpeed,
-                            voices: availableVoices,
-                          });
-                        }
-                      }}
-                      disabled={isSpeaking || isRecording}
-                      className="inline-flex h-12 min-w-0 items-center justify-center rounded-[16px] border border-[#e4e8ef] bg-white px-4 text-[13px] font-black text-[#343b48] disabled:cursor-not-allowed disabled:opacity-50 sm:h-14"
+                      onClick={() => void handleFinish()}
+                      disabled={messages.filter((message) => message.role === "sales").length < 2 || isSaving || isRecording || isTranscribing || isThinking}
+                      className="inline-flex h-12 min-w-0 items-center justify-center rounded-[16px] border border-[#f0c655] bg-[#ffd84d] px-4 text-[13px] font-black text-[#171717] shadow-[0_10px_22px_rgba(245,189,7,0.18)] disabled:cursor-not-allowed disabled:opacity-50 sm:h-14"
                     >
-                      もう一度聞く
+                      {isSaving ? "保存中" : "終了して採点"}
                     </button>
                   </div>
                 </div>
               </div>
             </article>
-
-            <aside className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_180px_180px] 2xl:block 2xl:space-y-4">
-              <section className="rounded-[24px] border border-[#e2e6ee] bg-white px-5 py-6 shadow-[0_8px_24px_rgba(17,24,39,0.04)]">
-                <h2 className="text-[18px] font-black text-[#171717]">AI顧客情報</h2>
-                <div className="mt-4 space-y-3">
-                  <InfoBlock label="役職" value={scenario.customerRole} />
-                  <InfoBlock label="プロフィール" value={scenario.customerProfile} />
-                  <InfoBlock label="ゴール" value={scenario.goal} />
-                  <InfoBlock label="想定反論" value={scenario.objections.join(" / ") || "未設定"} />
-                </div>
-              </section>
-              <section className="rounded-[24px] border border-[#e2e6ee] bg-white px-5 py-6 shadow-[0_8px_24px_rgba(17,24,39,0.04)]">
-                <h2 className="text-[18px] font-black text-[#171717]">AI音声設定</h2>
-                <div className="mt-4 space-y-3">
-                  <label className="block">
-                    <span className="mb-2 block text-[12px] font-bold text-[#8a909b]">声</span>
-                    <select
-                      value={voicePreference}
-                      onChange={(event) => setVoicePreference(event.target.value as VoicePreference)}
-                      className="h-11 w-full rounded-[14px] border border-[#e4e8ef] bg-white px-3 text-[13px] font-bold text-[#343b48] outline-none"
-                    >
-                      <option value="female">女性</option>
-                      <option value="male">男性</option>
-                      <option value="default">標準</option>
-                    </select>
-                  </label>
-                  <label className="block">
-                    <span className="mb-2 block text-[12px] font-bold text-[#8a909b]">話す速さ</span>
-                    <select
-                      value={speechSpeed}
-                      onChange={(event) => setSpeechSpeed(event.target.value as SpeechSpeed)}
-                      className="h-11 w-full rounded-[14px] border border-[#e4e8ef] bg-white px-3 text-[13px] font-bold text-[#343b48] outline-none"
-                    >
-                      <option value="slow">ゆっくり</option>
-                      <option value="normal">普通</option>
-                      <option value="fast">速め</option>
-                    </select>
-                  </label>
-                  <p className="text-[12px] leading-5 text-[#7a808c]">
-                    端末やブラウザに入っている日本語音声から近い声を選びます。
-                  </p>
-                </div>
-              </section>
-              <button
-                type="button"
-                onClick={() => void handleFinish()}
-                disabled={messages.filter((message) => message.role === "sales").length < 2 || isSaving}
-                className="inline-flex h-12 w-full items-center justify-center rounded-[14px] border border-[#f0c655] bg-[#ffd84d] text-[14px] font-black text-[#171717] disabled:cursor-not-allowed disabled:opacity-50 lg:self-start"
-              >
-                {isSaving ? "保存中" : "終了して採点"}
-              </button>
-              <Link href={`/sales/roleplay/scenarios?category=${roleplayType}`} className="inline-flex h-12 w-full items-center justify-center rounded-[14px] border border-[#e2e6ee] bg-white text-[14px] font-bold text-[#3d4350] lg:self-start">
-                シナリオを変更
-              </Link>
-            </aside>
+            <RoleplaySettingsModal
+              activeModal={activeModal}
+              onClose={() => setActiveModal(null)}
+              scenario={scenario}
+              voicePreference={voicePreference}
+              speechSpeed={speechSpeed}
+              onVoicePreferenceChange={setVoicePreference}
+              onSpeechSpeedChange={setSpeechSpeed}
+            />
           </section>
         ) : (
           <section className="mt-3 rounded-[24px] border border-[#e2e6ee] bg-white px-6 py-10 text-center shadow-[0_8px_24px_rgba(17,24,39,0.04)] md:px-10 md:py-12">
@@ -487,6 +436,103 @@ function CompactStatus({ label, value, active = false }: { label: string; value:
   );
 }
 
+function IconButton({ label, onClick, children }: { label: string; onClick: () => void; children: React.ReactNode }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-label={label}
+      title={label}
+      className="inline-flex h-11 w-11 items-center justify-center rounded-[14px] border border-[#e2e6ee] bg-white text-[#343b48] transition hover:border-[#f0c655] hover:bg-[#fff8df] hover:text-[#171717]"
+    >
+      {children}
+    </button>
+  );
+}
+
+function RoleplaySettingsModal({
+  activeModal,
+  onClose,
+  scenario,
+  voicePreference,
+  speechSpeed,
+  onVoicePreferenceChange,
+  onSpeechSpeedChange,
+}: {
+  activeModal: "customer" | "voice" | null;
+  onClose: () => void;
+  scenario: RoleplayScenario;
+  voicePreference: VoicePreference;
+  speechSpeed: SpeechSpeed;
+  onVoicePreferenceChange: (value: VoicePreference) => void;
+  onSpeechSpeedChange: (value: SpeechSpeed) => void;
+}) {
+  if (!activeModal) return null;
+
+  const title = activeModal === "customer" ? "AI顧客情報" : "AI音声設定";
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/35 px-4 py-6" role="dialog" aria-modal="true" aria-label={title}>
+      <div className="w-full max-w-[560px] rounded-[24px] border border-[#e2e6ee] bg-white shadow-[0_24px_70px_rgba(17,24,39,0.22)]">
+        <div className="flex items-center justify-between gap-4 border-b border-[#eef1f5] px-5 py-4">
+          <h2 className="text-[18px] font-black text-[#171717]">{title}</h2>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="閉じる"
+            className="inline-flex h-10 w-10 items-center justify-center rounded-[12px] border border-[#e2e6ee] bg-white text-[#596273] transition hover:bg-[#f7f7fa] hover:text-[#171717]"
+          >
+            <CloseIcon />
+          </button>
+        </div>
+        <div className="max-h-[70vh] overflow-y-auto px-5 py-5">
+          {activeModal === "customer" ? (
+            <div className="space-y-3">
+              <InfoBlock label="役職" value={scenario.customerRole} />
+              <InfoBlock label="プロフィール" value={scenario.customerProfile} />
+              <InfoBlock label="ゴール" value={scenario.goal} />
+              <InfoBlock label="想定反論" value={scenario.objections.join(" / ") || "未設定"} />
+              {scenario.customFields.map((field) => (
+                <InfoBlock key={field.id} label={field.label} value={field.value} />
+              ))}
+            </div>
+          ) : (
+            <div className="space-y-4">
+              <label className="block">
+                <span className="mb-2 block text-[12px] font-bold text-[#8a909b]">声</span>
+                <select
+                  value={voicePreference}
+                  onChange={(event) => onVoicePreferenceChange(event.target.value as VoicePreference)}
+                  className="h-12 w-full rounded-[14px] border border-[#e4e8ef] bg-white px-3 text-[14px] font-bold text-[#343b48] outline-none"
+                >
+                  <option value="female">女性</option>
+                  <option value="male">男性</option>
+                  <option value="default">標準</option>
+                </select>
+              </label>
+              <label className="block">
+                <span className="mb-2 block text-[12px] font-bold text-[#8a909b]">話す速さ</span>
+                <select
+                  value={speechSpeed}
+                  onChange={(event) => onSpeechSpeedChange(event.target.value as SpeechSpeed)}
+                  className="h-12 w-full rounded-[14px] border border-[#e4e8ef] bg-white px-3 text-[14px] font-bold text-[#343b48] outline-none"
+                >
+                  <option value="slow">ゆっくり</option>
+                  <option value="normal">普通</option>
+                  <option value="fast">速め</option>
+                </select>
+              </label>
+              <p className="rounded-[14px] border border-[#eef1f5] bg-[#fcfcfd] px-4 py-3 text-[12px] leading-6 text-[#7a808c]">
+                端末やブラウザに入っている日本語音声から近い声を選びます。
+              </p>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function MicIcon({ active }: { active: boolean }) {
   return (
     <svg viewBox="0 0 24 24" aria-hidden="true" className={`h-5 w-5 fill-none stroke-current stroke-[2] ${active ? "animate-pulse" : ""}`}>
@@ -494,6 +540,35 @@ function MicIcon({ active }: { active: boolean }) {
       <path d="M5 10a7 7 0 0 0 14 0" />
       <path d="M12 17v4" />
       <path d="M8 21h8" />
+    </svg>
+  );
+}
+
+function CustomerIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true" className="h-5 w-5 fill-none stroke-current stroke-[1.9]">
+      <circle cx="12" cy="8" r="3.4" />
+      <path d="M5.5 19a6.5 6.5 0 0 1 13 0" />
+      <path d="M18.7 6.2h1.8v4.6h-1.8" />
+    </svg>
+  );
+}
+
+function VoiceSettingsIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true" className="h-5 w-5 fill-none stroke-current stroke-[1.9]">
+      <path d="M5 9v6h3.2l4.3 3.3V5.7L8.2 9H5Z" />
+      <path d="M16.2 8.2a5.2 5.2 0 0 1 0 7.6" />
+      <path d="M18.8 5.8a8.8 8.8 0 0 1 0 12.4" />
+    </svg>
+  );
+}
+
+function CloseIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true" className="h-5 w-5 fill-none stroke-current stroke-[2]">
+      <path d="M6 6l12 12" />
+      <path d="M18 6L6 18" />
     </svg>
   );
 }

@@ -217,7 +217,7 @@ export default function SalesAccountPage() {
   }
 
   return (
-    <main className="overflow-x-hidden bg-transparent px-4 pb-3 pt-4 md:px-7 md:pb-4 md:pt-5">
+    <main className="overflow-x-hidden bg-transparent px-4 pb-0 pt-4 md:px-7 md:pb-0 md:pt-5">
       <div className="mx-auto max-w-[1240px]">
         {errorMessage ? (
           <div className="mb-5 rounded-[18px] border border-[#ffd2cc] bg-[#fff2ef] px-4 py-3 text-[14px] text-[#cf4b39]">

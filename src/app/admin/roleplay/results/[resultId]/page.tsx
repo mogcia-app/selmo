@@ -121,6 +121,7 @@ export default function AdminRoleplayResultDetailPage() {
         goal: goal.trim(),
         objections: splitLines(objections),
         evaluationCriteria: splitLines(criteria),
+        customFields: scenario.customFields,
         difficulty: scenario.difficulty,
         visibility: scenario.visibility,
         createdBy: scenario.createdBy ?? profile.uid,
