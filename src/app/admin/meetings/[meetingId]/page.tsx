@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useParams } from "next/navigation";
+import { useEffect, useState } from "react";
 
 import {
   EmptyState,
@@ -14,14 +15,52 @@ import {
   getMeetingOutcomeLabel,
   useAdminInsights,
 } from "@/app/admin/_components/admin-insights";
+import { useAuth } from "@/features/auth/auth-provider";
+import { saveMeetingAdminComment, type MeetingRecord } from "@/lib/firebase/meetings";
 
 export default function AdminMeetingDetailPage() {
   const params = useParams<{ meetingId: string }>();
+  const { profile } = useAuth();
   const { meetings, memberRows, error } = useAdminInsights();
+  const [adminComment, setAdminComment] = useState("");
+  const [adminCommentMessage, setAdminCommentMessage] = useState<string | null>(null);
+  const [isSavingAdminComment, setIsSavingAdminComment] = useState(false);
   const meeting = meetings.find((item) => item.id === params.meetingId);
   const member = meeting ? memberRows.find((row) => row.id === meeting.userId) : null;
   const transcript = meeting?.transcriptBlocks?.map((block) => block.text).join("\n\n") || meeting?.transcriptionProbeText || "";
   const review = buildMeetingReview(meeting);
+
+  useEffect(() => {
+    setAdminComment(meeting?.adminComment ?? "");
+    setAdminCommentMessage(null);
+  }, [meeting?.adminComment, meeting?.id]);
+
+  async function handleSaveAdminComment() {
+    if (!meeting || !profile?.uid) {
+      setAdminCommentMessage("管理者情報を取得できませんでした。");
+      return;
+    }
+
+    const comment = adminComment.trim();
+    if (!comment) {
+      setAdminCommentMessage("管理者コメントを入力してください。");
+      return;
+    }
+
+    setIsSavingAdminComment(true);
+    setAdminCommentMessage(null);
+    try {
+      await saveMeetingAdminComment(meeting.id, {
+        comment,
+        updatedBy: profile.uid,
+      });
+      setAdminCommentMessage("管理者コメントを保存しました。");
+    } catch (nextError) {
+      setAdminCommentMessage(nextError instanceof Error ? nextError.message : "管理者コメントの保存に失敗しました。");
+    } finally {
+      setIsSavingAdminComment(false);
+    }
+  }
 
   return (
     <PageShell>
@@ -111,10 +150,16 @@ export default function AdminMeetingDetailPage() {
                   </div>
                 </Panel>
 
-                <Panel title="上司コメント">
-                  <div className="rounded-[16px] border border-[#eef1f5] bg-[#fcfcfd] px-4 py-4 text-[13px] leading-6 text-[#596273]">
-                    {review.managerComment}
-                  </div>
+                <Panel title="管理者コメント">
+                  <AdminCommentEditor
+                    comment={adminComment}
+                    savedComment={review.adminComment}
+                    updatedAt={meeting.adminCommentUpdatedAt ?? null}
+                    isSaving={isSavingAdminComment}
+                    message={adminCommentMessage}
+                    onChange={setAdminComment}
+                    onSave={() => void handleSaveAdminComment()}
+                  />
                 </Panel>
 
                 <Panel title="ロープレ課題">
@@ -166,7 +211,59 @@ function ReviewList({ title, items }: { title: string; items: string[] }) {
   );
 }
 
-function buildMeetingReview(meeting: ReturnType<typeof useAdminInsights>["meetings"][number] | undefined) {
+function AdminCommentEditor({
+  comment,
+  savedComment,
+  updatedAt,
+  isSaving,
+  message,
+  onChange,
+  onSave,
+}: {
+  comment: string;
+  savedComment: string;
+  updatedAt: Date | null;
+  isSaving: boolean;
+  message: string | null;
+  onChange: (value: string) => void;
+  onSave: () => void;
+}) {
+  return (
+    <div className="space-y-3">
+      {savedComment ? (
+        <div className="rounded-[16px] border border-[#eef1f5] bg-[#fcfcfd] px-4 py-4 text-[13px] leading-6 text-[#596273]">
+          <div className="whitespace-pre-wrap">{savedComment}</div>
+          {updatedAt ? <div className="mt-3 text-[11px] font-bold text-[#8a909b]">更新日 {formatDateTime(updatedAt)}</div> : null}
+        </div>
+      ) : (
+        <div className="rounded-[16px] border border-dashed border-[#e2e6ee] bg-[#fcfcfd] px-4 py-4 text-[13px] font-bold leading-6 text-[#8a909b]">
+          管理者コメントはまだありません。必要な指導内容や確認事項をここから保存できます。
+        </div>
+      )}
+      <textarea
+        value={comment}
+        onChange={(event) => onChange(event.target.value)}
+        className="min-h-[120px] w-full resize-y rounded-[16px] border border-[#e4e8ef] bg-white px-4 py-3 text-[13px] leading-6 text-[#343b48] outline-none transition focus:border-[#e0bd4b]"
+        placeholder="例：次回は決裁者確認と導入時期の深掘りを重点的に確認してください。"
+      />
+      <button
+        type="button"
+        onClick={onSave}
+        disabled={isSaving}
+        className="inline-flex h-11 w-full items-center justify-center rounded-[14px] border border-[#f0c655] bg-[#ffd84d] text-[13px] font-black text-[#171717] disabled:opacity-60"
+      >
+        {isSaving ? "保存中" : savedComment ? "管理者コメントを更新" : "管理者コメントを保存"}
+      </button>
+      {message ? (
+        <div className="rounded-[14px] border border-[#eef1f5] bg-[#fcfcfd] px-4 py-3 text-[12px] font-bold leading-5 text-[#596273]">
+          {message}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function buildMeetingReview(meeting: MeetingRecord | undefined) {
   const compliance = meeting?.aiSummary?.manualCompliance;
   const firstBullet = meeting?.aiSummary?.bullets[0] ?? meeting?.aiSummary?.overview ?? "分析結果を確認してください";
   const goodPoint = compliance?.matchedCriteria[0] ?? firstBullet;
@@ -177,7 +274,7 @@ function buildMeetingReview(meeting: ReturnType<typeof useAdminInsights>["meetin
     goodPoint,
     improvementPoint,
     lostReason,
-    managerComment: `次回の指導では「${improvementPoint}」を中心に確認してください。`,
+    adminComment: meeting?.adminComment?.trim() ?? "",
   };
 }
 

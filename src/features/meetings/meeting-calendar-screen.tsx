@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 
 import { useAuth } from "@/features/auth/auth-provider";
+import { subscribeToUserProfiles, type AppUserProfile } from "@/lib/firebase/auth";
 import {
   createCalendarEvent,
   subscribeToCalendarEvents,
@@ -26,6 +27,7 @@ export function MeetingCalendarScreen({ variant }: { variant: CalendarVariant })
   const [meetings, setMeetings] = useState<MeetingRecord[]>([]);
   const [calendarEvents, setCalendarEvents] = useState<CalendarEvent[]>([]);
   const [products, setProducts] = useState<KnowledgeProduct[]>([]);
+  const [salesUsers, setSalesUsers] = useState<AppUserProfile[]>([]);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [eventFormOpen, setEventFormOpen] = useState(false);
   const [isSavingEvent, setIsSavingEvent] = useState(false);
@@ -72,6 +74,11 @@ export function MeetingCalendarScreen({ variant }: { variant: CalendarVariant })
         () => {
           setProducts([]);
         },
+      ),
+      subscribeToUserProfiles(
+        (profiles) => setSalesUsers(profiles.filter((user) => user.role === "sales")),
+        () => setSalesUsers([]),
+        profile.companyId,
       ),
     ];
 
@@ -139,6 +146,7 @@ export function MeetingCalendarScreen({ variant }: { variant: CalendarVariant })
   const meetingsByDate = useMemo(() => groupMeetingsByDate(monthMeetings), [monthMeetings]);
   const eventsByDate = useMemo(() => groupEventsByDate(monthEvents), [monthEvents]);
   const calendarDays = useMemo(() => buildCalendarDays(viewDate), [viewDate]);
+  const userNameById = useMemo(() => buildUserNameById(salesUsers, profile), [profile, salesUsers]);
   const domainLabel = domainFilter === "teleapo" ? "テレアポ" : domainFilter === "meeting" ? "商談" : "すべて";
   const plannedCount = monthMeetings.length + monthEvents.length;
 
@@ -371,8 +379,8 @@ export function MeetingCalendarScreen({ variant }: { variant: CalendarVariant })
               <div className="mt-4 space-y-3">
                 {selectedEvents.length + selectedMeetings.length > 0 ? (
                   <>
-                    {selectedEvents.map((event) => <CalendarEventCard key={event.id} event={event} />)}
-                    {selectedMeetings.map((meeting) => <MeetingCalendarCard key={meeting.id} meeting={meeting} variant={variant} />)}
+                    {selectedEvents.map((event) => <CalendarEventCard key={event.id} event={event} ownerName={userNameById.get(event.userId)} variant={variant} />)}
+                    {selectedMeetings.map((meeting) => <MeetingCalendarCard key={meeting.id} meeting={meeting} ownerName={userNameById.get(meeting.userId)} variant={variant} />)}
                   </>
                 ) : (
                   <div className="rounded-[18px] border border-dashed border-[#dfe4ec] bg-[#fcfcfd] px-4 py-8 text-center text-[13px] font-bold text-[#8f96a3]">
@@ -388,8 +396,8 @@ export function MeetingCalendarScreen({ variant }: { variant: CalendarVariant })
               <div className="mt-4 space-y-3">
                 {upcomingEvents.length + upcomingMeetings.length > 0 ? (
                   <>
-                    {upcomingEvents.map((event) => <CalendarEventCard key={event.id} event={event} compact />)}
-                    {upcomingMeetings.map((meeting) => <MeetingCalendarCard key={meeting.id} meeting={meeting} variant={variant} compact />)}
+                    {upcomingEvents.map((event) => <CalendarEventCard key={event.id} event={event} ownerName={userNameById.get(event.userId)} variant={variant} compact />)}
+                    {upcomingMeetings.map((meeting) => <MeetingCalendarCard key={meeting.id} meeting={meeting} ownerName={userNameById.get(meeting.userId)} variant={variant} compact />)}
                   </>
                 ) : (
                   <div className="rounded-[18px] border border-dashed border-[#dfe4ec] bg-[#fcfcfd] px-4 py-8 text-center text-[13px] font-bold text-[#8f96a3]">
@@ -405,6 +413,7 @@ export function MeetingCalendarScreen({ variant }: { variant: CalendarVariant })
         <CalendarDetailModal
           selection={detailSelection}
           variant={variant}
+          ownerName={userNameById.get(detailSelection.type === "event" ? detailSelection.event.userId : detailSelection.meeting.userId)}
           onClose={() => setDetailSelection(null)}
         />
       ) : null}
@@ -412,7 +421,7 @@ export function MeetingCalendarScreen({ variant }: { variant: CalendarVariant })
   );
 }
 
-function MeetingCalendarCard({ meeting, variant, compact = false }: { meeting: MeetingRecord; variant: CalendarVariant; compact?: boolean }) {
+function MeetingCalendarCard({ meeting, ownerName, variant, compact = false }: { meeting: MeetingRecord; ownerName?: string; variant: CalendarVariant; compact?: boolean }) {
   const href = variant === "admin" ? `/admin/meetings/${meeting.id}` : `/meetings/${meeting.id}`;
   return (
     <Link href={href} className="block rounded-[18px] border border-[#e6eaf0] bg-[#fcfcfd] px-4 py-3 transition hover:border-[#ead8a8] hover:bg-white">
@@ -424,6 +433,7 @@ function MeetingCalendarCard({ meeting, variant, compact = false }: { meeting: M
           </div>
           <h3 className="mt-2 truncate text-[14px] font-black text-[#171717]">{meeting.customerName || `${getDomainLabel(meeting.salesDomain)}名未設定`}</h3>
           <p className="mt-1 truncate text-[12px] font-bold text-[#7a808c]">{meeting.productType || "商材未設定"}</p>
+          {variant === "admin" ? <p className="mt-1 truncate text-[12px] font-black text-[#8a6500]">担当: {ownerName ?? "未設定"}</p> : null}
           {!compact && meeting.memo ? <p className="mt-2 line-clamp-2 text-[12px] leading-5 text-[#596273]">{meeting.memo}</p> : null}
         </div>
         <span className="shrink-0 rounded-full border border-[#e4e8ef] bg-white px-2.5 py-1 text-[11px] font-black text-[#596273]">
@@ -437,10 +447,12 @@ function MeetingCalendarCard({ meeting, variant, compact = false }: { meeting: M
 function CalendarDetailModal({
   selection,
   variant,
+  ownerName,
   onClose,
 }: {
   selection: CalendarDetailSelection;
   variant: CalendarVariant;
+  ownerName?: string;
   onClose: () => void;
 }) {
   const isEvent = selection.type === "event";
@@ -490,6 +502,7 @@ function CalendarDetailModal({
         <div className="max-h-[calc(100vh-220px)] overflow-y-auto px-5 py-5">
           <div className="grid gap-3 sm:grid-cols-2">
             <CalendarDetailRow label="商材" value={productName || "未設定"} />
+            {variant === "admin" ? <CalendarDetailRow label="担当者" value={ownerName ?? "未設定"} /> : null}
             <CalendarDetailRow label="目的" value={getPurposeLabel(purpose)} />
             <CalendarDetailRow
               label="顧客種別"
@@ -516,7 +529,6 @@ function CalendarDetailModal({
             <div className="mt-4 space-y-3">
               <CalendarDetailBlock label="メモ" value={selection.meeting.memo || "未登録"} />
               <CalendarDetailBlock label="ステータス" value={getMeetingStatusLabel(selection.meeting.status)} />
-              <CalendarDetailBlock label="処理状況" value={String(selection.meeting.processingStatus || "未設定")} />
             </div>
           )}
         </div>
@@ -693,7 +705,17 @@ function CalendarEventForm({
   );
 }
 
-function CalendarEventCard({ event, compact = false }: { event: CalendarEvent; compact?: boolean }) {
+function CalendarEventCard({
+  event,
+  ownerName,
+  variant,
+  compact = false,
+}: {
+  event: CalendarEvent;
+  ownerName?: string;
+  variant: CalendarVariant;
+  compact?: boolean;
+}) {
   const roleplayHref = buildPreRoleplayHref(event);
   const uploadHref = buildUploadHref(event);
 
@@ -708,6 +730,7 @@ function CalendarEventCard({ event, compact = false }: { event: CalendarEvent; c
           </div>
           <h3 className="mt-2 truncate text-[14px] font-black text-[#171717]">{event.customerName || "顧客名未設定"}</h3>
           <p className="mt-1 truncate text-[12px] font-bold text-[#6f5500]">{event.productName || "商材未設定"} / {event.customerType === "new" ? "新規" : "既存"}</p>
+          {variant === "admin" ? <p className="mt-1 truncate text-[12px] font-black text-[#8a6500]">担当: {ownerName ?? "未設定"}</p> : null}
           {!compact && event.agenda ? <p className="mt-2 line-clamp-2 text-[12px] leading-5 text-[#596273]">{event.agenda}</p> : null}
         </div>
         <span className="shrink-0 rounded-full border border-[#f0c655] bg-white px-2.5 py-1 text-[11px] font-black text-[#6f5500]">
@@ -908,4 +931,15 @@ function getMeetingStatusLabel(status: MeetingRecord["status"]) {
   if (status === "won") return "成約";
   if (status === "lost") return "失注";
   return "検討中";
+}
+
+function buildUserNameById(users: AppUserProfile[], currentProfile: AppUserProfile | null) {
+  const rows = new Map<string, string>();
+  users.forEach((user) => {
+    rows.set(user.uid, user.name || user.email || "名前未設定");
+  });
+  if (currentProfile) {
+    rows.set(currentProfile.uid, currentProfile.name || currentProfile.email || "名前未設定");
+  }
+  return rows;
 }

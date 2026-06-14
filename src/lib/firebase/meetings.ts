@@ -160,6 +160,9 @@ export type MeetingRecord = {
   aiSummaryStatus?: "idle" | "running" | "completed" | "failed";
   aiSummaryError?: string | null;
   aiSummaryTestedAt?: Date | null;
+  adminComment?: string;
+  adminCommentUpdatedAt?: Date | null;
+  adminCommentUpdatedBy?: string | null;
 };
 
 export type CreateMeetingInput = {
@@ -694,6 +697,20 @@ export async function updateMeetingMetadata(
   });
 }
 
+export async function saveMeetingAdminComment(
+  meetingId: string,
+  input: { comment: string; updatedBy: string },
+) {
+  const { firestore } = assertFirebaseClient();
+
+  await updateDoc(doc(firestore, "meetings", meetingId), {
+    adminComment: input.comment.trim(),
+    adminCommentUpdatedAt: serverTimestamp(),
+    adminCommentUpdatedBy: input.updatedBy,
+    updatedAt: serverTimestamp(),
+  });
+}
+
 export async function deleteMeetingRecord(meeting: MeetingRecord) {
   const { firestore, firebaseStorage } = assertFirebaseClient();
 
@@ -812,6 +829,9 @@ function mapMeetingRecord(id: string, data: Record<string, unknown>): MeetingRec
         | undefined) ?? "idle",
     aiSummaryError: toNullableString(data.aiSummaryError),
     aiSummaryTestedAt: toDateValue(data.aiSummaryTestedAt),
+    adminComment: String(data.adminComment ?? ""),
+    adminCommentUpdatedAt: toDateValue(data.adminCommentUpdatedAt),
+    adminCommentUpdatedBy: toNullableString(data.adminCommentUpdatedBy),
   };
 }
 

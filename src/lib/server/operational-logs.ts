@@ -1,5 +1,6 @@
 import { FieldValue } from "firebase-admin/firestore";
 
+import { SALES_MONTHLY_AI_USAGE_LIMIT } from "@/lib/ai-usage-limit";
 import { resolveCompanyId } from "@/lib/firebase/company";
 import { getFirebaseAdminDb } from "@/lib/firebase/admin";
 
@@ -36,6 +37,50 @@ export async function saveAiUsageLog(input: {
     status: input.status,
     ...(input.errorMessage ? { errorMessage: input.errorMessage } : {}),
   });
+}
+
+export async function readMonthlyAiUsageCount(input: { userId?: string | null }) {
+  if (!input.userId) {
+    return 0;
+  }
+
+  const db = getFirebaseAdminDb();
+  if (!db) {
+    return 0;
+  }
+
+  const monthStart = new Date();
+  monthStart.setDate(1);
+  monthStart.setHours(0, 0, 0, 0);
+
+  const snapshot = await db
+    .collection("aiUsageLogs")
+    .where("userId", "==", input.userId)
+    .where("status", "==", "success")
+    .get();
+
+  return snapshot.docs.filter((doc) => {
+    const createdAt = doc.data().createdAt;
+    const date = typeof createdAt?.toDate === "function" ? createdAt.toDate() as Date : null;
+    return Boolean(date && date >= monthStart);
+  }).length;
+}
+
+export async function assertMonthlyAiUsageAvailable(input: { userId?: string | null }) {
+  const used = await readMonthlyAiUsageCount(input);
+  if (used >= SALES_MONTHLY_AI_USAGE_LIMIT) {
+    return {
+      allowed: false as const,
+      used,
+      limit: SALES_MONTHLY_AI_USAGE_LIMIT,
+    };
+  }
+
+  return {
+    allowed: true as const,
+    used,
+    limit: SALES_MONTHLY_AI_USAGE_LIMIT,
+  };
 }
 
 export async function saveSystemErrorLog(input: {

@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 
 import { useAuth } from "@/features/auth/auth-provider";
-import { subscribeToUserProfiles, type AppUserProfile } from "@/lib/firebase/auth";
+import { subscribeToUserProfiles, type AdminReviewStatus, type AppUserProfile } from "@/lib/firebase/auth";
 import {
   subscribeToAllKnowledgeItems,
   subscribeToKnowledgeCategories,
@@ -45,6 +45,10 @@ export type AdminMemberRow = {
   coachingPriority: "high" | "medium" | "low";
   coachingReasons: string[];
   nextAction: string;
+  adminReviewStatus: AdminReviewStatus;
+  adminLastReviewedAt: Date | null;
+  adminNextReviewDate: Date | null;
+  adminReviewMemo: string;
 };
 
 export function useAdminInsights() {
@@ -121,37 +125,17 @@ export function buildMemberRows(users: AppUserProfile[], meetings: MeetingRecord
       .sort((left, right) => right.getTime() - left.getTime())[0] ?? null;
     const winRate = userMeetings.length > 0 ? Math.round((wonCount / userMeetings.length) * 1000) / 10 : null;
     const averageScore = userResults.length > 0 ? Math.round(userResults.reduce((sum, result) => sum + result.score, 0) / userResults.length) : null;
-    const coachingReasons = buildCoachingReasons({
-      lostCount,
-      lowRoleplayCount,
-      meetingCount: userMeetings.length,
-      roleplayCount: userResults.length,
-      unanalyzedCount,
-      winRate,
-    });
-    const needsCoaching = coachingReasons.length > 0;
+    const coachingReasons = user.adminCoachingReason ? [user.adminCoachingReason] : [];
+    const needsCoaching = user.adminCoachingStatus === "needs_coaching";
     const coachingPriority: AdminMemberRow["coachingPriority"] =
-      lostCount > 0 || lowRoleplayCount > 0 || (winRate !== null && winRate < 20)
-        ? "high"
-        : needsCoaching
-          ? "medium"
-          : "low";
+      user.adminCoachingStatus === "none" ? "low" : user.adminCoachingPriority;
     const tone: "good" | "normal" | "risk" =
       coachingPriority === "high"
         ? "risk"
         : averageScore !== null && averageScore >= 80 && lostCount === 0
           ? "good"
           : "normal";
-    const nextAction =
-      lostCount > 0
-        ? "失注商談を確認"
-        : lowRoleplayCount > 0
-          ? "ロープレ結果をレビュー"
-          : unanalyzedCount > 0
-            ? "AI分析結果を確認"
-            : userResults.length === 0 && userMeetings.length > 0
-              ? "ロープレ課題を割り当て"
-              : "通常フォロー";
+    const nextAction = user.adminNextActionTitle || "管理者アクション未設定";
 
     return {
       id: user.uid,
@@ -170,14 +154,25 @@ export function buildMemberRows(users: AppUserProfile[], meetings: MeetingRecord
       lowRoleplayCount,
       lastActivity: formatDate(latestActivityAt),
       tone,
-      guidance: needsCoaching ? coachingReasons[0] : tone === "good" ? "好事例として共有候補" : "商談ログを確認",
+      guidance: user.adminCoachingStatus === "needs_coaching"
+        ? coachingReasons[0] || "指導必要"
+        : user.adminCoachingStatus === "watch"
+          ? coachingReasons[0] || "要確認"
+          : "通常",
       needsCoaching,
       coachingPriority,
       coachingReasons,
       nextAction,
+      adminReviewStatus: user.adminReviewStatus,
+      adminLastReviewedAt: user.adminLastReviewedAt,
+      adminNextReviewDate: user.adminNextReviewDate,
+      adminReviewMemo: user.adminReviewMemo,
     };
   }).sort((left, right) => {
     const priorityWeight = { high: 0, medium: 1, low: 2 } as const;
+    if (left.needsCoaching !== right.needsCoaching) {
+      return left.needsCoaching ? -1 : 1;
+    }
     if (priorityWeight[left.coachingPriority] !== priorityWeight[right.coachingPriority]) {
       return priorityWeight[left.coachingPriority] - priorityWeight[right.coachingPriority];
     }
@@ -208,23 +203,6 @@ export function getWorkExperienceBucket(totalMonths: number | null) {
   if (totalMonths < 36) return "1〜2年";
   if (totalMonths < 72) return "3〜5年";
   return "6年以上";
-}
-
-function buildCoachingReasons(input: {
-  lostCount: number;
-  lowRoleplayCount: number;
-  meetingCount: number;
-  roleplayCount: number;
-  unanalyzedCount: number;
-  winRate: number | null;
-}) {
-  const reasons: string[] = [];
-  if (input.lostCount > 0) reasons.push(`失注 ${input.lostCount}件`);
-  if (input.winRate !== null && input.winRate < 20) reasons.push(`成約率 ${input.winRate}%`);
-  if (input.lowRoleplayCount > 0) reasons.push(`低スコアロープレ ${input.lowRoleplayCount}件`);
-  if (input.unanalyzedCount > 0) reasons.push(`未分析商談 ${input.unanalyzedCount}件`);
-  if (input.meetingCount > 0 && input.roleplayCount === 0) reasons.push("ロープレ未実施");
-  return reasons;
 }
 
 export function getMeetingScore(meeting: MeetingRecord) {
@@ -295,15 +273,19 @@ export function Panel({
   title,
   actionLabel,
   href,
+  className = "",
+  bodyClassName = "",
   children,
 }: {
   title: string;
   actionLabel?: string;
   href?: string;
+  className?: string;
+  bodyClassName?: string;
   children: React.ReactNode;
 }) {
   return (
-    <section className="rounded-[24px] border border-[#eceef4] bg-white shadow-[0_10px_28px_rgba(17,24,39,0.05)]">
+    <section className={`rounded-[24px] border border-[#eceef4] bg-white shadow-[0_10px_28px_rgba(17,24,39,0.05)] ${className}`}>
       <div className="flex items-center justify-between gap-4 border-b border-[#eef1f5] px-5 py-4">
         <h2 className="text-[18px] font-black text-[#171717]">{title}</h2>
         {actionLabel && href ? (
@@ -312,7 +294,7 @@ export function Panel({
           </Link>
         ) : null}
       </div>
-      <div className="p-5">{children}</div>
+      <div className={`p-5 ${bodyClassName}`}>{children}</div>
     </section>
   );
 }

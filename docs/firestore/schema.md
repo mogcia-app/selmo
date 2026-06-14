@@ -20,6 +20,23 @@ type UserDocument = {
     teleapo?: boolean; // 未設定時は true 扱い
   };
   teamId?: string;
+  adminCoachingStatus?: "none" | "watch" | "needs_coaching";
+  adminCoachingPriority?: "low" | "medium" | "high";
+  adminCoachingReason?: string;
+  adminNextActionTitle?: string;
+  adminNextActionNote?: string;
+  adminNextActionDueDate?: Timestamp | null;
+  adminNextActionUpdatedAt?: Timestamp;
+  adminNextActionUpdatedBy?: string;
+  adminReviewStatus?: "unchecked" | "checked" | "in_progress" | "follow_up" | "done";
+  adminLastReviewedAt?: Timestamp;
+  adminNextReviewDate?: Timestamp | null;
+  adminReviewMemo?: string;
+  adminReviewUpdatedAt?: Timestamp;
+  adminReviewUpdatedBy?: string;
+  nextCoachingMemo?: string;
+  nextCoachingMemoUpdatedAt?: Timestamp;
+  nextCoachingMemoUpdatedBy?: string;
   createdAt: Timestamp;
   updatedAt: Timestamp;
 };

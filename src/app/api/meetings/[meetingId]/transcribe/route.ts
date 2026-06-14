@@ -7,10 +7,12 @@ import { promisify } from "node:util";
 import { NextResponse } from "next/server";
 
 import {
+  assertMonthlyAiUsageAvailable,
   estimateTranscriptionCostUsd,
   saveAiUsageLog,
   saveSystemErrorLog,
 } from "@/lib/server/operational-logs";
+import { MONTHLY_AI_LIMIT_MESSAGE } from "@/lib/ai-usage-limit";
 
 export const runtime = "nodejs";
 
@@ -75,6 +77,18 @@ export async function POST(
       return NextResponse.json(
         { error: "音声ファイルのダウンロードURLが見つかりません。" },
         { status: 400 },
+      );
+    }
+
+    const usageAvailability = await assertMonthlyAiUsageAvailable({ userId: body.userId });
+    if (!usageAvailability.allowed) {
+      return NextResponse.json(
+        {
+          error: MONTHLY_AI_LIMIT_MESSAGE,
+          used: usageAvailability.used,
+          limit: usageAvailability.limit,
+        },
+        { status: 429 },
       );
     }
 

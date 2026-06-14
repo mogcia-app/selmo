@@ -301,15 +301,6 @@ export default function AdminAccountPage() {
           </div>
 
           <div className="space-y-5">
-            <SettingsCard iconSrc="/summary.png" title="管理者メニュー">
-              <div className="grid gap-3 sm:grid-cols-2">
-                <QuickLink href="/admin/dashboard" label="ダッシュボード" body="チーム全体と個人の状況を見る" />
-                <QuickLink href="/admin/members" label="営業メンバー" body="営業マン別の指導状況を見る" />
-                <QuickLink href="/admin/analysis?category=meeting" label="商談分析" body="商談の改善点を確認する" />
-                <QuickLink href="/admin/analysis?category=teleapo" label="テレアポ分析" body="テレアポの改善点を確認する" />
-              </div>
-            </SettingsCard>
-
             <SettingsCard iconSrc="/summary.png" title="メール通知先">
               <p className="mb-4 text-[13px] leading-6 text-[#596273]">
                 週次レポートやAI利用回数アラートを届ける幹部・管理者メールを最大3件まで設定できます。
@@ -435,15 +426,6 @@ function PasswordField({
         className="mt-2 h-12 w-full rounded-[12px] border border-[#e4e7ed] bg-white px-4 text-[14px] text-[#171717] outline-none transition focus:border-[#f0c655] focus:shadow-[0_0_0_3px_rgba(255,196,0,0.14)]"
       />
     </label>
-  );
-}
-
-function QuickLink({ href, label, body }: { href: string; label: string; body: string }) {
-  return (
-    <a href={href} className="rounded-[18px] border border-[#eef1f5] bg-[#fcfcfd] px-4 py-4 transition hover:border-[#f0c655] hover:bg-[#fffdf7]">
-      <div className="text-[14px] font-black text-[#171717]">{label}</div>
-      <p className="mt-1 text-[12px] leading-5 text-[#596273]">{body}</p>
-    </a>
   );
 }
 

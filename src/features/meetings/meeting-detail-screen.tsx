@@ -6,6 +6,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { useAuth } from "@/features/auth/auth-provider";
+import { MONTHLY_AI_LIMIT_MESSAGE } from "@/lib/ai-usage-limit";
 import { saveSalesActivityEvent } from "@/lib/firebase/activity";
 import {
   saveMeetingAiSummary,
@@ -19,8 +20,7 @@ import { canUseSalesDomain } from "@/lib/sales-domains";
 
 const transcriptionRequestTimeoutMs = 10 * 60 * 1000;
 const transientBannerDurationMs = 5 * 1000;
-const monthlyLimitMessage =
-  "月間利用上限に達しました。管理者にプラン変更または上限変更を依頼してください。";
+const monthlyLimitMessage = MONTHLY_AI_LIMIT_MESSAGE;
 type DisplayLog = {
   id: string;
   startSec?: number | null;

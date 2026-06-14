@@ -168,52 +168,45 @@ export default function AdminActivityPage() {
             </div>
 
             {filteredEvents.length > 0 ? (
-              <div className="space-y-3">
+              <div className="overflow-x-auto rounded-[14px] border border-[#eef1f5] bg-[#fcfcfd]">
                 {filteredEvents.map((event) => {
                   const member = memberRows.find((row) => row.id === event.userId);
                   const isExpanded = expandedEventId === event.id;
 
                   return (
-                    <article
-                      key={event.id}
-                      className="rounded-[18px] border border-[#eef1f5] bg-[#fcfcfd] px-4 py-4"
-                    >
-                      <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-                        <div className="min-w-0">
-                          <div className="mb-3 flex items-center gap-3 rounded-[14px] bg-white px-3 py-2">
-                            <span className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-[#fff3cf] text-[13px] font-black text-[#8a6500]">
+                    <article key={event.id} className="border-b border-[#f0f2f6] last:border-b-0">
+                      <div className="grid min-w-[980px] grid-cols-[180px_94px_minmax(220px,1fr)_132px_104px] items-center gap-3 px-4 py-2.5 transition hover:bg-white">
+                        <div className="flex min-w-0 items-center gap-2">
+                            <span className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[#fff3cf] text-[12px] font-black text-[#8a6500]">
                               {(member?.name ?? "?").slice(0, 1)}
                             </span>
-                            <div className="min-w-0">
-                              <div className="truncate text-[13px] font-black text-[#171717]">{member?.name ?? "未設定の営業"}</div>
-                              <div className="truncate text-[12px] text-[#8a909b]">{member?.email ?? event.userId}</div>
+                            <div className="min-w-0 flex-1">
+                              <div className="truncate text-[12px] font-black text-[#171717]">{member?.name ?? "未設定の営業"}</div>
+                              <div className="truncate text-[11px] text-[#8a909b]">{member?.email ?? event.userId}</div>
                             </div>
-                          </div>
-                          <div className="flex flex-wrap items-center gap-2">
-                            <ActivityBadge type={event.type} />
-                            <span className="text-[12px] font-bold text-[#8a909b]">
-                              {formatDateTime(event.createdAt)}
-                            </span>
-                          </div>
-                          <h2 className="mt-2 text-[15px] font-black text-[#171717]">
-                            {event.title}
-                          </h2>
-                          <p className="mt-1 text-[13px] leading-6 text-[#596273]">
-                            {event.summary}
-                          </p>
                         </div>
-                        <div className="flex shrink-0 items-center gap-2">
+                        <div className="min-w-0">
+                          <ActivityBadge type={event.type} />
+                        </div>
+                        <div className="flex min-w-0 items-center gap-2">
+                          <span className="shrink-0 truncate text-[12px] font-black text-[#343b48]">{event.title}</span>
+                          <span className="min-w-0 truncate text-[12px] font-bold text-[#8a909b]">{event.summary}</span>
+                        </div>
+                        <div className="whitespace-nowrap text-[11px] font-bold text-[#8a909b]">
+                          {formatDateTime(event.createdAt)}
+                        </div>
+                        <div className="flex shrink-0 items-center justify-end gap-2">
                           <button
                             type="button"
                             onClick={() => setExpandedEventId(isExpanded ? null : event.id)}
-                            className="rounded-[12px] border border-[#e2e6ee] bg-white px-3 py-2 text-[12px] font-black text-[#343b48]"
+                            className="rounded-[10px] border border-[#e2e6ee] bg-white px-2.5 py-1.5 text-[11px] font-black text-[#343b48]"
                           >
                             {isExpanded ? "閉じる" : "詳細"}
                           </button>
                           {event.href ? (
                             <Link
                               href={event.href}
-                              className="rounded-[12px] bg-[#ffd84d] px-3 py-2 text-[12px] font-black text-[#171717]"
+                              className="rounded-[10px] bg-[#ffd84d] px-2.5 py-1.5 text-[11px] font-black text-[#171717]"
                             >
                               開く
                             </Link>
@@ -222,7 +215,7 @@ export default function AdminActivityPage() {
                       </div>
 
                       {isExpanded ? (
-                        <div className="mt-4 whitespace-pre-wrap rounded-[14px] border border-[#e2e6ee] bg-white px-4 py-3 text-[13px] leading-6 text-[#343b48]">
+                        <div className="mx-4 mb-3 whitespace-pre-wrap rounded-[12px] border border-[#e2e6ee] bg-white px-4 py-3 text-[12px] leading-6 text-[#343b48]">
                           {event.detail || event.summary}
                         </div>
                       ) : null}

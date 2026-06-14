@@ -29,6 +29,9 @@ import { readEnabledSalesDomains, type EnabledSalesDomains } from "@/lib/sales-d
 import type { UserRole } from "@/types/domain";
 
 export type CompanyPlan = "standard" | "pro" | "enterprise";
+export type AdminCoachingPriority = "high" | "medium" | "low";
+export type AdminCoachingStatus = "none" | "watch" | "needs_coaching";
+export type AdminReviewStatus = "unchecked" | "checked" | "in_progress" | "follow_up" | "done";
 
 const STANDARD_AI_QUOTA = 15;
 const PRO_AI_QUOTA = 30;
@@ -50,6 +53,23 @@ export type AppUserProfile = {
   workExperienceMonths: number | null;
   workExperienceLocked: boolean;
   enabledSalesDomains: EnabledSalesDomains;
+  nextCoachingMemo: string;
+  nextCoachingMemoUpdatedAt: Date | null;
+  nextCoachingMemoUpdatedBy: string | null;
+  adminCoachingStatus: AdminCoachingStatus;
+  adminCoachingPriority: AdminCoachingPriority;
+  adminCoachingReason: string;
+  adminNextActionTitle: string;
+  adminNextActionNote: string;
+  adminNextActionDueDate: Date | null;
+  adminNextActionUpdatedAt: Date | null;
+  adminNextActionUpdatedBy: string | null;
+  adminReviewStatus: AdminReviewStatus;
+  adminLastReviewedAt: Date | null;
+  adminNextReviewDate: Date | null;
+  adminReviewMemo: string;
+  adminReviewUpdatedAt: Date | null;
+  adminReviewUpdatedBy: string | null;
 };
 
 type RegisterUserInput = {
@@ -169,6 +189,23 @@ export async function fetchUserProfile(uid: string): Promise<AppUserProfile | nu
     workExperienceMonths?: unknown;
     workExperienceLocked?: unknown;
     enabledSalesDomains?: unknown;
+    nextCoachingMemo?: unknown;
+    nextCoachingMemoUpdatedAt?: unknown;
+    nextCoachingMemoUpdatedBy?: unknown;
+    adminCoachingStatus?: unknown;
+    adminCoachingPriority?: unknown;
+    adminCoachingReason?: unknown;
+    adminNextActionTitle?: unknown;
+    adminNextActionNote?: unknown;
+    adminNextActionDueDate?: unknown;
+    adminNextActionUpdatedAt?: unknown;
+    adminNextActionUpdatedBy?: unknown;
+    adminReviewStatus?: unknown;
+    adminLastReviewedAt?: unknown;
+    adminNextReviewDate?: unknown;
+    adminReviewMemo?: unknown;
+    adminReviewUpdatedAt?: unknown;
+    adminReviewUpdatedBy?: unknown;
   };
 
   if (!data.role) {
@@ -194,6 +231,23 @@ export async function fetchUserProfile(uid: string): Promise<AppUserProfile | nu
     workExperienceMonths: readWorkExperienceValue(data.workExperienceMonths),
     workExperienceLocked: data.workExperienceLocked === true,
     enabledSalesDomains: readEnabledSalesDomains(data.enabledSalesDomains),
+    nextCoachingMemo: readString(data.nextCoachingMemo),
+    nextCoachingMemoUpdatedAt: readDate(data.nextCoachingMemoUpdatedAt),
+    nextCoachingMemoUpdatedBy: readNullableString(data.nextCoachingMemoUpdatedBy),
+    adminCoachingStatus: readAdminCoachingStatus(data.adminCoachingStatus),
+    adminCoachingPriority: readAdminCoachingPriority(data.adminCoachingPriority),
+    adminCoachingReason: readString(data.adminCoachingReason),
+    adminNextActionTitle: readString(data.adminNextActionTitle),
+    adminNextActionNote: readString(data.adminNextActionNote),
+    adminNextActionDueDate: readDate(data.adminNextActionDueDate),
+    adminNextActionUpdatedAt: readDate(data.adminNextActionUpdatedAt),
+    adminNextActionUpdatedBy: readNullableString(data.adminNextActionUpdatedBy),
+    adminReviewStatus: readAdminReviewStatus(data.adminReviewStatus),
+    adminLastReviewedAt: readDate(data.adminLastReviewedAt),
+    adminNextReviewDate: readDate(data.adminNextReviewDate),
+    adminReviewMemo: readString(data.adminReviewMemo),
+    adminReviewUpdatedAt: readDate(data.adminReviewUpdatedAt),
+    adminReviewUpdatedBy: readNullableString(data.adminReviewUpdatedBy),
   };
 }
 
@@ -231,6 +285,23 @@ export function subscribeToUserProfiles(
               workExperienceMonths?: unknown;
               workExperienceLocked?: unknown;
               enabledSalesDomains?: unknown;
+              nextCoachingMemo?: unknown;
+              nextCoachingMemoUpdatedAt?: unknown;
+              nextCoachingMemoUpdatedBy?: unknown;
+              adminCoachingStatus?: unknown;
+              adminCoachingPriority?: unknown;
+              adminCoachingReason?: unknown;
+              adminNextActionTitle?: unknown;
+              adminNextActionNote?: unknown;
+              adminNextActionDueDate?: unknown;
+              adminNextActionUpdatedAt?: unknown;
+              adminNextActionUpdatedBy?: unknown;
+              adminReviewStatus?: unknown;
+              adminLastReviewedAt?: unknown;
+              adminNextReviewDate?: unknown;
+              adminReviewMemo?: unknown;
+              adminReviewUpdatedAt?: unknown;
+              adminReviewUpdatedBy?: unknown;
             };
 
             if (!data.role) return null;
@@ -252,6 +323,23 @@ export function subscribeToUserProfiles(
               workExperienceMonths: readWorkExperienceValue(data.workExperienceMonths),
               workExperienceLocked: data.workExperienceLocked === true,
               enabledSalesDomains: readEnabledSalesDomains(data.enabledSalesDomains),
+              nextCoachingMemo: readString(data.nextCoachingMemo),
+              nextCoachingMemoUpdatedAt: readDate(data.nextCoachingMemoUpdatedAt),
+              nextCoachingMemoUpdatedBy: readNullableString(data.nextCoachingMemoUpdatedBy),
+              adminCoachingStatus: readAdminCoachingStatus(data.adminCoachingStatus),
+              adminCoachingPriority: readAdminCoachingPriority(data.adminCoachingPriority),
+              adminCoachingReason: readString(data.adminCoachingReason),
+              adminNextActionTitle: readString(data.adminNextActionTitle),
+              adminNextActionNote: readString(data.adminNextActionNote),
+              adminNextActionDueDate: readDate(data.adminNextActionDueDate),
+              adminNextActionUpdatedAt: readDate(data.adminNextActionUpdatedAt),
+              adminNextActionUpdatedBy: readNullableString(data.adminNextActionUpdatedBy),
+              adminReviewStatus: readAdminReviewStatus(data.adminReviewStatus),
+              adminLastReviewedAt: readDate(data.adminLastReviewedAt),
+              adminNextReviewDate: readDate(data.adminNextReviewDate),
+              adminReviewMemo: readString(data.adminReviewMemo),
+              adminReviewUpdatedAt: readDate(data.adminReviewUpdatedAt),
+              adminReviewUpdatedBy: readNullableString(data.adminReviewUpdatedBy),
             };
           })
           .filter((profile): profile is AppUserProfile => Boolean(profile)),
@@ -284,6 +372,66 @@ export async function uploadUserAvatar(input: { userId: string; file: File }) {
     avatarUrl,
     avatarStoragePath: storagePath,
   };
+}
+
+export async function saveNextCoachingMemo(input: { userId: string; memo: string; updatedBy: string }) {
+  const { firestore } = assertFirebaseClient();
+
+  await updateDoc(doc(firestore, "users", input.userId), {
+    nextCoachingMemo: input.memo.trim(),
+    nextCoachingMemoUpdatedAt: serverTimestamp(),
+    nextCoachingMemoUpdatedBy: input.updatedBy,
+    updatedAt: serverTimestamp(),
+  });
+}
+
+export async function saveAdminCoachingPlan(input: {
+  userId: string;
+  status: AdminCoachingStatus;
+  priority: AdminCoachingPriority;
+  reason: string;
+  nextActionTitle: string;
+  nextActionNote: string;
+  nextActionDueDate: Date | null;
+  updatedBy: string;
+}) {
+  const { firestore } = assertFirebaseClient();
+
+  await updateDoc(doc(firestore, "users", input.userId), {
+    adminCoachingStatus: input.status,
+    adminCoachingPriority: input.priority,
+    adminCoachingReason: input.reason.trim(),
+    adminNextActionTitle: input.nextActionTitle.trim(),
+    adminNextActionNote: input.nextActionNote.trim(),
+    adminNextActionDueDate: input.nextActionDueDate,
+    adminNextActionUpdatedAt: serverTimestamp(),
+    adminNextActionUpdatedBy: input.updatedBy,
+    updatedAt: serverTimestamp(),
+  });
+}
+
+export async function saveAdminReviewProgress(input: {
+  userId: string;
+  status: AdminReviewStatus;
+  nextReviewDate: Date | null;
+  memo: string;
+  updatedBy: string;
+  markReviewed?: boolean;
+}) {
+  const { firestore } = assertFirebaseClient();
+  const payload: Record<string, unknown> = {
+    adminReviewStatus: input.status,
+    adminNextReviewDate: input.nextReviewDate,
+    adminReviewMemo: input.memo.trim(),
+    adminReviewUpdatedAt: serverTimestamp(),
+    adminReviewUpdatedBy: input.updatedBy,
+    updatedAt: serverTimestamp(),
+  };
+  if (input.markReviewed) {
+    payload.adminLastReviewedAt = serverTimestamp();
+  }
+
+  await updateDoc(doc(firestore, "users", input.userId), payload);
 }
 
 async function fetchCompanyProfile(companyId: string) {
@@ -341,6 +489,43 @@ function readWorkExperienceValue(value: unknown) {
   }
 
   return null;
+}
+
+function readString(value: unknown) {
+  return typeof value === "string" ? value : "";
+}
+
+function readNullableString(value: unknown) {
+  return typeof value === "string" ? value : null;
+}
+
+function readDate(value: unknown) {
+  if (!value) return null;
+  if (value instanceof Date) return value;
+  if (
+    typeof value === "object" &&
+    value !== null &&
+    "toDate" in value &&
+    typeof (value as { toDate?: unknown }).toDate === "function"
+  ) {
+    return (value as { toDate: () => Date }).toDate();
+  }
+  return null;
+}
+
+function readAdminCoachingStatus(value: unknown): AdminCoachingStatus {
+  if (value === "watch" || value === "needs_coaching") return value;
+  return "none";
+}
+
+function readAdminCoachingPriority(value: unknown): AdminCoachingPriority {
+  if (value === "high" || value === "medium") return value;
+  return "low";
+}
+
+function readAdminReviewStatus(value: unknown): AdminReviewStatus {
+  if (value === "checked" || value === "in_progress" || value === "follow_up" || value === "done") return value;
+  return "unchecked";
 }
 
 function sanitizeFileName(fileName: string) {

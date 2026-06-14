@@ -1,10 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 
 import {
+  assertMonthlyAiUsageAvailable,
   estimateTranscriptionCostUsd,
   saveAiUsageLog,
   saveSystemErrorLog,
 } from "@/lib/server/operational-logs";
+import { MONTHLY_AI_LIMIT_MESSAGE } from "@/lib/ai-usage-limit";
 
 export const runtime = "nodejs";
 
@@ -25,6 +27,18 @@ export async function POST(request: NextRequest) {
   }
 
   try {
+    const usageAvailability = await assertMonthlyAiUsageAvailable({ userId });
+    if (!usageAvailability.allowed) {
+      return NextResponse.json(
+        {
+          error: MONTHLY_AI_LIMIT_MESSAGE,
+          used: usageAvailability.used,
+          limit: usageAvailability.limit,
+        },
+        { status: 429 },
+      );
+    }
+
     const openAiFormData = new FormData();
     openAiFormData.append("file", audio, audio.name || "roleplay.webm");
     openAiFormData.append("model", model);

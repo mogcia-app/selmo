@@ -19,6 +19,26 @@ export function RouteGuard({ allowedRoles, children }: RouteGuardProps) {
   const pathname = usePathname();
   const { isAuthenticated, isFirebaseReady, isLoading, profile, missingEnvKeys, sessionExpiresAt, signOut } = useAuth();
   const [isAuthSettling, setIsAuthSettling] = useState(true);
+  const shouldShowAuthLoading = isLoading || (!isAuthenticated && isAuthSettling);
+
+  useEffect(() => {
+    if (!shouldShowAuthLoading || isAuthenticated) {
+      return;
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      const loginPath = pathname.startsWith("/admin") ? "/admin/login" : "/login";
+      const nextUrl = `${loginPath}?next=${encodeURIComponent(pathname)}&reason=auth-timeout`;
+      router.replace(nextUrl);
+      window.setTimeout(() => {
+        if (window.location.pathname !== loginPath) {
+          window.location.replace(nextUrl);
+        }
+      }, 120);
+    }, 3000);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [isAuthenticated, pathname, router, shouldShowAuthLoading]);
 
   useEffect(() => {
     if (isLoading || isAuthenticated) {
@@ -73,7 +93,7 @@ export function RouteGuard({ allowedRoles, children }: RouteGuardProps) {
     }
   }, [allowedRoles, isAuthenticated, isAuthSettling, isLoading, pathname, profile, router]);
 
-  if (isLoading || (!isAuthenticated && isAuthSettling)) {
+  if (shouldShowAuthLoading) {
     return <AuthLoadingScreen />;
   }
 

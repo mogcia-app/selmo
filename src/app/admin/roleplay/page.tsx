@@ -484,23 +484,20 @@ export default function AdminRoleplayPage() {
 
             <Panel title="ロープレ結果">
               {roleplayResults.length > 0 ? (
-                <div className="space-y-2">
-                  {roleplayResults.slice(0, 8).map((result) => {
+                <div className="max-h-[360px] overflow-y-auto rounded-[14px] border border-[#eef1f5] bg-[#fcfcfd]">
+                  {roleplayResults.map((result) => {
                     const member = memberRows.find((row) => row.id === result.userId);
                     return (
                       <Link
                         key={result.id}
                         href={`/admin/roleplay/results/${result.id}`}
-                        className="w-full rounded-[14px] border border-[#eef1f5] bg-[#fcfcfd] px-4 py-3 text-left transition hover:border-[#e0bd4b] hover:bg-white"
+                        className="grid min-w-[720px] grid-cols-[120px_minmax(160px,1fr)_64px_minmax(180px,1.2fr)_56px] items-center gap-3 border-b border-[#f0f2f6] px-4 py-2.5 text-left transition last:border-b-0 hover:bg-white"
                       >
-                        <div className="flex items-start justify-between gap-3">
-                          <div className="min-w-0">
-                            <div className="truncate text-[13px] font-black text-[#171717]">{member?.name ?? "未設定"}</div>
-                            <div className="mt-1 truncate text-[12px] font-bold text-[#596273]">{result.scenarioTitle}</div>
-                            <p className="mt-1 line-clamp-2 text-[12px] leading-5 text-[#7a808c]">{result.summary || "分析なし"}</p>
-                          </div>
-                          <span className="shrink-0 rounded-[12px] bg-[#171717] px-3 py-2 text-[12px] font-black text-white">{result.score}点</span>
-                        </div>
+                        <div className="truncate text-[12px] font-black text-[#171717]">{member?.name ?? "未設定"}</div>
+                        <div className="truncate text-[12px] font-bold text-[#596273]">{result.scenarioTitle}</div>
+                        <div className={`text-[13px] font-black ${result.score < 70 ? "text-[#d63c2f]" : "text-[#16834f]"}`}>{result.score}点</div>
+                        <div className="truncate text-[12px] font-bold text-[#7a808c]">{result.summary || "分析なし"}</div>
+                        <div className="text-right text-[12px] font-black text-[#2672d9]">詳細</div>
                       </Link>
                     );
                   })}

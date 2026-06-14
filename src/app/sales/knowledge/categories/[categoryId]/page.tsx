@@ -67,7 +67,7 @@ export default function SalesKnowledgeCategoryPage() {
   );
 
   return (
-    <main className="min-h-screen overflow-x-hidden bg-white">
+    <main className="min-h-[calc(100vh-73px)] overflow-x-hidden bg-white">
       <div className="min-w-0 px-5 pb-0 pt-4 md:px-8 md:pb-0 md:pt-5">
         <div className="mx-auto max-w-[1180px] min-w-0">
           <Link
@@ -144,7 +144,7 @@ export default function SalesKnowledgeCategoryPage() {
                     href={`${basePath}/categories/${categoryId}/knowledge/${item.id}`}
                     className="grid gap-4 rounded-[14px] border border-[#e5e9f0] bg-white px-4 py-4 shadow-[0_6px_16px_rgba(17,24,39,0.025)] md:grid-cols-[56px_minmax(0,1fr)_112px]"
                   >
-                    <span className="inline-flex h-14 w-14 items-center justify-center rounded-[12px] bg-[#ecefff] text-[#5767c8] [&_svg]:h-6 [&_svg]:w-6">
+                    <span className="inline-flex h-14 w-14 items-center justify-center rounded-[12px] border border-[#eef1f5] bg-white text-[#5767c8] [&_svg]:h-6 [&_svg]:w-6">
                       <DocumentIcon />
                     </span>
                     <div className="min-w-0">
@@ -168,7 +168,7 @@ export default function SalesKnowledgeCategoryPage() {
                 ))}
               </div>
             ) : (
-              <div className="rounded-[18px] border border-dashed border-[#f0c655] bg-[#fffdf7] px-6 py-14 text-center">
+              <div className="rounded-[18px] border border-dashed border-[#f0c655] bg-white px-6 py-14 text-center">
                 <div className="mx-auto inline-flex h-14 w-14 items-center justify-center rounded-[16px] bg-white text-[#9c7600] shadow-[0_8px_18px_rgba(17,24,39,0.05)]">
                   <PlusIcon />
                 </div>
@@ -179,13 +179,15 @@ export default function SalesKnowledgeCategoryPage() {
               </div>
             )}
 
-            <Link
-              href={`${basePath}/new?kind=knowledge&scope=personal&categoryId=${encodeURIComponent(categoryId)}`}
-              className="mt-5 inline-flex min-h-[54px] w-full items-center justify-center gap-2 rounded-[14px] border border-dashed border-[#f0c655] bg-white text-[15px] font-bold text-[#171717] hover:bg-[#fffdf7]"
-            >
-              <PlusIcon />
-              ナレッジを追加
-            </Link>
+            {categoryId !== DEFAULT_CATEGORY.id ? (
+              <Link
+                href={`${basePath}/new?kind=knowledge&scope=personal&categoryId=${encodeURIComponent(categoryId)}`}
+                className="mt-5 inline-flex min-h-[54px] w-full items-center justify-center gap-2 rounded-[14px] border border-dashed border-[#f0c655] bg-white text-[15px] font-bold text-[#171717] hover:bg-white"
+              >
+                <PlusIcon />
+                ナレッジを追加
+              </Link>
+            ) : null}
           </section>
         </div>
       </div>
@@ -195,7 +197,7 @@ export default function SalesKnowledgeCategoryPage() {
 
 function Pill({ children }: { children: React.ReactNode }) {
   return (
-    <span className="rounded-full bg-[#f1f2f5] px-4 py-2 font-medium text-[#596273] shadow-[0_4px_14px_rgba(17,24,39,0.03)]">
+    <span className="rounded-full border border-[#eef1f5] bg-white px-4 py-2 font-medium text-[#596273] shadow-[0_4px_14px_rgba(17,24,39,0.03)]">
       {children}
     </span>
   );

@@ -209,6 +209,55 @@ service cloud.firestore {
       }
     }
 
+    match /customers/{customerId} {
+      allow read: if isOwnerRole()
+        || (
+          canReadCompanyData(resource.data.companyId)
+          && (isAdminRole() || resource.data.assignedUserId == request.auth.uid)
+        );
+      allow create: if isSignedIn()
+        && sameCompany(request.resource.data.companyId)
+        && (
+          isAdminRole()
+          || (
+            isSalesRole()
+            && request.resource.data.assignedUserId == request.auth.uid
+          )
+        );
+      allow update: if canAdminCompanyData(resource.data.companyId)
+        || (
+          isSalesRole()
+          && resource.data.assignedUserId == request.auth.uid
+          && sameCompany(resource.data.companyId)
+          && request.resource.data.companyId == resource.data.companyId
+          && request.resource.data.assignedUserId == resource.data.assignedUserId
+        );
+      allow delete: if canAdminCompanyData(resource.data.companyId);
+    }
+
+    match /customerLogs/{logId} {
+      allow read: if isOwnerRole()
+        || (
+          canReadCompanyData(resource.data.companyId)
+          && (isAdminRole() || resource.data.userId == request.auth.uid || resource.data.createdBy == request.auth.uid)
+        );
+      allow create: if isSignedIn()
+        && sameCompany(request.resource.data.companyId)
+        && (
+          isAdminRole()
+          || request.resource.data.userId == request.auth.uid
+          || request.resource.data.createdBy == request.auth.uid
+        );
+      allow update, delete: if canAdminCompanyData(resource.data.companyId);
+    }
+
+    match /customerMeetings/{linkId} {
+      allow read: if canReadCompanyData(resource.data.companyId);
+      allow create: if isSignedIn()
+        && sameCompany(request.resource.data.companyId);
+      allow update, delete: if canAdminCompanyData(resource.data.companyId);
+    }
+
     match /meetingOutcomeHistory/{historyId} {
       allow read, write: if isOwnerRole() || isAdminRole();
     }

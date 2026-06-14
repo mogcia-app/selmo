@@ -7,6 +7,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { useAuth } from "@/features/auth/auth-provider";
+import { MONTHLY_AI_LIMIT_MESSAGE } from "@/lib/ai-usage-limit";
 import {
   saveRoleplayResult,
   subscribeToRoleplayAssignments,
@@ -16,8 +17,7 @@ import {
   type RoleplayScenario,
 } from "@/lib/firebase/roleplay";
 
-const monthlyLimitMessage =
-  "月間利用上限に達しました。管理者にプラン変更または上限変更を依頼してください。";
+const monthlyLimitMessage = MONTHLY_AI_LIMIT_MESSAGE;
 
 type VoicePreference = "female" | "male" | "default";
 type SpeechSpeed = "slow" | "normal" | "fast";

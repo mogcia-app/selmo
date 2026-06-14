@@ -7,6 +7,7 @@ import { useState } from "react";
 
 import { useAuth } from "@/features/auth/auth-provider";
 import { resolveRoleSafePath } from "@/features/auth/role-routing";
+import type { UserRole } from "@/types/domain";
 
 const errorMessageMap: Record<string, string> = {
   "auth/invalid-credential": "メールアドレスまたはパスワードが正しくありません。",
@@ -21,7 +22,7 @@ export function LoginForm({
 }) {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const { firebaseError, isFirebaseReady, missingEnvKeys, signIn } = useAuth();
+  const { firebaseError, isFirebaseReady, missingEnvKeys, signIn, signOut } = useAuth();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
@@ -47,8 +48,15 @@ export function LoginForm({
     try {
       const nextProfile = await signIn(email, password);
       if (!nextProfile) {
-        await waitForAuthStateFlush();
-        router.replace(isAdmin ? "/admin/dashboard" : "/sales/dashboard");
+        await signOut();
+        setErrorMessage("ログイン権限を確認できませんでした。アカウントを確認してください。");
+        return;
+      }
+
+      const allowedRoles = getAllowedLoginRoles(variant);
+      if (!allowedRoles.includes(nextProfile.role)) {
+        await signOut();
+        setErrorMessage(getRoleMismatchMessage(variant));
         return;
       }
 
@@ -176,6 +184,16 @@ export function LoginForm({
       </div>
     </form>
   );
+}
+
+function getAllowedLoginRoles(variant: "default" | "admin"): UserRole[] {
+  return variant === "admin" ? ["admin"] : ["sales"];
+}
+
+function getRoleMismatchMessage(variant: "default" | "admin") {
+  return variant === "admin"
+    ? "このログイン画面では管理者アカウントのみログインできます。営業アカウントではログインできません。"
+    : "このログイン画面では営業アカウントのみログインできます。管理者アカウントではログインできません。";
 }
 
 function waitForAuthStateFlush() {
