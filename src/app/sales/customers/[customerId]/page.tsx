@@ -15,6 +15,7 @@ import {
   updateCustomer,
   updateCustomerNextAction,
   type CustomerChurnRisk,
+  type CustomerContractStatus,
   type CustomerLogRecord,
   type CustomerLogType,
   type CustomerRecord,
@@ -22,6 +23,7 @@ import {
   type CustomerTemperature,
   type SaveCustomerInput,
 } from "@/lib/firebase/customers";
+import { subscribeToKnowledgeProducts, type KnowledgeProduct } from "@/lib/firebase/knowledge";
 import { subscribeToMeetings, type MeetingRecord } from "@/lib/firebase/meetings";
 
 const statusOptions: Array<{ value: CustomerStatus; label: string }> = [
@@ -47,6 +49,15 @@ const churnRiskOptions: Array<{ value: CustomerChurnRisk; label: string }> = [
   { value: "high", label: "高" },
 ];
 
+const contractStatusOptions: Array<{ value: CustomerContractStatus; label: string }> = [
+  { value: "not_contracted", label: "未契約" },
+  { value: "considering", label: "検討中" },
+  { value: "needs_consultation", label: "要相談" },
+  { value: "contracted", label: "契約中" },
+  { value: "paused", label: "保留" },
+  { value: "cancelled", label: "解約" },
+];
+
 const logTypeOptions: Array<{ value: CustomerLogType; label: string }> = [
   { value: "teleapo", label: "テレアポ" },
   { value: "meeting", label: "商談" },
@@ -64,6 +75,7 @@ type CustomerFormState = {
   email: string;
   industry: string;
   employeeCount: string;
+  productIds: string[];
   status: CustomerStatus;
   temperature: CustomerTemperature;
   expectedAmount: string;
@@ -72,7 +84,7 @@ type CustomerFormState = {
   nextActionDate: string;
   lastContactDate: string;
   memo: string;
-  isContracted: boolean;
+  contractStatus: CustomerContractStatus;
   contractStartDate: string;
   contractPlan: string;
   monthlyAmount: string;
@@ -84,6 +96,7 @@ export default function SalesCustomerDetailPage() {
   const params = useParams<{ customerId: string }>();
   const { profile } = useAuth();
   const [customer, setCustomer] = useState<CustomerRecord | null>(null);
+  const [products, setProducts] = useState<KnowledgeProduct[]>([]);
   const [logs, setLogs] = useState<CustomerLogRecord[]>([]);
   const [meetings, setMeetings] = useState<MeetingRecord[]>([]);
   const [linkedMeetingIds, setLinkedMeetingIds] = useState<string[]>([]);
@@ -138,6 +151,18 @@ export default function SalesCustomerDetailPage() {
     return () => unsubscribers.forEach((unsubscribe) => unsubscribe());
   }, [params.customerId, profile?.companyId, profile?.uid]);
 
+  useEffect(() => {
+    if (!profile?.companyId) {
+      setProducts([]);
+      return;
+    }
+    return subscribeToKnowledgeProducts(
+      profile.companyId,
+      setProducts,
+      (nextError: FirebaseError) => setErrorMessage(nextError.message),
+    );
+  }, [profile?.companyId]);
+
   const relatedMeetings = useMemo(() => {
     if (!customer) return [];
     const normalizedName = customer.companyName.trim().toLowerCase();
@@ -161,7 +186,7 @@ export default function SalesCustomerDetailPage() {
     setErrorMessage(null);
     setSuccessMessage(null);
     try {
-      await updateCustomer(customer.id, buildCustomerInput(formState, customer));
+      await updateCustomer(customer.id, buildCustomerInput(formState, products, customer));
       setIsEditing(false);
       setSuccessMessage("顧客カルテを更新しました。");
     } catch (error) {
@@ -269,14 +294,14 @@ export default function SalesCustomerDetailPage() {
         <section className="mt-5 grid gap-4 md:grid-cols-4">
           <KpiCard label="現在ステータス" value={readStatusLabel(customer.status)} note="営業状況" />
           <KpiCard label="温度感" value={readTemperatureLabel(customer.temperature)} note="営業判断" tone={customer.temperature === "high" ? "risk" : "normal"} />
-          <KpiCard label="契約経過" value={contractMonths === null ? "-" : `${contractMonths}ヶ月`} note={customer.isContracted ? "契約中" : "未契約"} tone={customer.isContracted ? "good" : "normal"} />
+          <KpiCard label="契約状況" value={readContractStatusLabel(customer.contractStatus)} note={contractMonths === null ? "契約開始日未設定" : `${contractMonths}ヶ月経過`} tone={customer.contractStatus === "contracted" ? "good" : customer.contractStatus === "needs_consultation" ? "risk" : "normal"} />
           <KpiCard label="商談AI平均" value={aiAverage === null ? "-" : `${aiAverage}点`} note={`${relatedMeetings.length}件の履歴`} />
         </section>
 
         {isEditing && formState ? (
           <section className="mt-5 rounded-[16px] border border-[#e4e8ef] bg-white p-5 shadow-[0_8px_22px_rgba(17,24,39,0.05)]">
             <h2 className="text-[18px] font-black text-[#171717]">顧客カルテ編集</h2>
-            <CustomerForm formState={formState} onChange={setFormState} onSubmit={handleUpdateCustomer} submitLabel={isSaving ? "保存中" : "保存"} disabled={isSaving} />
+            <CustomerForm formState={formState} onChange={setFormState} onSubmit={handleUpdateCustomer} submitLabel={isSaving ? "保存中" : "保存"} disabled={isSaving} products={products} />
           </section>
         ) : null}
 
@@ -290,6 +315,7 @@ export default function SalesCustomerDetailPage() {
                 ["メールアドレス", customer.email || "未設定"],
                 ["業種", customer.industry || "未設定"],
                 ["従業員数", customer.employeeCount === null ? "未設定" : `${customer.employeeCount}人`],
+                ["商材", customer.productNames.length > 0 ? customer.productNames.join(" / ") : "未設定"],
                 ["担当営業マン", customer.assignedUserName || "未設定"],
                 ["メモ", customer.memo || "未設定"],
               ]} />
@@ -309,7 +335,7 @@ export default function SalesCustomerDetailPage() {
 
             <Panel title="契約情報">
               <InfoGrid rows={[
-                ["契約有無", customer.isContracted ? "契約中" : "未契約"],
+                ["契約状況", readContractStatusLabel(customer.contractStatus)],
                 ["契約開始日", formatDate(customer.contractStartDate)],
                 ["契約プラン", customer.contractPlan || "未設定"],
                 ["月額金額", formatCurrency(customer.monthlyAmount)],
@@ -372,7 +398,21 @@ export default function SalesCustomerDetailPage() {
   );
 }
 
-function CustomerForm({ formState, onChange, onSubmit, submitLabel, disabled }: { formState: CustomerFormState; onChange: (state: CustomerFormState) => void; onSubmit: (event: React.FormEvent<HTMLFormElement>) => void; submitLabel: string; disabled?: boolean }) {
+function CustomerForm({
+  formState,
+  onChange,
+  onSubmit,
+  submitLabel,
+  disabled,
+  products,
+}: {
+  formState: CustomerFormState;
+  onChange: (state: CustomerFormState) => void;
+  onSubmit: (event: React.FormEvent<HTMLFormElement>) => void;
+  submitLabel: string;
+  disabled?: boolean;
+  products: KnowledgeProduct[];
+}) {
   const setField = <Key extends keyof CustomerFormState>(key: Key, value: CustomerFormState[Key]) => onChange({ ...formState, [key]: value });
   return (
     <form onSubmit={onSubmit} className="mt-4 grid gap-4">
@@ -384,6 +424,7 @@ function CustomerForm({ formState, onChange, onSubmit, submitLabel, disabled }: 
         <TextField label="業種" value={formState.industry} onChange={(value) => setField("industry", value)} />
         <TextField label="従業員数" value={formState.employeeCount} onChange={(value) => setField("employeeCount", value)} type="number" />
       </div>
+      <ProductMultiSelect products={products} selectedIds={formState.productIds} onChange={(productIds) => setField("productIds", productIds)} />
       <div className="grid gap-4 md:grid-cols-4">
         <SelectField label="ステータス" value={formState.status} options={statusOptions} onChange={(value) => setField("status", value as CustomerStatus)} />
         <SelectField label="温度感" value={formState.temperature} options={temperatureOptions} onChange={(value) => setField("temperature", value as CustomerTemperature)} />
@@ -396,10 +437,7 @@ function CustomerForm({ formState, onChange, onSubmit, submitLabel, disabled }: 
         <TextField label="最終接触日" value={formState.lastContactDate} onChange={(value) => setField("lastContactDate", value)} type="date" />
       </div>
       <div className="grid gap-4 md:grid-cols-5">
-        <label className="flex h-[66px] items-center gap-3 rounded-[12px] border border-[#dfe4ec] bg-white px-3 text-[13px] font-black text-[#343b48]">
-          <input type="checkbox" checked={formState.isContracted} onChange={(event) => setField("isContracted", event.target.checked)} />
-          契約中
-        </label>
+        <SelectField label="契約ラベル" value={formState.contractStatus} options={contractStatusOptions} onChange={(value) => setField("contractStatus", value as CustomerContractStatus)} />
         <TextField label="契約開始日" value={formState.contractStartDate} onChange={(value) => setField("contractStartDate", value)} type="date" />
         <TextField label="契約プラン" value={formState.contractPlan} onChange={(value) => setField("contractPlan", value)} />
         <TextField label="月額金額" value={formState.monthlyAmount} onChange={(value) => setField("monthlyAmount", value)} type="number" />
@@ -522,6 +560,53 @@ function SelectField({ label, value, options, onChange }: { label: string; value
   );
 }
 
+function ProductMultiSelect({
+  products,
+  selectedIds,
+  onChange,
+}: {
+  products: KnowledgeProduct[];
+  selectedIds: string[];
+  onChange: (selectedIds: string[]) => void;
+}) {
+  const selectedProducts = products.filter((product) => selectedIds.includes(product.id));
+  const toggleProduct = (productId: string) => {
+    onChange(selectedIds.includes(productId) ? selectedIds.filter((id) => id !== productId) : [...selectedIds, productId]);
+  };
+
+  return (
+    <div className="rounded-[12px] border border-[#dfe4ec] bg-[#fcfcfd] px-3 py-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <span className="text-[12px] font-black text-[#596273]">商材</span>
+        <span className="text-[11px] font-bold text-[#8a909b]">{selectedProducts.length > 0 ? `${selectedProducts.length}件選択中` : "複数選択可"}</span>
+      </div>
+      {products.length > 0 ? (
+        <div className="mt-3 flex flex-wrap gap-2">
+          {products.map((product) => {
+            const selected = selectedIds.includes(product.id);
+            return (
+              <button
+                key={product.id}
+                type="button"
+                onClick={() => toggleProduct(product.id)}
+                className={`rounded-full border px-3 py-1.5 text-[12px] font-black transition ${
+                  selected
+                    ? "border-[#f0c655] bg-[#ffd84d] text-[#171717]"
+                    : "border-[#e2e6ee] bg-white text-[#596273] hover:border-[#ead8a8]"
+                }`}
+              >
+                {product.name}
+              </button>
+            );
+          })}
+        </div>
+      ) : (
+        <p className="mt-2 text-[12px] font-bold text-[#8a909b]">商材管理に登録された商材がここに表示されます。</p>
+      )}
+    </div>
+  );
+}
+
 function KpiCard({ label, value, note, tone = "normal" }: { label: string; value: string; note: string; tone?: "normal" | "good" | "risk" }) {
   const valueClass = tone === "good" ? "text-[#16834f]" : tone === "risk" ? "text-[#d63c2f]" : "text-[#171717]";
   return (
@@ -554,6 +639,7 @@ function buildFormState(customer: CustomerRecord): CustomerFormState {
     email: customer.email,
     industry: customer.industry,
     employeeCount: customer.employeeCount?.toString() ?? "",
+    productIds: customer.productIds,
     status: customer.status,
     temperature: customer.temperature,
     expectedAmount: customer.expectedAmount?.toString() ?? "",
@@ -562,7 +648,7 @@ function buildFormState(customer: CustomerRecord): CustomerFormState {
     nextActionDate: toDateInputValue(customer.nextActionDate),
     lastContactDate: toDateInputValue(customer.lastContactDate),
     memo: customer.memo,
-    isContracted: customer.isContracted,
+    contractStatus: customer.contractStatus,
     contractStartDate: toDateInputValue(customer.contractStartDate),
     contractPlan: customer.contractPlan,
     monthlyAmount: customer.monthlyAmount?.toString() ?? "",
@@ -571,7 +657,8 @@ function buildFormState(customer: CustomerRecord): CustomerFormState {
   };
 }
 
-function buildCustomerInput(formState: CustomerFormState, customer: CustomerRecord): SaveCustomerInput {
+function buildCustomerInput(formState: CustomerFormState, products: KnowledgeProduct[], customer: CustomerRecord): SaveCustomerInput {
+  const selectedProducts = products.filter((product) => formState.productIds.includes(product.id));
   return {
     companyId: customer.companyId,
     companyName: formState.companyName.trim(),
@@ -582,7 +669,9 @@ function buildCustomerInput(formState: CustomerFormState, customer: CustomerReco
     employeeCount: readOptionalNumber(formState.employeeCount),
     assignedUserId: customer.assignedUserId,
     assignedUserName: customer.assignedUserName,
-    status: formState.isContracted ? "contracted" : formState.status,
+    productIds: selectedProducts.map((product) => product.id),
+    productNames: selectedProducts.map((product) => product.name),
+    status: formState.contractStatus === "contracted" ? "contracted" : formState.status,
     temperature: formState.temperature,
     expectedAmount: readOptionalNumber(formState.expectedAmount),
     lostReason: formState.lostReason.trim(),
@@ -590,7 +679,8 @@ function buildCustomerInput(formState: CustomerFormState, customer: CustomerReco
     nextActionDate: readOptionalDate(formState.nextActionDate),
     lastContactDate: readOptionalDate(formState.lastContactDate),
     memo: formState.memo.trim(),
-    isContracted: formState.isContracted,
+    isContracted: formState.contractStatus === "contracted",
+    contractStatus: formState.contractStatus,
     contractStartDate: readOptionalDate(formState.contractStartDate),
     contractPlan: formState.contractPlan.trim(),
     monthlyAmount: readOptionalNumber(formState.monthlyAmount),
@@ -635,6 +725,10 @@ function readTemperatureLabel(temperature: CustomerTemperature) {
 
 function readChurnRiskLabel(risk: CustomerChurnRisk) {
   return churnRiskOptions.find((option) => option.value === risk)?.label ?? "低";
+}
+
+function readContractStatusLabel(status: CustomerContractStatus) {
+  return contractStatusOptions.find((option) => option.value === status)?.label ?? "未契約";
 }
 
 function readLogTypeLabel(type: CustomerLogType) {

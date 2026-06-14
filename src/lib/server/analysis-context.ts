@@ -19,6 +19,7 @@ export type AnalysisContext = {
     sourceSummary: string;
   } | null;
   manual: {
+    manualDomain: "meeting" | "teleapo";
     title: string;
     productName: string;
     manualCategory: string;
@@ -37,6 +38,9 @@ export type AnalysisContext = {
 export async function loadAnalysisContext(input: {
   companyId?: string | null;
   productName?: string | null;
+  manualCategory?: string | null;
+  targetSegment?: string | null;
+  manualDomain?: string | null;
 }): Promise<AnalysisContext> {
   const db = getFirebaseAdminDb();
   if (!db || !input.companyId) {
@@ -49,20 +53,58 @@ export async function loadAnalysisContext(input: {
     db.collection("meetings").where("companyId", "==", input.companyId).limit(40).get(),
   ]);
   const normalizedProductName = input.productName?.trim() ?? "";
+  const normalizedManualCategory = normalizeText(input.manualCategory);
+  const normalizedTargetSegment = normalizeText(input.targetSegment);
   const productDoc =
     productsSnapshot.docs.find((doc) => readString(doc.data().name) === normalizedProductName) ??
     productsSnapshot.docs.find((doc) => normalizedProductName && readString(doc.data().name).includes(normalizedProductName));
   const matchedProductName = readString(productDoc?.data().name) || normalizedProductName;
-  const manualDoc =
-    manualsSnapshot.docs.find((doc) => matchedProductName && readString(doc.data().productName) === matchedProductName) ??
-    manualsSnapshot.docs[0] ??
-    null;
+  const manualDoc = selectBestManual(
+    manualsSnapshot.docs.map((doc) => doc.data()),
+    {
+      productName: matchedProductName,
+      manualCategory: normalizedManualCategory,
+      targetSegment: normalizedTargetSegment,
+      manualDomain: readManualDomain(input.manualDomain),
+    },
+  );
 
   return {
     product: productDoc ? mapProduct(productDoc.data()) : null,
-    manual: manualDoc ? mapManual(manualDoc.data()) : null,
+    manual: manualDoc ? mapManual(manualDoc) : null,
     pastTrends: buildPastTrends(meetingsSnapshot.docs.map((doc) => doc.data()), matchedProductName),
   };
+}
+
+function selectBestManual(
+  manuals: DocumentData[],
+  input: { productName: string; manualCategory: string; targetSegment: string; manualDomain: "meeting" | "teleapo" },
+) {
+  const scored = manuals
+    .map((manual) => {
+      const manualDomain = readManualDomain(manual.manualDomain);
+      const productName = normalizeText(readString(manual.productName));
+      const manualCategory = normalizeText(readString(manual.manualCategory));
+      const targetSegment = normalizeText(readString(manual.targetSegment));
+      const domainScore = manualDomain === input.manualDomain ? 10 : -20;
+      const productScore = input.productName && isTextMatch(productName, normalizeText(input.productName)) ? 8 : 0;
+      const categoryScore = input.manualCategory && manualCategory === input.manualCategory ? 5 : 0;
+      const targetScore = input.targetSegment && isTextMatch(targetSegment, input.targetSegment) ? 4 : 0;
+      return { manual, score: domainScore + productScore + categoryScore + targetScore };
+    })
+    .filter((item) => item.score > 0)
+    .sort((left, right) => right.score - left.score);
+
+  return scored[0]?.manual ?? manuals.find((manual) => readManualDomain(manual.manualDomain) === input.manualDomain) ?? manuals[0] ?? null;
+}
+
+function isTextMatch(left: string, right: string) {
+  if (!left || !right) return false;
+  return left === right || left.includes(right) || right.includes(left);
+}
+
+function normalizeText(value?: string | null) {
+  return (value ?? "").trim().toLowerCase().replace(/\s+/g, "");
 }
 
 export function buildAnalysisContextPrompt(context: AnalysisContext) {
@@ -94,6 +136,7 @@ export function buildAnalysisContextPrompt(context: AnalysisContext) {
       [
         "【営業成功基準】",
         `タイトル: ${context.manual.title}`,
+        `種別: ${context.manual.manualDomain === "teleapo" ? "テレアポ" : "商談"}`,
         `商材: ${context.manual.productName}`,
         `カテゴリー: ${context.manual.manualCategory}`,
         `ターゲット層: ${context.manual.targetSegment}`,
@@ -140,6 +183,7 @@ function mapProduct(data: DocumentData): NonNullable<AnalysisContext["product"]>
 
 function mapManual(data: DocumentData): NonNullable<AnalysisContext["manual"]> {
   return {
+    manualDomain: readManualDomain(data.manualDomain),
     title: readString(data.title),
     productName: readString(data.productName),
     manualCategory: readString(data.manualCategory),
@@ -152,6 +196,10 @@ function mapManual(data: DocumentData): NonNullable<AnalysisContext["manual"]> {
     closingRules: readStringArray(data.closingRules),
     customFields: readCustomFields(data.customFields),
   };
+}
+
+function readManualDomain(value: unknown): "meeting" | "teleapo" {
+  return value === "teleapo" ? "teleapo" : "meeting";
 }
 
 function readString(value: unknown) {

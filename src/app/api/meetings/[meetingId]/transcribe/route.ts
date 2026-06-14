@@ -24,7 +24,6 @@ const transcriptionModels = new Set([
   "gpt-4o-mini-transcribe",
   "gpt-4o-transcribe",
   "gpt-4o-transcribe-diarize",
-  "whisper-1",
 ]);
 const execFileAsync = promisify(execFile);
 
@@ -96,8 +95,7 @@ export async function POST(
       ? (body.model as
           | "gpt-4o-mini-transcribe"
           | "gpt-4o-transcribe"
-          | "gpt-4o-transcribe-diarize"
-          | "whisper-1")
+          | "gpt-4o-transcribe-diarize")
       : "gpt-4o-mini-transcribe";
     selectedModel = model;
 
@@ -248,8 +246,7 @@ async function transcribeChunk({
   model:
     | "gpt-4o-mini-transcribe"
     | "gpt-4o-transcribe"
-    | "gpt-4o-transcribe-diarize"
-    | "whisper-1";
+    | "gpt-4o-transcribe-diarize";
 }) {
   const bytes = new Uint8Array(fileBuffer);
   const file = new File([bytes], fileName, { type: mimeType });
@@ -264,10 +261,7 @@ async function transcribeChunk({
       formData.append("language", language);
     }
 
-    if (model === "whisper-1") {
-      formData.append("response_format", "verbose_json");
-      formData.append("timestamp_granularities[]", "segment");
-    } else if (model === "gpt-4o-transcribe-diarize") {
+    if (model === "gpt-4o-transcribe-diarize") {
       formData.append("response_format", "diarized_json");
       formData.append("chunking_strategy", "auto");
     } else {

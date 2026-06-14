@@ -87,6 +87,10 @@ export default function AdminMemberDetailPage() {
   const lostCount = userMeetings.filter((meeting) => meeting.status === "lost").length;
   const analyzedCount = userMeetings.filter((meeting) => meeting.aiSummary).length;
   const averageDurationMin = calcAverageDurationMin(userMeetings);
+  const manualInsights = useMemo(
+    () => buildManualInsightSummary(userMeetings, userResults),
+    [userMeetings, userResults],
+  );
 
   useEffect(() => {
     if (!adminProfile?.companyId) {
@@ -409,6 +413,18 @@ export default function AdminMemberDetailPage() {
               <MemberKeywordList meetings={userMeetings} />
             </Panel>
 
+            <Panel title="顧客側の頻出ワード">
+              <MemberCustomerWordList meetings={userMeetings} />
+            </Panel>
+
+            <Panel title="商材 × マニュアル達成度">
+              <MemberProductManualAchievement rows={manualInsights.productRows} />
+            </Panel>
+
+            <Panel title="よく抜ける基準 TOP5">
+              <MemberMissingManualList rows={manualInsights.missingRows} />
+            </Panel>
+
             <Panel title="商材別 成約率" className="flex flex-1 flex-col" bodyClassName="flex-1">
               <MemberProductWinList products={products} meetings={userMeetings} knowledgeItems={userKnowledgeItems} />
             </Panel>
@@ -497,6 +513,10 @@ export default function AdminMemberDetailPage() {
               ) : (
                 <EmptyState title="比較データはまだありません" body="営業メンバー情報を取得すると、同じ勤務年数や社内全体との比較が表示されます。" />
               )}
+            </Panel>
+
+            <Panel title="ロープレと実商談の差分">
+              <MemberRoleplayMeetingGapList rows={manualInsights.gapRows} />
             </Panel>
           </div>
 
@@ -751,6 +771,164 @@ function buildMeetingKeywords(meetings: MeetingRecord[]) {
     .slice(0, 5);
 }
 
+function buildCustomerWords(meetings: MeetingRecord[]) {
+  const counts = new Map<string, number>();
+  const words = ["価格", "料金", "予算", "高い", "検討", "比較", "不安", "難しい", "社内", "決裁", "来月", "興味", "採用", "集客", "効果"];
+
+  meetings.forEach((meeting) => {
+    const customerText = (meeting.conversationLogs ?? [])
+      .filter((log) => log.speaker === "customer" || log.speaker === "speaker_2")
+      .map((log) => log.text)
+      .join(" ");
+
+    words.forEach((word) => {
+      const count = customerText.split(word).length - 1;
+      if (count > 0) counts.set(word, (counts.get(word) ?? 0) + count);
+    });
+  });
+
+  return Array.from(counts.entries())
+    .map(([word, count]) => ({ word, count }))
+    .sort((left, right) => right.count - left.count);
+}
+
+type ManualChecklistItem = {
+  category: string;
+  label: string;
+  status: "done" | "missing";
+  scoreImpact?: number | null;
+};
+
+function buildManualInsightSummary(meetings: MeetingRecord[], results: RoleplayResult[]) {
+  const productMap = new Map<string, {
+    productName: string;
+    meetingDone: number;
+    meetingTotal: number;
+    roleplayDone: number;
+    roleplayTotal: number;
+  }>();
+  const missingMap = new Map<string, {
+    category: string;
+    label: string;
+    count: number;
+    meetingCount: number;
+    roleplayCount: number;
+  }>();
+  const gapMap = new Map<string, {
+    productName: string;
+    category: string;
+    label: string;
+    meetingDone: number;
+    meetingTotal: number;
+    roleplayDone: number;
+    roleplayTotal: number;
+  }>();
+
+  meetings.forEach((meeting) => {
+    const productName = meeting.productType || "商材未設定";
+    const items = meeting.aiSummary?.manualCompliance?.checklistItems ?? [];
+    addProductChecklist(productMap, productName, items, "meeting");
+    addMissingChecklist(missingMap, items, "meeting");
+    addGapChecklist(gapMap, productName, items, "meeting");
+  });
+
+  results.forEach((result) => {
+    const productName = result.productName || "商材未設定";
+    const items = result.manualChecklistItems ?? [];
+    addProductChecklist(productMap, productName, items, "roleplay");
+    addMissingChecklist(missingMap, items, "roleplay");
+    addGapChecklist(gapMap, productName, items, "roleplay");
+  });
+
+  const productRows = Array.from(productMap.values())
+    .map((row) => {
+      const done = row.meetingDone + row.roleplayDone;
+      const total = row.meetingTotal + row.roleplayTotal;
+      return {
+        ...row,
+        rate: total > 0 ? Math.round((done / total) * 100) : null,
+      };
+    })
+    .filter((row) => row.meetingTotal + row.roleplayTotal > 0)
+    .sort((left, right) => (right.meetingTotal + right.roleplayTotal) - (left.meetingTotal + left.roleplayTotal));
+
+  const missingRows = Array.from(missingMap.values())
+    .sort((left, right) => right.count - left.count);
+
+  const gapRows = Array.from(gapMap.values())
+    .filter((row) => row.meetingTotal > 0 && row.roleplayTotal > 0)
+    .map((row) => {
+      const meetingRate = Math.round((row.meetingDone / row.meetingTotal) * 100);
+      const roleplayRate = Math.round((row.roleplayDone / row.roleplayTotal) * 100);
+      return {
+        productName: row.productName,
+        category: row.category,
+        label: row.label,
+        meetingRate,
+        roleplayRate,
+        gap: Math.abs(roleplayRate - meetingRate),
+      };
+    })
+    .filter((row) => row.gap >= 15)
+    .sort((left, right) => right.gap - left.gap);
+
+  return { productRows, missingRows, gapRows };
+}
+
+function addProductChecklist(
+  map: Map<string, { productName: string; meetingDone: number; meetingTotal: number; roleplayDone: number; roleplayTotal: number }>,
+  productName: string,
+  items: ManualChecklistItem[],
+  source: "meeting" | "roleplay",
+) {
+  if (items.length === 0) return;
+  const row = map.get(productName) ?? { productName, meetingDone: 0, meetingTotal: 0, roleplayDone: 0, roleplayTotal: 0 };
+  const done = items.filter((item) => item.status === "done").length;
+  if (source === "meeting") {
+    row.meetingDone += done;
+    row.meetingTotal += items.length;
+  } else {
+    row.roleplayDone += done;
+    row.roleplayTotal += items.length;
+  }
+  map.set(productName, row);
+}
+
+function addMissingChecklist(
+  map: Map<string, { category: string; label: string; count: number; meetingCount: number; roleplayCount: number }>,
+  items: ManualChecklistItem[],
+  source: "meeting" | "roleplay",
+) {
+  items.filter((item) => item.status === "missing").forEach((item) => {
+    const key = `${item.category}:${item.label}`;
+    const row = map.get(key) ?? { category: item.category, label: item.label, count: 0, meetingCount: 0, roleplayCount: 0 };
+    row.count += 1;
+    if (source === "meeting") row.meetingCount += 1;
+    if (source === "roleplay") row.roleplayCount += 1;
+    map.set(key, row);
+  });
+}
+
+function addGapChecklist(
+  map: Map<string, { productName: string; category: string; label: string; meetingDone: number; meetingTotal: number; roleplayDone: number; roleplayTotal: number }>,
+  productName: string,
+  items: ManualChecklistItem[],
+  source: "meeting" | "roleplay",
+) {
+  items.forEach((item) => {
+    const key = `${productName}:${item.category}:${item.label}`;
+    const row = map.get(key) ?? { productName, category: item.category, label: item.label, meetingDone: 0, meetingTotal: 0, roleplayDone: 0, roleplayTotal: 0 };
+    if (source === "meeting") {
+      row.meetingTotal += 1;
+      if (item.status === "done") row.meetingDone += 1;
+    } else {
+      row.roleplayTotal += 1;
+      if (item.status === "done") row.roleplayDone += 1;
+    }
+    map.set(key, row);
+  });
+}
+
 function buildMeetingConversationText(meeting: MeetingRecord) {
   const conversationText = meeting.conversationLogs?.map((log) => log.text).join(" ") ?? "";
   const transcriptText = meeting.transcriptBlocks?.map((block) => block.text).join(" ") ?? "";
@@ -959,6 +1137,100 @@ function MemberKeywordList({ meetings }: { meetings: MeetingRecord[] }) {
           <div className="text-[12px] font-black text-[#8a909b]">{index + 1}</div>
           <div className="min-w-0 truncate text-[13px] font-black text-[#343b48]">{row.word}</div>
           <div className="text-right text-[12px] font-black text-[#8a6500]">{row.count}回</div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function MemberCustomerWordList({ meetings }: { meetings: MeetingRecord[] }) {
+  const rows = buildCustomerWords(meetings).slice(0, 8);
+
+  if (rows.length === 0) {
+    return <EmptyState title="顧客ワードはまだありません" body="話者分離済みの顧客発話が増えると、顧客側の頻出ワードを表示します。" />;
+  }
+
+  return (
+    <div className="overflow-hidden rounded-[14px] border border-[#eef1f5]">
+      <div className="grid grid-cols-[40px_minmax(0,1fr)_56px] gap-3 border-b border-[#eef1f5] bg-[#fcfcfd] px-3 py-2 text-[11px] font-black text-[#8a909b]">
+        <div>#</div>
+        <div>ワード</div>
+        <div className="text-right">回数</div>
+      </div>
+      {rows.map((row, index) => (
+        <div key={row.word} className="grid grid-cols-[40px_minmax(0,1fr)_56px] items-center gap-3 border-b border-[#f0f2f6] bg-white px-3 py-2.5 last:border-b-0">
+          <div className="text-[12px] font-black text-[#8a909b]">{index + 1}</div>
+          <div className="min-w-0 truncate text-[13px] font-black text-[#343b48]">{row.word}</div>
+          <div className="text-right text-[12px] font-black text-[#8a6500]">{row.count}回</div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function MemberProductManualAchievement({ rows }: { rows: ReturnType<typeof buildManualInsightSummary>["productRows"] }) {
+  if (rows.length === 0) {
+    return <EmptyState title="基準達成データはまだありません" body="マニュアルチェック済みの商談やロープレが増えると、商材別の達成度を表示します。" />;
+  }
+
+  return (
+    <div className="space-y-3">
+      {rows.slice(0, 6).map((row) => (
+        <div key={row.productName} className="rounded-[14px] border border-[#eef1f5] bg-[#fcfcfd] px-4 py-3">
+          <div className="flex items-center justify-between gap-3">
+            <div className="min-w-0">
+              <div className="truncate text-[13px] font-black text-[#171717]">{row.productName}</div>
+              <div className="mt-1 text-[11px] font-bold text-[#8a909b]">実商談 {row.meetingDone}/{row.meetingTotal} ・ ロープレ {row.roleplayDone}/{row.roleplayTotal}</div>
+            </div>
+            <div className="text-[16px] font-black text-[#8a6500]">{row.rate === null ? "-" : `${row.rate}%`}</div>
+          </div>
+          <div className="mt-3 h-2 rounded-full bg-[#edf0f5]">
+            <div className="h-full rounded-full bg-[#ffd84d]" style={{ width: `${row.rate ?? 0}%` }} />
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function MemberMissingManualList({ rows }: { rows: ReturnType<typeof buildManualInsightSummary>["missingRows"] }) {
+  if (rows.length === 0) {
+    return <EmptyState title="未達項目はまだありません" body="マニュアルチェックが保存されると、よく抜ける基準を表示します。" />;
+  }
+
+  return (
+    <div className="space-y-2">
+      {rows.slice(0, 5).map((row) => (
+        <div key={`${row.category}-${row.label}`} className="rounded-[14px] border border-[#eef1f5] bg-[#fcfcfd] px-4 py-3">
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <div className="truncate text-[13px] font-black text-[#171717]">{row.label}</div>
+              <div className="mt-1 text-[11px] font-bold text-[#8a909b]">{row.category} ・ 実商談 {row.meetingCount} / ロープレ {row.roleplayCount}</div>
+            </div>
+            <span className="rounded-full bg-[#fff0ed] px-2.5 py-1 text-[11px] font-black text-[#d63c2f]">{row.count}件</span>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function MemberRoleplayMeetingGapList({ rows }: { rows: ReturnType<typeof buildManualInsightSummary>["gapRows"] }) {
+  if (rows.length === 0) {
+    return <EmptyState title="差分はまだありません" body="同じ基準の商談・ロープレ結果が揃うと、ロープレとのギャップを表示します。" />;
+  }
+
+  return (
+    <div className="space-y-2">
+      {rows.slice(0, 5).map((row) => (
+        <div key={`${row.productName}-${row.label}`} className="rounded-[14px] border border-[#eef1f5] bg-[#fcfcfd] px-4 py-3">
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <div className="truncate text-[13px] font-black text-[#171717]">{row.label}</div>
+              <div className="mt-1 text-[11px] font-bold text-[#8a909b]">{row.productName} ・ 実商談 {row.meetingRate}% / ロープレ {row.roleplayRate}%</div>
+            </div>
+            <span className="rounded-full bg-[#fff3cf] px-2.5 py-1 text-[11px] font-black text-[#8a6500]">{row.gap}pt差</span>
+          </div>
         </div>
       ))}
     </div>
@@ -1526,7 +1798,7 @@ function buildTenureComparisonLabel(member: ComparisonMember, peers: ComparisonM
 }
 
 function AdminCustomerManagementLog({ customers, logs }: { customers: CustomerRecord[]; logs: CustomerLogRecord[] }) {
-  const contractedCount = customers.filter((customer) => customer.isContracted || customer.status === "contracted").length;
+  const contractedCount = customers.filter((customer) => customer.contractStatus === "contracted" || customer.isContracted || customer.status === "contracted").length;
   const proposalCount = customers.filter((customer) => customer.status === "proposal").length;
   const lostCount = customers.filter((customer) => customer.status === "lost").length;
   const overdueCustomers = customers.filter(isActionOverdue);
@@ -1652,7 +1924,8 @@ function AdminCustomerKarteList({ customers, logs }: { customers: CustomerRecord
 
               <div className="mt-3 grid gap-2 sm:grid-cols-2">
                 <SmallInfo label="次回アクション" value={`${customer.nextActionTitle || "未設定"} / ${formatDate(customer.nextActionDate)}`} tone={overdue ? "risk" : "normal"} />
-                <SmallInfo label="契約状況" value={customer.isContracted || customer.status === "contracted" ? `${customer.contractPlan || "契約中"} / ${formatCurrency(customer.monthlyAmount)}` : "未契約"} tone={customer.isContracted ? "good" : "normal"} />
+                <SmallInfo label="商材" value={customer.productNames.length > 0 ? customer.productNames.join(" / ") : "未設定"} />
+                <SmallInfo label="契約状況" value={customer.contractStatus === "contracted" || customer.isContracted || customer.status === "contracted" ? `${customer.contractPlan || readContractStatusLabel(customer.contractStatus)} / ${formatCurrency(customer.monthlyAmount)}` : readContractStatusLabel(customer.contractStatus)} tone={customer.contractStatus === "contracted" || customer.isContracted ? "good" : customer.contractStatus === "needs_consultation" ? "risk" : "normal"} />
                 <SmallInfo label="契約経過" value={customer.contractStartDate ? `${calcContractMonths(customer.contractStartDate)}ヶ月` : "未設定"} />
                 <SmallInfo label="解約リスク" value={readChurnRiskLabel(customer.churnRisk)} tone={customer.churnRisk === "high" ? "risk" : customer.churnRisk === "low" ? "good" : "normal"} />
               </div>
@@ -1746,6 +2019,18 @@ function readChurnRiskLabel(risk: CustomerRecord["churnRisk"]) {
     low: "低",
   };
   return labels[risk];
+}
+
+function readContractStatusLabel(status: CustomerRecord["contractStatus"]) {
+  const labels: Record<CustomerRecord["contractStatus"], string> = {
+    not_contracted: "未契約",
+    considering: "検討中",
+    needs_consultation: "要相談",
+    contracted: "契約中",
+    paused: "保留",
+    cancelled: "解約",
+  };
+  return labels[status];
 }
 
 function readCustomerLogTypeLabel(type: CustomerLogRecord["type"]) {

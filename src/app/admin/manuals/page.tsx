@@ -18,6 +18,7 @@ import {
   subscribeToSalesManuals,
   updateSalesManual,
   type SalesManualCustomField,
+  type SalesManualDomain,
   type SalesManual,
 } from "@/lib/firebase/manuals";
 
@@ -106,7 +107,10 @@ export default function AdminManualsPage() {
                       <p className="mt-1 text-[12px] font-bold text-[#8a909b]">{formatManualMeta(manual)}</p>
                       <p className="mt-2 line-clamp-3 text-[13px] leading-6 text-[#596273]">{manual.content || "本文未登録"}</p>
                     </div>
-                    <StatusBadge tone={manual.status === "active" ? "good" : "normal"} label={manual.status === "active" ? "有効" : "下書き"} />
+                    <div className="flex shrink-0 flex-col items-end gap-2">
+                      <ManualDomainBadge domain={manual.manualDomain} />
+                      <StatusBadge tone={manual.status === "active" ? "good" : "normal"} label={manual.status === "active" ? "有効" : "下書き"} />
+                    </div>
                   </div>
                   <div className="mt-4 grid gap-3 md:grid-cols-2">
                     <MiniInfo label="評価基準" value={`${manual.criteria.length}件`} />
@@ -187,6 +191,7 @@ function ManualDetailDialog({
         </div>
 
         <div className="mt-5 grid gap-3 md:grid-cols-2">
+          <DetailItem label="種別" value={formatManualDomain(manual.manualDomain)} />
           <DetailItem label="商材" value={manual.productName} />
           <DetailItem label="カテゴリー" value={manual.manualCategory} />
           <DetailItem label="ターゲット層" value={manual.targetSegment} />
@@ -224,6 +229,7 @@ function ManualDialog({
   manual?: SalesManual;
   onClose: () => void;
 }) {
+  const [manualDomain, setManualDomain] = useState<SalesManualDomain>(manual?.manualDomain ?? "meeting");
   const [productId, setProductId] = useState(manual?.productId ?? products.find((product) => product.name === manual?.productName)?.id ?? "");
   const [manualCategory, setManualCategory] = useState<"新規" | "既存" | "">(manual?.manualCategory ?? "");
   const [targetSegment, setTargetSegment] = useState(manual?.targetSegment ?? "");
@@ -297,6 +303,7 @@ function ManualDialog({
     });
     const payload = {
       companyId,
+      manualDomain,
       title,
       productId: selectedProduct.id,
       productName: selectedProduct.name,
@@ -367,6 +374,12 @@ function ManualDialog({
         </div>
 
         <div className="mt-5 grid gap-4 md:grid-cols-2">
+          <Field label="種別">
+            <select value={manualDomain} onChange={(event) => setManualDomain(event.target.value as SalesManualDomain)} className={inputClassName}>
+              <option value="meeting">商談</option>
+              <option value="teleapo">テレアポ</option>
+            </select>
+          </Field>
           <Field label="商材">
             <select value={productId} onChange={(event) => setProductId(event.target.value)} className={inputClassName}>
               <option value="">商材を選択</option>
@@ -477,9 +490,28 @@ function DetailItem({ label, value, className = "" }: { label: string; value: st
   );
 }
 
+function ManualDomainBadge({ domain }: { domain: SalesManualDomain }) {
+  const isTeleapo = domain === "teleapo";
+  return (
+    <span
+      className={`inline-flex rounded-full border px-3 py-1 text-[11px] font-black ${
+        isTeleapo
+          ? "border-[#b8d8ff] bg-[#eef6ff] text-[#2362a8]"
+          : "border-[#f0c655] bg-[#fff5d8] text-[#8a6500]"
+      }`}
+    >
+      {formatManualDomain(domain)}
+    </span>
+  );
+}
+
 function formatManualMeta(manual: SalesManual) {
-  const items = [manual.productName, manual.manualCategory, manual.targetSegment].filter(Boolean);
+  const items = [formatManualDomain(manual.manualDomain), manual.productName, manual.manualCategory, manual.targetSegment].filter(Boolean);
   return items.length > 0 ? items.join(" / ") : "分類未設定";
+}
+
+function formatManualDomain(domain: SalesManualDomain) {
+  return domain === "teleapo" ? "テレアポ" : "商談";
 }
 
 function getManualDisplayTitle(manual: SalesManual) {

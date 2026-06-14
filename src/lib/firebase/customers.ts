@@ -29,6 +29,13 @@ export type CustomerStatus =
 export type CustomerTemperature = "high" | "middle" | "low";
 export type CustomerChurnRisk = "high" | "middle" | "low";
 export type CustomerLogType = "teleapo" | "meeting" | "email" | "quote" | "contract" | "follow" | "memo";
+export type CustomerContractStatus =
+  | "not_contracted"
+  | "considering"
+  | "needs_consultation"
+  | "contracted"
+  | "paused"
+  | "cancelled";
 
 export type CustomerRecord = {
   id: string;
@@ -41,6 +48,8 @@ export type CustomerRecord = {
   employeeCount: number | null;
   assignedUserId: string;
   assignedUserName: string;
+  productIds: string[];
+  productNames: string[];
   status: CustomerStatus;
   temperature: CustomerTemperature;
   expectedAmount: number | null;
@@ -50,6 +59,7 @@ export type CustomerRecord = {
   lastContactDate: Date | null;
   memo: string;
   isContracted: boolean;
+  contractStatus: CustomerContractStatus;
   contractStartDate: Date | null;
   contractPlan: string;
   monthlyAmount: number | null;
@@ -90,6 +100,8 @@ export type SaveCustomerInput = {
   employeeCount: number | null;
   assignedUserId: string;
   assignedUserName: string;
+  productIds: string[];
+  productNames: string[];
   status: CustomerStatus;
   temperature: CustomerTemperature;
   expectedAmount: number | null;
@@ -99,6 +111,7 @@ export type SaveCustomerInput = {
   lastContactDate: Date | null;
   memo: string;
   isContracted: boolean;
+  contractStatus: CustomerContractStatus;
   contractStartDate: Date | null;
   contractPlan: string;
   monthlyAmount: number | null;
@@ -287,6 +300,8 @@ function serializeCustomerInput(input: SaveCustomerInput) {
     employeeCount: input.employeeCount,
     assignedUserId: input.assignedUserId,
     assignedUserName: input.assignedUserName,
+    productIds: input.productIds,
+    productNames: input.productNames,
     status: input.status,
     temperature: input.temperature,
     expectedAmount: input.expectedAmount,
@@ -295,7 +310,8 @@ function serializeCustomerInput(input: SaveCustomerInput) {
     nextActionDate: toTimestampOrNull(input.nextActionDate),
     lastContactDate: toTimestampOrNull(input.lastContactDate),
     memo: input.memo,
-    isContracted: input.isContracted,
+    isContracted: input.contractStatus === "contracted" || input.isContracted,
+    contractStatus: input.contractStatus,
     contractStartDate: toTimestampOrNull(input.contractStartDate),
     contractPlan: input.contractPlan,
     monthlyAmount: input.monthlyAmount,
@@ -316,6 +332,8 @@ function mapCustomerRecord(id: string, data: Record<string, unknown>): CustomerR
     employeeCount: readNullableNumber(data.employeeCount),
     assignedUserId: readString(data.assignedUserId),
     assignedUserName: readString(data.assignedUserName),
+    productIds: readStringArray(data.productIds),
+    productNames: readStringArray(data.productNames),
     status: readCustomerStatus(data.status),
     temperature: readTemperature(data.temperature),
     expectedAmount: readNullableNumber(data.expectedAmount),
@@ -325,6 +343,7 @@ function mapCustomerRecord(id: string, data: Record<string, unknown>): CustomerR
     lastContactDate: toDateValue(data.lastContactDate),
     memo: readString(data.memo),
     isContracted: data.isContracted === true,
+    contractStatus: readContractStatus(data.contractStatus, data.isContracted === true),
     contractStartDate: toDateValue(data.contractStartDate),
     contractPlan: readString(data.contractPlan),
     monthlyAmount: readNullableNumber(data.monthlyAmount),
@@ -374,6 +393,12 @@ function readString(value: unknown) {
   return typeof value === "string" ? value : "";
 }
 
+function readStringArray(value: unknown) {
+  return Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === "string" && Boolean(item.trim()))
+    : [];
+}
+
 function readNullableNumber(value: unknown) {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
@@ -389,6 +414,12 @@ function readTemperature(value: unknown): CustomerTemperature {
 
 function readChurnRisk(value: unknown): CustomerChurnRisk {
   return value === "high" || value === "middle" || value === "low" ? value : "low";
+}
+
+function readContractStatus(value: unknown, isContracted: boolean): CustomerContractStatus {
+  const statuses: CustomerContractStatus[] = ["not_contracted", "considering", "needs_consultation", "contracted", "paused", "cancelled"];
+  if (statuses.includes(value as CustomerContractStatus)) return value as CustomerContractStatus;
+  return isContracted ? "contracted" : "not_contracted";
 }
 
 function readLogType(value: unknown): CustomerLogType {

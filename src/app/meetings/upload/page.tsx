@@ -152,6 +152,17 @@ export default function MeetingUploadPage() {
     applyCalendarEventToForm(selectedCalendarEvent);
   }, [applyCalendarEventToForm, selectedCalendarEvent]);
 
+  function handleRecordedAtChange(value: string) {
+    setRecordedAt(value);
+
+    const nextRecordedAt = new Date(value);
+    if (Number.isNaN(nextRecordedAt.getTime())) {
+      return;
+    }
+
+    setTranscriptEndedAtTime(toTimeInputValue(addMinutes(nextRecordedAt, 60)));
+  }
+
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setErrorMessage(null);
@@ -503,7 +514,7 @@ export default function MeetingUploadPage() {
                 type="datetime-local"
                 className={inputClassName}
                 value={recordedAt}
-                onChange={(event) => setRecordedAt(event.target.value)}
+                onChange={(event) => handleRecordedAtChange(event.target.value)}
               />
             </Field>
 
@@ -515,6 +526,9 @@ export default function MeetingUploadPage() {
                   value={transcriptEndedAtTime}
                   onChange={(event) => setTranscriptEndedAtTime(event.target.value)}
                 />
+                <p className="mt-2 text-[12px] font-semibold text-[#8a909b]">
+                  実施日時の1時間後を自動入力します。必要に応じて変更できます。
+                </p>
               </Field>
             ) : null}
 
@@ -889,6 +903,9 @@ function calculateTranscriptDurationSec(startedAt: Date, endedAtTime: string) {
 
   const endedAt = new Date(startedAt);
   endedAt.setHours(hours, minutes, 0, 0);
+  if (endedAt.getTime() <= startedAt.getTime()) {
+    endedAt.setDate(endedAt.getDate() + 1);
+  }
 
   const durationSec = Math.round((endedAt.getTime() - startedAt.getTime()) / 1000);
   return durationSec > 0 ? durationSec : null;

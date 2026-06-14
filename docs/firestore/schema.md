@@ -248,6 +248,55 @@ type MeetingOutcomeHistoryDocument = {
 };
 ```
 
+### `customers/{customerId}`
+
+```ts
+type CustomerDocument = {
+  companyId: string;
+  companyName: string;
+  contactName: string;
+  phone: string;
+  email: string;
+  industry: string;
+  employeeCount: number | null;
+  assignedUserId: string;
+  assignedUserName: string;
+  productIds: string[];
+  productNames: string[];
+  status:
+    | "not_contacted"
+    | "called"
+    | "meeting_scheduled"
+    | "meeting_done"
+    | "proposal"
+    | "contracted"
+    | "lost"
+    | "dormant";
+  temperature: "high" | "middle" | "low";
+  expectedAmount: number | null;
+  lostReason: string;
+  nextActionTitle: string;
+  nextActionDate: Timestamp | null;
+  lastContactDate: Timestamp | null;
+  memo: string;
+  isContracted: boolean;
+  contractStatus:
+    | "not_contracted"
+    | "considering"
+    | "needs_consultation"
+    | "contracted"
+    | "paused"
+    | "cancelled";
+  contractStartDate: Timestamp | null;
+  contractPlan: string;
+  monthlyAmount: number | null;
+  renewalDate: Timestamp | null;
+  churnRisk: "high" | "middle" | "low";
+  createdAt: Timestamp;
+  updatedAt: Timestamp;
+};
+```
+
 ### `monthlyStats/{month}`
 
 ドキュメントID例: `2026-05`
@@ -299,6 +348,35 @@ type ManualChecklistDocument = {
     label: string;
     description?: string;
   }>;
+  createdAt: Timestamp;
+  updatedAt: Timestamp;
+};
+```
+
+### `salesManuals/{manualId}`
+
+```ts
+type SalesManualDocument = {
+  companyId: string;
+  manualDomain?: "meeting" | "teleapo"; // 未設定時は meeting 扱い
+  title: string;
+  productId: string | null;
+  productName: string;
+  manualCategory: "新規" | "既存" | "";
+  targetSegment: string;
+  content: string;
+  criteria: string[];
+  requiredQuestions: string[];
+  scoringRules: string[];
+  objectionHandling: string[];
+  closingRules: string[];
+  customFields: Array<{
+    id: string;
+    label: string;
+    value: string;
+  }>;
+  status: "active" | "draft";
+  createdBy: string;
   createdAt: Timestamp;
   updatedAt: Timestamp;
 };
@@ -391,16 +469,26 @@ type KnowledgeSearchHistoryDocument = {
 
 ```ts
 type RoleplayScenarioDocument = {
+  companyId: string;
+  roleplayType?: "meeting" | "teleapo"; // 未設定時は meeting 扱い
   title: string;
   description: string;
   productId: string | null;
   productName: string;
+  scenarioCategory: "新規" | "既存" | "";
+  targetSegment: string;
   customerRole: string;
   customerProfile: string;
   goal: string;
   objections: string[];
   evaluationCriteria: string[];
+  customFields: Array<{
+    id: string;
+    label: string;
+    value: string;
+  }>;
   difficulty: "easy" | "normal" | "hard";
+  visibility: "draft" | "all";
   createdBy: string;
   createdAt: Timestamp;
   updatedAt: Timestamp;

@@ -38,12 +38,14 @@ export async function POST(request: Request) {
     product?: ProductPayload;
     category?: unknown;
     targetSegment?: unknown;
+    roleplayType?: unknown;
     meetingInsights?: unknown;
   } | null;
   const companyId = typeof body?.companyId === "string" ? body.companyId : null;
   const product = body?.product ?? {};
   const category = body?.category === "新規" || body?.category === "既存" ? body.category : null;
   const targetSegment = typeof body?.targetSegment === "string" ? body.targetSegment.trim() : "";
+  const roleplayType = body?.roleplayType === "teleapo" ? "teleapo" : "meeting";
   const meetingInsights = readStringArray(body?.meetingInsights).slice(0, 16);
 
   if (!product.name || !category) {
@@ -53,6 +55,9 @@ export async function POST(request: Request) {
   const analysisContext = await loadAnalysisContext({
     companyId,
     productName: product.name,
+    manualCategory: category,
+    targetSegment,
+    manualDomain: roleplayType,
   });
   const scoringRuleInsights = buildScoringRuleInsights(analysisContext);
 

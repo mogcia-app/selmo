@@ -32,7 +32,7 @@ type TalkAnalysis = {
 };
 
 export function RoleplayResultDetailPanel({ result }: { result: RoleplayResult }) {
-  const analysis = buildTalkAnalysis(result.messages);
+  const analysis = buildTalkAnalysis(result.messages, result.evaluationCriteria);
   const { profile } = useAuth();
 
   return (
@@ -52,14 +52,114 @@ export function RoleplayResultDetailPanel({ result }: { result: RoleplayResult }
         <ListBlock title="良かった点" items={result.strengths} />
         <ListBlock title="改善ポイント" items={result.improvements} />
       </div>
-      <div className="mt-3">
-        <ListBlock title="次回使う改善フレーズ" items={result.improvementPhrases} />
-      </div>
+      {result.manualChecklistItems && result.manualChecklistItems.length > 0 ? (
+        <ManualChecklistBlock items={result.manualChecklistItems} score={result.score} />
+      ) : null}
       <TalkAnalysisBlock analysis={analysis} />
       <AdminCommentBlock companyId={profile?.companyId ?? result.companyId} resultId={result.id} />
       <ConversationBlock messages={result.messages} />
     </article>
   );
+}
+
+function ManualChecklistBlock({
+  items,
+  score,
+}: {
+  items: NonNullable<RoleplayResult["manualChecklistItems"]>;
+  score: number;
+}) {
+  const positive = items.reduce((sum, item) => sum + Math.max(item.scoreImpact ?? 0, 0), 0);
+  const negative = items.reduce((sum, item) => sum + Math.min(item.scoreImpact ?? 0, 0), 0);
+  const hasImpacts = items.some((item) => typeof item.scoreImpact === "number" && item.scoreImpact !== 0);
+  const visibleScore = calculateScoreFromImpacts(items) ?? score;
+
+  return (
+    <section className="mt-4 rounded-[24px] border border-[#f0e3c1] bg-[#fffaf0] p-5 shadow-[0_6px_18px_rgba(17,24,39,0.04)]">
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+        <div>
+          <div className="flex flex-wrap items-center gap-2">
+            <h3 className="text-[18px] font-bold text-[#171717]">会社基準に沿った改善ポイント</h3>
+            <span className="rounded-full border border-[#f0d992] bg-white px-3 py-1 text-[12px] font-bold text-[#8a6500]">
+              会社基準: 適用済み
+            </span>
+          </div>
+          <p className="mt-2 text-[13px] leading-6 text-[#6f6250]">
+            管理者が登録した成功基準・商品情報をもとに、次のロープレで直すべきポイントを整理しています。
+          </p>
+        </div>
+        <div className="rounded-[18px] border border-[#f0d992] bg-white px-5 py-4 text-center">
+          <div className="text-[12px] font-bold text-[#8a909b]">準拠スコア</div>
+          <div className="mt-1 text-[28px] font-black text-[#171717]">
+            {visibleScore}<span className="ml-1 text-[14px] font-bold text-[#8a909b]">点</span>
+          </div>
+          <div className="mt-3 border-t border-[#f0e3c1] pt-3">
+            <div className="grid grid-cols-3 gap-2 text-center">
+              <div>
+                <div className="text-[10px] font-bold text-[#8a909b]">達成</div>
+                <div className="mt-0.5 text-[12px] font-black text-[#171717]">{items.filter((item) => item.status === "done").length}/{items.length}</div>
+              </div>
+              <div>
+                <div className="text-[10px] font-bold text-[#8a909b]">加点</div>
+                <div className="mt-0.5 text-[12px] font-black text-[#15803d]">{hasImpacts ? `+${positive}` : "-"}</div>
+              </div>
+              <div>
+                <div className="text-[10px] font-bold text-[#8a909b]">減点</div>
+                <div className="mt-0.5 text-[12px] font-black text-[#d63c2f]">{hasImpacts ? negative : "-"}</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div className="mt-5 rounded-[18px] border border-[#f0e3c1] bg-white p-5">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <div className="text-[15px] font-black text-[#171717]">マニュアルチェック</div>
+            <div className="mt-1 text-[12px] font-bold text-[#8a909b]">登録項目ごとに、ロープレ会話を当てはめています。</div>
+          </div>
+          <div className="text-[12px] font-bold text-[#8a909b]">
+            {items.filter((item) => item.status === "done").length} / {items.length}
+          </div>
+        </div>
+        <div className="mt-4 max-h-[460px] overflow-y-auto pr-1">
+        <div className="divide-y divide-[#f3ead4]">
+          {items.map((item) => {
+            const isDone = item.status === "done";
+            return (
+              <div key={`${item.category}-${item.label}`} className="grid gap-3 py-3 md:grid-cols-[140px_1fr_72px_96px] md:items-start">
+                <span className="w-fit rounded-full border border-[#f0e3c1] bg-[#fffaf0] px-2.5 py-1 text-[11px] font-black text-[#8a6500]">
+                  {item.category}
+                </span>
+                <div className="min-w-0">
+                  <div className="text-[13px] font-bold leading-5 text-[#171717]">{item.label}</div>
+                  {item.reason ? <div className="mt-1 text-[12px] leading-5 text-[#7a808c]">{item.reason}</div> : null}
+                </div>
+                <span className={`text-[12px] font-black ${typeof item.scoreImpact === "number" ? item.scoreImpact >= 0 ? "text-[#15803d]" : "text-[#d63c2f]" : "text-[#a1a7b3]"}`}>
+                  {formatScoreImpact(item.scoreImpact)}
+                </span>
+                <span className={`inline-flex h-7 items-center justify-center rounded-full px-3 text-[11px] font-black ${isDone ? "bg-[#eaf8ef] text-[#15803d]" : "bg-[#fff0ed] text-[#d63c2f]"}`}>
+                  {isDone ? "できている" : "要改善"}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function calculateScoreFromImpacts(items: NonNullable<RoleplayResult["manualChecklistItems"]>) {
+  const positive = items.reduce((sum, item) => sum + Math.max(item.scoreImpact ?? 0, 0), 0);
+  const negative = items.reduce((sum, item) => sum + Math.min(item.scoreImpact ?? 0, 0), 0);
+  if (positive <= 0) return null;
+  return Math.min(100, Math.max(0, Math.round(((positive + negative) / positive) * 100)));
+}
+
+function formatScoreImpact(value: number | null | undefined) {
+  if (typeof value !== "number" || !Number.isFinite(value) || value === 0) return "-";
+  return value > 0 ? `+${value}` : `${value}`;
 }
 
 function AdminCommentBlock({ companyId, resultId }: { companyId?: string | null; resultId: string }) {
@@ -216,11 +316,12 @@ function ListBlock({ title, items }: { title: string; items: string[] }) {
   );
 }
 
-export function buildTalkAnalysis(messages: RoleplayResult["messages"]): TalkAnalysis {
+export function buildTalkAnalysis(messages: RoleplayResult["messages"], criteria: string[] = []): TalkAnalysis {
   const salesTurns = messages
     .map((message, index) => ({ message, index }))
     .filter((item) => item.message.role === "sales");
-  const checklist = analysisDefinitions.map((definition) => {
+  const definitions = buildAnalysisDefinitions(criteria);
+  const checklist = definitions.map((definition) => {
     const evidenceTurn = findEvidenceTurn(definition, salesTurns, messages);
     return {
       id: definition.id,
@@ -240,7 +341,14 @@ export function buildTalkAnalysis(messages: RoleplayResult["messages"]): TalkAna
   };
 }
 
-const analysisDefinitions = [
+type AnalysisDefinition = {
+  id: string;
+  label: string;
+  description: string;
+  keywords?: string[];
+};
+
+const analysisDefinitions: AnalysisDefinition[] = [
   {
     id: "issue-depth",
     label: "課題深掘り",
@@ -271,26 +379,53 @@ const analysisDefinitions = [
     label: "次回アクション確定",
     description: "次回日程・資料送付・見積提出など次の動きを合意できているか",
   },
-] as const;
+];
+
+function buildAnalysisDefinitions(criteria: string[]): AnalysisDefinition[] {
+  const manualDefinitions = criteria
+    .map((criterion) => criterion.trim())
+    .filter(Boolean)
+    .slice(0, 12)
+    .map((criterion, index) => ({
+      id: `manual-${index}`,
+      label: criterion,
+      description: "登録マニュアル/シナリオの採点基準に対して、営業発話内で実行できているかを確認します。",
+      keywords: buildCriterionKeywords(criterion),
+    }));
+
+  return manualDefinitions.length > 0 ? manualDefinitions : analysisDefinitions;
+}
+
+function buildCriterionKeywords(criterion: string) {
+  return criterion
+    .replace(/[：:+\-0-9点「」『』（）()[\]\s]/g, " ")
+    .split(/[、。,.\s/]+/)
+    .map((word) => word.trim())
+    .filter((word) => word.length >= 2)
+    .slice(0, 8);
+}
 
 function findEvidenceTurn(
-  definition: (typeof analysisDefinitions)[number],
+  definition: AnalysisDefinition,
   turns: Array<{ message: RoleplayResult["messages"][number]; index: number }>,
   messages: RoleplayResult["messages"],
 ) {
-  return turns.find((turn) => isEvidenceTurn(definition.id, turn, messages)) ?? null;
+  return turns.find((turn) => isEvidenceTurn(definition, turn, messages)) ?? null;
 }
 
 function isEvidenceTurn(
-  definitionId: (typeof analysisDefinitions)[number]["id"],
+  definition: AnalysisDefinition,
   turn: { message: RoleplayResult["messages"][number]; index: number },
   messages: RoleplayResult["messages"],
 ) {
   const text = turn.message.content;
 
   if (hasMetaTalk(text)) return false;
+  if (definition.keywords?.length) {
+    return definition.keywords.some((keyword) => text.includes(keyword));
+  }
 
-  switch (definitionId) {
+  switch (definition.id) {
     case "issue-depth":
       return hasPriorCustomerIssue(messages, turn.index) && isQuestionLike(text) && includesAny(text, issueDepthKeywords);
     case "value-connection":

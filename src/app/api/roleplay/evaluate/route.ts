@@ -1,0 +1,449 @@
+import { NextRequest, NextResponse } from "next/server";
+
+import { MONTHLY_AI_LIMIT_MESSAGE } from "@/lib/ai-usage-limit";
+import {
+  assertMonthlyAiUsageAvailable,
+  estimateChatCostUsd,
+  saveAiUsageLog,
+  saveSystemErrorLog,
+} from "@/lib/server/operational-logs";
+import type { AnalysisContext } from "@/lib/server/analysis-context";
+import { buildAnalysisContextPrompt, loadAnalysisContext } from "@/lib/server/analysis-context";
+
+type RoleplayMessage = {
+  role: "customer" | "sales";
+  content: string;
+};
+
+type RoleplayScenarioPayload = {
+  title: string;
+  roleplayType?: "meeting" | "teleapo";
+  productName?: string;
+  scenarioCategory?: string;
+  targetSegment?: string;
+  customerRole?: string;
+  customerProfile?: string;
+  goal?: string;
+  objections?: string[];
+  evaluationCriteria?: string[];
+  customFields?: Array<{ label?: string; value?: string }>;
+  difficulty?: "easy" | "normal" | "hard";
+};
+
+type EvaluationResponse = {
+  score?: number;
+  summary?: string;
+  strengths?: string[];
+  improvements?: string[];
+  improvementPhrases?: string[];
+  manualChecklistItems?: Array<{
+    category?: string;
+    label?: string;
+    status?: "done" | "missing";
+    reason?: string;
+    scoreImpact?: number | null;
+  }>;
+};
+
+type ManualChecklistEntry = {
+  category: string;
+  label: string;
+  display: string;
+};
+
+export async function POST(request: NextRequest) {
+  const body = (await request.json()) as {
+    companyId?: string | null;
+    userId?: string | null;
+    scenario?: RoleplayScenarioPayload;
+    messages?: RoleplayMessage[];
+  };
+  const model = process.env.OPENAI_CHAT_MODEL ?? "gpt-4o-mini";
+
+  if (!body.scenario || !Array.isArray(body.messages) || body.messages.length < 2) {
+    return NextResponse.json({ error: "シナリオと会話ログが必要です。" }, { status: 400 });
+  }
+
+  if (!process.env.OPENAI_API_KEY) {
+    return NextResponse.json({ error: "AI評価を実行できませんでした。" }, { status: 503 });
+  }
+
+  try {
+    const usageAvailability = await assertMonthlyAiUsageAvailable({ userId: body.userId });
+    if (!usageAvailability.allowed) {
+      return NextResponse.json(
+        {
+          error: MONTHLY_AI_LIMIT_MESSAGE,
+          used: usageAvailability.used,
+          limit: usageAvailability.limit,
+        },
+        { status: 429 },
+      );
+    }
+
+    const roleplayType = body.scenario.roleplayType === "teleapo" ? "teleapo" : "meeting";
+    const analysisContext = await loadAnalysisContext({
+      companyId: body.companyId,
+      productName: body.scenario.productName,
+      manualCategory: body.scenario.scenarioCategory,
+      targetSegment: body.scenario.targetSegment,
+      manualDomain: roleplayType,
+    });
+    const contextPrompt = buildAnalysisContextPrompt(analysisContext);
+    const response = await fetchWithTimeout("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+      },
+      body: JSON.stringify({
+        model,
+        temperature: 0.25,
+        response_format: {
+          type: "json_schema",
+          json_schema: {
+            name: "roleplay_evaluation",
+            schema: {
+              type: "object",
+              additionalProperties: false,
+              properties: {
+                score: { type: "number" },
+                summary: { type: "string" },
+                strengths: { type: "array", items: { type: "string" }, minItems: 2, maxItems: 5 },
+                improvements: { type: "array", items: { type: "string" }, minItems: 2, maxItems: 6 },
+                improvementPhrases: { type: "array", items: { type: "string" }, minItems: 2, maxItems: 5 },
+                manualChecklistItems: {
+                  type: "array",
+                  items: {
+                    type: "object",
+                    additionalProperties: false,
+                    properties: {
+                      category: { type: "string" },
+                      label: { type: "string" },
+                      status: { type: "string", enum: ["done", "missing"] },
+                      reason: { type: "string" },
+                      scoreImpact: { type: ["number", "null"] },
+                    },
+                    required: ["category", "label", "status", "reason", "scoreImpact"],
+                  },
+                },
+              },
+              required: ["score", "summary", "strengths", "improvements", "improvementPhrases", "manualChecklistItems"],
+            },
+          },
+        },
+        messages: [
+          {
+            role: "system",
+            content: buildEvaluationSystemPrompt(roleplayType, Boolean(analysisContext.manual)),
+          },
+          {
+            role: "user",
+            content: [
+              buildScenarioPrompt(body.scenario),
+              contextPrompt ? `会社基準・商材情報:\n${contextPrompt}` : "会社基準・商材情報: 未登録",
+              `会話ログ:\n${formatMessages(body.messages)}`,
+            ].join("\n\n"),
+          },
+        ],
+      }),
+    });
+
+    const rawText = await response.text();
+    if (!response.ok) {
+      throw new Error(`OpenAI がエラーを返しました。${response.statusText}`);
+    }
+
+    const data = JSON.parse(rawText) as {
+      choices?: Array<{ message?: { content?: string | null } }>;
+      usage?: { prompt_tokens?: number; completion_tokens?: number };
+    };
+    const content = data.choices?.[0]?.message?.content;
+    if (!content) {
+      throw new Error("AI評価本文が返りませんでした。");
+    }
+    const evaluation = normalizeEvaluation(JSON.parse(content) as EvaluationResponse, analysisContext.manual);
+
+    await saveAiUsageLog({
+      companyId: body.companyId,
+      userId: body.userId,
+      feature: "roleplay",
+      model,
+      inputTokens: data.usage?.prompt_tokens ?? null,
+      outputTokens: data.usage?.completion_tokens ?? null,
+      estimatedCostUsd: estimateChatCostUsd({
+        model,
+        inputTokens: data.usage?.prompt_tokens ?? null,
+        outputTokens: data.usage?.completion_tokens ?? null,
+      }),
+      status: "success",
+    });
+
+    return NextResponse.json(evaluation);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "AIロープレ評価に失敗しました。";
+    await saveAiUsageLog({
+      companyId: body.companyId,
+      userId: body.userId,
+      feature: "roleplay",
+      model,
+      status: "failed",
+      errorMessage: message,
+    });
+    await saveSystemErrorLog({
+      companyId: body.companyId,
+      userId: body.userId,
+      kind: "OpenAI",
+      message,
+      severity: "warning",
+      source: "api/roleplay/evaluate",
+    });
+    return NextResponse.json({ error: message }, { status: 500 });
+  }
+}
+
+function buildEvaluationSystemPrompt(roleplayType: "meeting" | "teleapo", hasManual: boolean) {
+  const domainLabel = roleplayType === "teleapo" ? "テレアポ" : "商談";
+  const finalAction = roleplayType === "teleapo" ? "アポ打診・日程提案" : "クロージング・次回アクション";
+
+  return [
+    `あなたは営業${domainLabel}ロープレの評価者です。`,
+    "会話ログを時系列で読み、顧客発話に対する営業返答の質を評価してください。",
+    "キーワードの有無だけで採点せず、直前の顧客の質問・懸念・反論に正面から答えているか、論点をずらしていないか、会話を前に進めているかを重視してください。",
+    "顧客の発話を受け止めずに一般的な商品説明へ移った場合、返答品質を低く評価してください。",
+    "良い返答は、顧客の発言を受け止め、必要な追加質問をし、商材価値・事例・条件確認へ自然につなげています。",
+    "会社基準、商材情報、マニュアル、シナリオ採点基準、自由項目を全て分類軸として使ってください。",
+    hasManual
+      ? "マニュアルがあるため、manualChecklistItems には登録マニュアルの評価基準・必須ヒアリング・クロージング基準の全項目を1件ずつ入れてください。AIの判断で項目を増やしたり言い換えたりしてはいけません。"
+      : "マニュアルがない場合、manualChecklistItems は空配列にしてください。",
+    "manualChecklistItems の category は 評価基準 / 必須ヒアリング / クロージング基準 のいずれか、label は登録項目の文言そのまま、status は done または missing にしてください。",
+    "ロープレ会話上で実質的に確認・説明・合意できている場合だけ done にしてください。根拠が弱い、触れていない、曖昧な場合は missing です。",
+    `評価軸は、課題把握、返答の的確さ、価値接続、反論対応、予算/決裁/時期確認、${finalAction}です。`,
+    "strengths と improvements は、できるだけ会話中の具体的な場面に触れてください。",
+    "improvementPhrases は次回そのまま使える自然な営業トークにしてください。",
+    "根拠のない高得点は禁止です。会話が短い、質問に答えていない、マニュアル項目が未達なら厳しめに採点してください。",
+    "日本語で返してください。",
+  ].join("\n");
+}
+
+function buildScenarioPrompt(scenario: RoleplayScenarioPayload) {
+  return [
+    `シナリオ: ${scenario.title}`,
+    `種別: ${scenario.roleplayType === "teleapo" ? "テレアポ" : "商談"}`,
+    `商材: ${scenario.productName ?? ""}`,
+    `カテゴリー: ${scenario.scenarioCategory ?? ""}`,
+    `ターゲット層: ${scenario.targetSegment ?? ""}`,
+    `顧客役職: ${scenario.customerRole ?? ""}`,
+    `顧客プロフィール: ${scenario.customerProfile ?? ""}`,
+    `ゴール: ${scenario.goal ?? ""}`,
+    `想定反論: ${(scenario.objections ?? []).join(" / ")}`,
+    `独自採点項目: ${(scenario.evaluationCriteria ?? []).join(" / ")}`,
+    `自由項目: ${readScenarioCustomFields(scenario.customFields).join(" / ") || "なし"}`,
+  ].join("\n");
+}
+
+function formatMessages(messages: RoleplayMessage[]) {
+  return messages
+    .map((message, index) => `${index + 1}. ${message.role === "sales" ? "営業" : "顧客"}: ${message.content}`)
+    .join("\n");
+}
+
+function normalizeEvaluation(value: EvaluationResponse, manual: AnalysisContext["manual"]) {
+  const manualChecklistItems = applyManualScoreImpacts(manual, normalizeManualChecklistItems(value.manualChecklistItems, manual));
+  const score = manualChecklistItems.length > 0
+    ? calculateManualChecklistScore(manual, manualChecklistItems)
+    : clampNumber(value.score, 0, 100, 40);
+
+  return {
+    score,
+    summary: readString(value.summary, "ロープレ評価を生成しました。"),
+    strengths: readStringArray(value.strengths).slice(0, 5),
+    improvements: readStringArray(value.improvements).slice(0, 6),
+    improvementPhrases: readStringArray(value.improvementPhrases).slice(0, 5),
+    manualChecklistItems,
+  };
+}
+
+function normalizeManualChecklistItems(value: unknown, manual: AnalysisContext["manual"]) {
+  if (!manual) return [];
+
+  const checklist = buildManualChecklist(manual);
+  const returnedItems = Array.isArray(value) ? value : [];
+  const returnedByDisplay = new Map<string, { status: "done" | "missing"; reason: string; scoreImpact: number | null }>();
+
+  for (const item of returnedItems) {
+    if (!item || typeof item !== "object") continue;
+    const data = item as NonNullable<EvaluationResponse["manualChecklistItems"]>[number];
+    const matched = findManualChecklistEntry(data.label ?? "", checklist);
+    if (!matched || (data.status !== "done" && data.status !== "missing")) continue;
+    returnedByDisplay.set(matched.display, {
+      status: data.status,
+      reason: typeof data.reason === "string" ? data.reason.trim() : "",
+      scoreImpact: typeof data.scoreImpact === "number" && Number.isFinite(data.scoreImpact) ? Math.round(data.scoreImpact) : null,
+    });
+  }
+
+  return checklist.map((entry) => {
+    const returned = returnedByDisplay.get(entry.display);
+    return {
+      category: entry.category,
+      label: entry.label,
+      status: returned?.status ?? "missing",
+      reason: returned?.reason ?? "",
+      scoreImpact: returned?.scoreImpact ?? null,
+    };
+  });
+}
+
+function applyManualScoreImpacts(
+  manual: AnalysisContext["manual"],
+  items: Array<{ category: string; label: string; status: "done" | "missing"; reason: string; scoreImpact: number | null }>,
+) {
+  if (!manual || manual.scoringRules.length === 0) return items;
+
+  const parsedRules = manual.scoringRules
+    .map(parseScoringRule)
+    .filter((rule): rule is { label: string; points: number } => Boolean(rule));
+  if (parsedRules.length === 0) return items;
+
+  return items.map((item) => {
+    const matchedRulePoints = parsedRules
+      .filter((rule) => {
+        const normalizedRule = normalizeCriteriaText(rule.label);
+        const normalizedItem = normalizeCriteriaText(item.label);
+        if (!isScoringRuleMatched(normalizedRule, normalizedItem)) return false;
+        return (item.status === "done" && rule.points > 0) || (item.status === "missing" && rule.points < 0);
+      })
+      .reduce((sum, rule) => sum + rule.points, 0);
+
+    return {
+      ...item,
+      scoreImpact: matchedRulePoints !== 0 ? matchedRulePoints : item.scoreImpact,
+    };
+  });
+}
+
+function buildManualChecklist(manual: AnalysisContext["manual"]) {
+  if (!manual) return [];
+  return [
+    ...manual.criteria.map((item) => ({ category: "評価基準", label: item.trim(), display: item.trim() })),
+    ...manual.requiredQuestions.map((item) => ({ category: "必須ヒアリング", label: item.trim(), display: `必須ヒアリング: ${item.trim()}` })),
+    ...manual.closingRules.map((item) => ({ category: "クロージング基準", label: item.trim(), display: `クロージング: ${item.trim()}` })),
+  ].filter((item) => item.label);
+}
+
+function findManualChecklistEntry(value: string, checklist: ManualChecklistEntry[]) {
+  const normalizedValue = normalizeCriteriaText(value);
+  if (!normalizedValue) return null;
+
+  return checklist.find((item) => {
+    const normalizedDisplay = normalizeCriteriaText(item.display);
+    const normalizedLabel = normalizeCriteriaText(item.label);
+    return normalizedDisplay === normalizedValue ||
+      normalizedLabel === normalizedValue ||
+      normalizedDisplay.includes(normalizedValue) ||
+      normalizedValue.includes(normalizedDisplay) ||
+      normalizedLabel.includes(normalizedValue) ||
+      normalizedValue.includes(normalizedLabel);
+  }) ?? null;
+}
+
+function calculateManualChecklistScore(
+  manual: AnalysisContext["manual"],
+  items: Array<{ category: string; label: string; status: "done" | "missing" }>,
+) {
+  const ruleScore = calculateManualScoringRuleScore(manual, items);
+  if (ruleScore !== null) return ruleScore;
+
+  const doneCount = items.filter((item) => item.status === "done").length;
+  return clampNumber((doneCount / items.length) * 100, 0, 100, 40);
+}
+
+function calculateManualScoringRuleScore(
+  manual: AnalysisContext["manual"],
+  items: Array<{ category: string; label: string; status: "done" | "missing"; scoreImpact?: number | null }>,
+) {
+  if (!manual || manual.scoringRules.length === 0) return null;
+
+  const parsedRules = manual.scoringRules
+    .map(parseScoringRule)
+    .filter((rule): rule is { label: string; points: number } => Boolean(rule));
+  if (parsedRules.length === 0) return null;
+
+  const positiveTotal = parsedRules.filter((rule) => rule.points > 0).reduce((sum, rule) => sum + rule.points, 0);
+  const rawScore = items.reduce((sum, item) => sum + (item.scoreImpact ?? 0), 0);
+
+  if (positiveTotal <= 0) return clampNumber(rawScore, 0, 100, 0);
+  return clampNumber((rawScore / positiveTotal) * 100, 0, 100, 0);
+}
+
+function parseScoringRule(rule: string) {
+  const match = rule.match(/(.+?)[：:]\s*([+-]?\d+)\s*点?/u);
+  if (!match) return null;
+  return {
+    label: match[1]?.trim() ?? "",
+    points: Number(match[2]),
+  };
+}
+
+function isScoringRuleMatched(normalizedRule: string, normalizedText: string) {
+  return buildScoringRuleKeywords(normalizedRule).some((keyword) => normalizedText.includes(keyword));
+}
+
+function buildScoringRuleKeywords(normalizedRule: string) {
+  const withoutResultWords = normalizedRule
+    .replace(/あり|なし|確認|未確認|設定|説明|イメージ|価格のみ|一方的な|商品説明/g, "")
+    .trim();
+  const keywords = [normalizedRule, withoutResultWords].filter((keyword) => keyword.length >= 2);
+
+  if (/課題/.test(normalizedRule)) keywords.push("課題");
+  if (/採用/.test(normalizedRule)) keywords.push("採用課題");
+  if (/売上/.test(normalizedRule)) keywords.push("売上課題");
+  if (/決裁/.test(normalizedRule)) keywords.push("決裁者");
+  if (/予算/.test(normalizedRule)) keywords.push("予算感");
+  if (/導入時期/.test(normalizedRule)) keywords.push("導入時期");
+  if (/導入後/.test(normalizedRule)) keywords.push("導入後の未来像");
+  if (/次回アクション/.test(normalizedRule)) keywords.push("次回アクション");
+
+  return Array.from(new Set(keywords.map(normalizeCriteriaText).filter((keyword) => keyword.length >= 2)));
+}
+
+function normalizeCriteriaText(value: string) {
+  return value
+    .replace(/^(評価基準|必須ヒアリング|クロージング|クロージング基準|未達|達成|不足)\s*[:：]\s*/u, "")
+    .replace(/\s+/g, "")
+    .trim()
+    .toLowerCase();
+}
+
+function readScenarioCustomFields(fields: RoleplayScenarioPayload["customFields"]) {
+  return (fields ?? [])
+    .map((field) => {
+      const label = typeof field.label === "string" ? field.label.trim() : "";
+      const value = typeof field.value === "string" ? field.value.trim() : "";
+      return label && value ? `${label}: ${value}` : "";
+    })
+    .filter(Boolean)
+    .slice(0, 12);
+}
+
+function readString(value: unknown, fallback = "") {
+  return typeof value === "string" && value.trim() ? value.trim() : fallback;
+}
+
+function readStringArray(value: unknown) {
+  return Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === "string" && Boolean(item.trim())).map((item) => item.trim())
+    : [];
+}
+
+function clampNumber(value: unknown, min: number, max: number, fallback: number) {
+  return typeof value === "number" && Number.isFinite(value) ? Math.min(max, Math.max(min, Math.round(value))) : fallback;
+}
+
+function fetchWithTimeout(url: string, init: RequestInit, timeoutMs = 30000) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+
+  return fetch(url, { ...init, signal: controller.signal }).finally(() => clearTimeout(timeout));
+}

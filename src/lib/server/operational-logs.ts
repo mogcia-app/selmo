@@ -1,6 +1,6 @@
 import { FieldValue } from "firebase-admin/firestore";
 
-import { SALES_MONTHLY_AI_USAGE_LIMIT } from "@/lib/ai-usage-limit";
+import { SALES_MONTHLY_AI_USAGE_LIMIT, isSalesMonthlyAiUsageFeature } from "@/lib/ai-usage-limit";
 import { resolveCompanyId } from "@/lib/firebase/company";
 import { getFirebaseAdminDb } from "@/lib/firebase/admin";
 
@@ -53,17 +53,31 @@ export async function readMonthlyAiUsageCount(input: { userId?: string | null })
   monthStart.setDate(1);
   monthStart.setHours(0, 0, 0, 0);
 
-  const snapshot = await db
+  const usageSnapshot = await db
     .collection("aiUsageLogs")
     .where("userId", "==", input.userId)
     .where("status", "==", "success")
     .get();
+  const roleplaySnapshot = await db
+    .collection("roleplayResults")
+    .where("userId", "==", input.userId)
+    .get();
 
-  return snapshot.docs.filter((doc) => {
-    const createdAt = doc.data().createdAt;
+  const meetingAnalysisCount = usageSnapshot.docs.filter((doc) => {
+    const data = doc.data();
+    const createdAt = data.createdAt;
+    const date = typeof createdAt?.toDate === "function" ? createdAt.toDate() as Date : null;
+    const feature = typeof data.feature === "string" ? data.feature : null;
+    return Boolean(date && date >= monthStart && isSalesMonthlyAiUsageFeature(feature));
+  }).length;
+  const roleplayCount = roleplaySnapshot.docs.filter((doc) => {
+    const data = doc.data();
+    const createdAt = data.createdAt;
     const date = typeof createdAt?.toDate === "function" ? createdAt.toDate() as Date : null;
     return Boolean(date && date >= monthStart);
   }).length;
+
+  return meetingAnalysisCount + roleplayCount;
 }
 
 export async function assertMonthlyAiUsageAvailable(input: { userId?: string | null }) {
@@ -128,10 +142,6 @@ export function estimateTranscriptionCostUsd(input: {
 
   if (minutes <= 0) {
     return null;
-  }
-
-  if (input.model === "whisper-1") {
-    return minutes * 0.006;
   }
 
   if (input.model === "gpt-4o-transcribe" || input.model === "gpt-4o-transcribe-diarize") {

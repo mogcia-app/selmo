@@ -15,7 +15,7 @@ import {
 } from "firebase/firestore";
 
 import { useAuth } from "@/features/auth/auth-provider";
-import { SALES_MONTHLY_AI_USAGE_LIMIT } from "@/lib/ai-usage-limit";
+import { SALES_MONTHLY_AI_USAGE_LIMIT, isSalesMonthlyAiUsageFeature } from "@/lib/ai-usage-limit";
 import type { AppUserProfile } from "@/lib/firebase/auth";
 import { assertFirebaseClient } from "@/lib/firebase/client";
 import {
@@ -39,7 +39,7 @@ type NavItem = {
 
 type AiUsageState = {
   used: number;
-  transcriptionCount: number;
+  meetingAnalysisCount: number;
   roleplayCount: number;
   isLoading: boolean;
 };
@@ -117,7 +117,7 @@ export function DashboardShell({ children, variant }: DashboardShellProps) {
   const [isNotificationOpen, setIsNotificationOpen] = useState(false);
   const [aiUsage, setAiUsage] = useState<AiUsageState>({
     used: 0,
-    transcriptionCount: 0,
+    meetingAnalysisCount: 0,
     roleplayCount: 0,
     isLoading: true,
   });
@@ -151,7 +151,7 @@ export function DashboardShell({ children, variant }: DashboardShellProps) {
 
   useEffect(() => {
     if (variant !== "sales" || profile?.role !== "sales" || !profile?.companyId || !profile.uid) {
-      setAiUsage({ used: 0, transcriptionCount: 0, roleplayCount: 0, isLoading: false });
+      setAiUsage({ used: 0, meetingAnalysisCount: 0, roleplayCount: 0, isLoading: false });
       return;
     }
 
@@ -164,27 +164,55 @@ export function DashboardShell({ children, variant }: DashboardShellProps) {
       where("userId", "==", profile.uid),
       where("status", "==", "success"),
     );
+    const roleplayResultsQuery = query(
+      collection(firestore, "roleplayResults"),
+      where("companyId", "==", profile.companyId),
+      where("userId", "==", profile.uid),
+    );
+    let usageLogs: AiUsageLog[] = [];
+    let roleplayResultDates: Array<Date | null> = [];
 
-    return onSnapshot(
+    function updateUsage() {
+      const monthlyLogs = usageLogs.filter((log) => isCurrentMonth(log.createdAt));
+      const meetingAnalysisCount = monthlyLogs.filter((log) => isSalesMonthlyAiUsageFeature(log.feature)).length;
+      const roleplayCount = roleplayResultDates.filter((date) => isCurrentMonth(date)).length;
+
+      setAiUsage({
+        used: meetingAnalysisCount + roleplayCount,
+        meetingAnalysisCount,
+        roleplayCount,
+        isLoading: false,
+      });
+    }
+
+    const unsubscribeUsage = onSnapshot(
       logsQuery,
       (snapshot) => {
-        const monthlyLogs = snapshot.docs
-          .map(mapAiUsageLog)
-          .filter((log) => isCurrentMonth(log.createdAt));
-        const transcriptionCount = monthlyLogs.filter((log) => log.feature === "transcription").length;
-        const roleplayCount = monthlyLogs.filter((log) => log.feature === "roleplay").length;
-
-        setAiUsage({
-          used: monthlyLogs.length,
-          transcriptionCount,
-          roleplayCount,
-          isLoading: false,
-        });
+        usageLogs = snapshot.docs.map(mapAiUsageLog);
+        updateUsage();
       },
       () => {
-        setAiUsage({ used: 0, transcriptionCount: 0, roleplayCount: 0, isLoading: false });
+        setAiUsage({ used: 0, meetingAnalysisCount: 0, roleplayCount: 0, isLoading: false });
       },
     );
+    const unsubscribeRoleplay = onSnapshot(
+      roleplayResultsQuery,
+      (snapshot) => {
+        roleplayResultDates = snapshot.docs.map((docSnapshot) => {
+          const createdAt = docSnapshot.data().createdAt;
+          return createdAt instanceof Timestamp ? createdAt.toDate() : null;
+        });
+        updateUsage();
+      },
+      () => {
+        setAiUsage({ used: 0, meetingAnalysisCount: 0, roleplayCount: 0, isLoading: false });
+      },
+    );
+
+    return () => {
+      unsubscribeUsage();
+      unsubscribeRoleplay();
+    };
   }, [profile?.companyId, profile?.role, profile?.uid, variant]);
 
   return (
@@ -578,7 +606,7 @@ function AiUsageGauge({ profile, usage }: { profile: AppUserProfile | null; usag
   return (
     <div
       className="min-w-[168px] px-1 py-1"
-      title={`今月の文字起こし ${usage.transcriptionCount}回 / ロープレ ${usage.roleplayCount}回`}
+      title={`今月の商談・テレアポ分析 ${usage.meetingAnalysisCount}回 / ロープレ ${usage.roleplayCount}回`}
     >
       <div className="flex items-center justify-between gap-3">
         <span className="text-[11px] font-black text-[#8a6500]">AI回数</span>

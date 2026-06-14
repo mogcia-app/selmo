@@ -21,18 +21,18 @@ import { canUseSalesDomain } from "@/lib/sales-domains";
 const transcriptionRequestTimeoutMs = 10 * 60 * 1000;
 const transientBannerDurationMs = 5 * 1000;
 const monthlyLimitMessage = MONTHLY_AI_LIMIT_MESSAGE;
+type ConversationSpeaker = "sales" | "customer" | "participant" | "unknown";
+
 type DisplayLog = {
   id: string;
   startSec?: number | null;
   endSec?: number | null;
-  speaker: "speaker_1" | "speaker_2" | "unknown";
+  speaker: ConversationSpeaker;
   label: string;
   text: string;
   confidence: "estimated" | "aligned";
   kind: "speech" | "backchannel" | "unknown";
 };
-
-type TranscriptSidebarTab = "keywords" | "focusWords" | "important" | "checkpoints";
 
 type TranscriptFocusWordCategory = {
   id: "issues" | "concerns" | "value" | "actions";
@@ -79,7 +79,6 @@ export function MeetingDetailScreen({
   const [isTranscribing, setIsTranscribing] = useState(false);
   const [logSearch, setLogSearch] = useState("");
   const [transcriptViewMode, setTranscriptViewMode] = useState("all");
-  const [transcriptSidebarTab, setTranscriptSidebarTab] = useState<TranscriptSidebarTab>("keywords");
   const [selectedTranscriptBlockIndex, setSelectedTranscriptBlockIndex] = useState<number | null>(null);
   const [transcriptionVisualProgress, setTranscriptionVisualProgress] = useState(12);
   const [transcriptScrollbar, setTranscriptScrollbar] = useState<ScrollbarMetrics>({
@@ -88,9 +87,19 @@ export function MeetingDetailScreen({
     isScrollable: false,
   });
   const [editableLogs, setEditableLogs] = useState<DisplayLog[]>([]);
+  const [selectedLogIds, setSelectedLogIds] = useState<string[]>([]);
+  const [isTranscriptEditMode, setIsTranscriptEditMode] = useState(false);
+  const [speakerNames, setSpeakerNames] = useState<Record<ConversationSpeaker, string>>({
+    sales: "営業",
+    customer: "顧客",
+    participant: "同席者",
+    unknown: "不明",
+  });
+  const [isSavingConversationLogs, setIsSavingConversationLogs] = useState(false);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const transcriptBlockRefs = useRef<Array<HTMLElement | null>>([]);
   const transcriptScrollRef = useRef<HTMLDivElement | null>(null);
+  const logTextAreaRefs = useRef<Record<string, HTMLTextAreaElement | null>>({});
   const summaryGenerationRequestedRef = useRef(false);
 
   useEffect(() => {
@@ -128,6 +137,14 @@ export function MeetingDetailScreen({
     }
 
   }, [meeting, profile]);
+
+  const salesSpeakerName = useMemo(() => {
+    if (profile?.uid && meeting?.userId && profile.uid === meeting.userId) {
+      return buildSalesSpeakerName(profile.name);
+    }
+
+    return null;
+  }, [meeting?.userId, profile?.name, profile?.uid]);
 
   useEffect(() => {
     if (meeting?.transcriptionProbeStatus === "completed" || meeting?.transcriptionProbeStatus === "failed") {
@@ -174,7 +191,7 @@ export function MeetingDetailScreen({
     };
   }, [isTranscribing, meeting?.audioDurationSec]);
 
-  const generateAiSummaryInBackground = useCallback(async (transcriptText: string) => {
+  const generateAiSummaryInBackground = useCallback(async (transcriptText: string, logs: DisplayLog[], options?: { countUsage?: boolean }) => {
     try {
       await saveMeetingAiSummary(meetingId, {
         status: "running",
@@ -196,6 +213,14 @@ export function MeetingDetailScreen({
           customerType: meeting?.customerType ?? null,
           salesDomain: meeting?.salesDomain ?? null,
           transcriptText,
+          countUsage: options?.countUsage ?? true,
+          conversationLogs: logs
+            .map((log) => ({
+              speaker: log.speaker,
+              label: log.label || defaultSpeakerName(log.speaker),
+              text: log.text.trim(),
+            }))
+            .filter((log) => log.text),
         }),
         timeoutMs: null,
       });
@@ -427,8 +452,17 @@ export function MeetingDetailScreen({
   ]);
 
   useEffect(() => {
-    setEditableLogs(baseLogs);
-  }, [baseLogs]);
+    const derivedNames = deriveSpeakerNamesFromLogs(baseLogs);
+    const salesLabel = salesSpeakerName ?? derivedNames.sales ?? defaultSpeakerName("sales");
+    setEditableLogs(baseLogs.map((log) => (log.speaker === "sales" ? { ...log, label: salesLabel } : log)));
+    setSelectedLogIds([]);
+    setIsTranscriptEditMode(false);
+    setSpeakerNames((current) => ({
+      ...current,
+      ...derivedNames,
+      sales: salesLabel,
+    }));
+  }, [baseLogs, salesSpeakerName]);
 
   const aiSummary = useMemo<NonNullable<MeetingRecord["aiSummary"]>>(
     () => meeting?.aiSummary ?? buildAiSummary(meeting?.transcriptionProbeText, editableLogs),
@@ -472,7 +506,11 @@ export function MeetingDetailScreen({
   const exportTranscriptText = useMemo(
     () =>
       editableLogs
-        .map((log) => log.text.trim())
+        .map((log) => {
+          const text = log.text.trim();
+          if (!text) return "";
+          return `${log.label || defaultSpeakerName(log.speaker)}: ${text}`;
+        })
         .filter(Boolean)
         .join("\n\n"),
     [editableLogs],
@@ -493,39 +531,42 @@ export function MeetingDetailScreen({
     }
 
     summaryGenerationRequestedRef.current = true;
-    void generateAiSummaryInBackground(transcriptText);
+    void generateAiSummaryInBackground(transcriptText, editableLogs, { countUsage: true });
   }, [
+    editableLogs,
     exportTranscriptText,
     generateAiSummaryInBackground,
     isSummaryView,
     meeting,
   ]);
-  const transcriptImportantLogs = useMemo(
-    () => buildImportantTranscriptLogs(editableLogs).slice(0, 3),
-    [editableLogs],
-  );
   const transcriptFrequentWords = useMemo(() => buildFrequentWords(editableLogs), [editableLogs]);
-  const transcriptFocusWords = useMemo(() => buildTranscriptFocusWords(editableLogs), [editableLogs]);
-  const transcriptAiExtracts = useMemo(
-    () => buildGroundedTranscriptExtractLogs(editableLogs).slice(0, 4),
+  const customerFrequentWords = useMemo(
+    () => buildFrequentWords(editableLogs.filter((log) => inferConversationSide(log) === "customer")),
     [editableLogs],
   );
+  const transcriptFocusWords = useMemo(() => buildTranscriptFocusWords(editableLogs), [editableLogs]);
+  const isAiSummaryRunning = meeting?.aiSummaryStatus === "running";
+  const canRunAiSummary = exportTranscriptText.trim().length > 0 || Boolean(meeting?.transcriptionProbeText?.trim());
   const transcriptReadingBlocks = useMemo(() => buildTranscriptReadingBlocks(editableLogs), [editableLogs]);
   const normalizedLogSearch = logSearch.trim().toLowerCase();
-  const visibleTranscriptReadingBlocks = useMemo(() => {
-    const indexedBlocks = transcriptReadingBlocks.map((block, index) => ({ block, index }));
+  const visibleEditableLogs = useMemo(() => {
+    const indexedLogs = editableLogs.map((log, index) => ({ log, index }));
+    const speakerFilteredLogs =
+      transcriptViewMode === "all"
+        ? indexedLogs
+        : indexedLogs.filter(({ log }) => log.speaker === transcriptViewMode);
 
     if (!normalizedLogSearch) {
-      return indexedBlocks;
+      return speakerFilteredLogs;
     }
 
-    return indexedBlocks.filter(({ block }) =>
-      block.text.toLowerCase().includes(normalizedLogSearch),
+    return speakerFilteredLogs.filter(({ log }) =>
+      `${log.label} ${log.text}`.toLowerCase().includes(normalizedLogSearch),
     );
-  }, [normalizedLogSearch, transcriptReadingBlocks]);
+  }, [editableLogs, normalizedLogSearch, transcriptViewMode]);
 
   function handleJumpToTranscriptLog(log: DisplayLog) {
-    const targetIndex = findTranscriptReadingBlockIndexForLog(log, transcriptReadingBlocks);
+    const targetIndex = editableLogs.findIndex((item) => item.id === log.id);
 
     if (targetIndex < 0) {
       return;
@@ -534,6 +575,118 @@ export function MeetingDetailScreen({
     setSelectedTranscriptBlockIndex(targetIndex);
     const target = transcriptBlockRefs.current[targetIndex];
     target?.scrollIntoView({ block: "center", behavior: "smooth" });
+  }
+
+  function handleRegenerateAiSummary() {
+    const transcriptText = exportTranscriptText.trim() || meeting?.transcriptionProbeText?.trim() || "";
+    if (!transcriptText) {
+      setErrorMessage("再分析できる文字起こし本文がありません。");
+      return;
+    }
+
+    summaryGenerationRequestedRef.current = true;
+    void generateAiSummaryInBackground(transcriptText, editableLogs, { countUsage: false });
+  }
+
+  function handleUpdateLogSpeaker(logId: string, speaker: ConversationSpeaker) {
+    setEditableLogs((current) =>
+      current.map((log) => (log.id === logId ? { ...log, speaker, label: speakerNames[speaker], kind: speaker === "unknown" ? "unknown" : "speech" } : log)),
+    );
+  }
+
+  function handleToggleLogSelection(logId: string, checked: boolean) {
+    setSelectedLogIds((current) => checked ? Array.from(new Set([...current, logId])) : current.filter((id) => id !== logId));
+  }
+
+  function handleApplySpeakerToSelected(speaker: ConversationSpeaker) {
+    setEditableLogs((current) =>
+      current.map((log) =>
+        selectedLogIds.includes(log.id)
+          ? { ...log, speaker, label: speakerNames[speaker], kind: speaker === "unknown" ? "unknown" : "speech" }
+          : log,
+      ),
+    );
+  }
+
+  function handleSplitLogAtIndex(logId: string, splitIndex: number) {
+    setEditableLogs((current) => {
+      const index = current.findIndex((log) => log.id === logId);
+      const log = current[index];
+      if (!log || splitIndex <= 0 || splitIndex >= log.text.length) {
+        setErrorMessage("分割できる位置を選択してください。");
+        return current;
+      }
+
+      const before = log.text.slice(0, splitIndex).trim();
+      const after = log.text.slice(splitIndex).trim();
+      if (!before || !after) {
+        setErrorMessage("分割後のブロックが空にならない位置を選択してください。");
+        return current;
+      }
+
+      const nextLogs = [
+        ...current.slice(0, index),
+        { ...log, id: `${log.id}_a_${Date.now()}`, text: before, confidence: "estimated" as const },
+        { ...log, id: `${log.id}_b_${Date.now()}`, text: after, confidence: "estimated" as const },
+        ...current.slice(index + 1),
+      ];
+      setErrorMessage("ブロックを分割しました。保存すると反映されます。");
+      return nextLogs;
+    });
+  }
+
+  function handleMergeSelectedLogs() {
+    setEditableLogs((current) => {
+      const indexes = selectedLogIds
+        .map((id) => current.findIndex((log) => log.id === id))
+        .filter((index) => index >= 0)
+        .sort((left, right) => left - right);
+
+      if (indexes.length < 2 || !areConsecutiveNumbers(indexes)) {
+        setErrorMessage("結合する連続ブロックを2件以上選択してください。");
+        return current;
+      }
+
+      const firstIndex = indexes[0];
+      const selectedSet = new Set(indexes);
+      const selectedLogs = indexes.map((index) => current[index]);
+      const merged: DisplayLog = {
+        ...selectedLogs[0],
+        id: `merged_${Date.now()}`,
+        text: selectedLogs.map((log) => log.text.trim()).filter(Boolean).join("\n"),
+        endSec: selectedLogs[selectedLogs.length - 1].endSec ?? selectedLogs[0].endSec ?? null,
+        confidence: "estimated",
+      };
+
+      setSelectedLogIds([]);
+      setErrorMessage("ブロックを結合しました。保存すると反映されます。");
+      return current.flatMap((log, index) => {
+        if (index === firstIndex) return [merged];
+        return selectedSet.has(index) ? [] : [log];
+      });
+    });
+  }
+
+  async function handleSaveConversationEdits() {
+    if (!meeting) return;
+    setIsSavingConversationLogs(true);
+    setErrorMessage(null);
+    try {
+      await saveMeetingConversationLogs(meetingId, {
+        status: "completed",
+        model: "manual-edit",
+        logs: editableLogs
+          .map((log, index) => mapDisplayLogToConversationLog(log, index, speakerNames))
+          .filter((log) => log.text.trim()),
+        error: null,
+        processingStatus: "uploaded",
+      });
+      setErrorMessage("会話ブロックを保存しました。");
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "会話ブロックの保存に失敗しました。");
+    } finally {
+      setIsSavingConversationLogs(false);
+    }
   }
 
   useEffect(() => {
@@ -576,7 +729,7 @@ export function MeetingDetailScreen({
       window.removeEventListener("resize", updateTranscript);
     };
   }, [
-    visibleTranscriptReadingBlocks,
+    visibleEditableLogs,
   ]);
 
   async function handleCopyTranscript() {
@@ -689,6 +842,14 @@ export function MeetingDetailScreen({
                 </div>
               </div>
             </div>
+            <button
+              type="button"
+              onClick={handleRegenerateAiSummary}
+              disabled={!canRunAiSummary || isAiSummaryRunning}
+              className={`relative inline-flex h-11 items-center justify-center overflow-hidden rounded-[14px] border border-[#f0c655] bg-[#ffd84d] px-5 text-[13px] font-black text-[#171717] shadow-[0_8px_18px_rgba(245,189,7,0.18)] transition hover:bg-[#ffcf33] disabled:cursor-not-allowed ${isAiSummaryRunning ? "ai-summary-regenerate-active" : "disabled:opacity-50"}`}
+            >
+              <span className="relative z-10">{isAiSummaryRunning ? "再分析中..." : "再分析実行"}</span>
+            </button>
           </div>
 
           <article className="mt-4 rounded-[24px] bg-white p-6">
@@ -705,19 +866,16 @@ export function MeetingDetailScreen({
                 label={meetingStatusSummary.label}
                 description={meetingStatusSummary.description}
                 tone={meetingStatusSummary.tone}
-                evidence={meetingStatusSummary.evidence}
               />
               <TemperatureSummaryCard
                 title="温度感"
                 stars={temperatureSummary.stars}
                 description={temperatureSummary.description}
-                evidence={temperatureSummary.evidence}
               />
               <ConsiderationSummaryCard
                 title="検討度"
                 score={considerationSummary.score}
                 description={considerationSummary.description}
-                evidence={considerationSummary.evidence}
               />
             </div>
 
@@ -741,7 +899,7 @@ export function MeetingDetailScreen({
             </div>
           </article>
 
-          {aiSummary.manualCompliance ? (
+          {aiSummary.manualCompliance?.mode === "manual" ? (
             <ManualComplianceInsight compliance={aiSummary.manualCompliance} manualDescription={domainCopy.manualDescription} />
           ) : null}
 
@@ -756,7 +914,6 @@ export function MeetingDetailScreen({
                   unit="/100"
                   color={score.color}
                   description={buildScoreDescription(score.label, score.value, score.description)}
-                  evidence={score.evidence}
                   variant="ring"
                 />
               ))}
@@ -770,12 +927,19 @@ export function MeetingDetailScreen({
             </div>
 
             <div className="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-              <EvidenceInsightCard title="顧客の課題" icon={<IssueGlyph />} bullets={analysisPanels.issues} evidence={buildTranscriptEvidence(editableLogs, 8)} />
-              <EvidenceInsightCard title="顧客の要望" icon={<InterestGlyph />} bullets={analysisPanels.requests} evidence={buildTranscriptEvidence(editableLogs, 7)} />
-              <EvidenceInsightCard title="顧客の不安・懸念" icon={<ConcernGlyph />} bullets={analysisPanels.concerns} evidence={buildTranscriptEvidence(editableLogs, 6)} />
+              <EvidenceInsightCard title="顧客の課題" icon={<IssueGlyph />} bullets={analysisPanels.issues} />
+              <EvidenceInsightCard title="顧客の要望" icon={<InterestGlyph />} bullets={analysisPanels.requests} />
+              <EvidenceInsightCard title="顧客の不安・懸念" icon={<ConcernGlyph />} bullets={analysisPanels.concerns} />
               <ActionInsightCard actions={analysisPanels.actions} mentionedNextDate={mentionedNextDate} />
             </div>
           </article>
+
+          <TranscriptAnalysisInsightSection
+            frequentWords={transcriptFrequentWords}
+            customerFrequentWords={customerFrequentWords}
+            focusWords={transcriptFocusWords}
+            onJumpToLog={handleJumpToTranscriptLog}
+          />
 
           <article className="mt-5 rounded-[24px] border border-[#eceef4] bg-white p-6 shadow-[0_6px_18px_rgba(17,24,39,0.04)]">
             <div className="text-[18px] font-bold text-[#171717]">AIからのフィードバック</div>
@@ -784,22 +948,16 @@ export function MeetingDetailScreen({
                 title="良かった点"
                 tone="positive"
                 bullets={buildFeedbackBullets(aiScorecards, "positive")}
-                footer="根拠となる発話を見る"
-                details={buildTranscriptEvidence(editableLogs, 5)}
               />
               <FeedbackInsightCard
                 title="改善ポイント"
                 tone="warning"
                 bullets={buildFeedbackBullets(aiScorecards, "warning")}
-                footer="根拠となる発話を見る"
-                details={buildTranscriptEvidence(editableLogs, 4)}
               />
               <FeedbackInsightCard
                 title="次回意識すること"
                 tone="info"
                 bullets={buildFeedbackBullets(aiScorecards, "next")}
-                footer="詳細なアドバイスを見る"
-                details={buildDetailedAdvice(aiScorecards, analysisPanels.actions)}
               />
             </div>
           </article>
@@ -911,7 +1069,11 @@ export function MeetingDetailScreen({
                     onChange={(event) => setTranscriptViewMode(event.target.value)}
                     className="h-[44px] w-full appearance-none rounded-[12px] border border-[#d8dde6] bg-white px-4 pr-12 text-[14px] text-[#171717] outline-none"
                   >
-                    <option value="all">フィルター</option>
+                    <option value="all">すべての話者</option>
+                    <option value="sales">営業のみ</option>
+                    <option value="customer">顧客のみ</option>
+                    <option value="participant">同席者のみ</option>
+                    <option value="unknown">不明のみ</option>
                   </select>
                   <span className="pointer-events-none absolute right-4 top-1/2 -translate-y-1/2 text-[#4b5563]">
                     <ChevronDownGlyph />
@@ -949,48 +1111,181 @@ export function MeetingDetailScreen({
                     </div>
                     <p className="mt-5 text-[8px] font-medium text-[#8a909b]">しばらくお待ちください</p>
                   </div>
-                ) : transcriptReadingBlocks.length > 0 ? (
+                ) : editableLogs.length > 0 ? (
                   <>
+                    <div className="mb-3 rounded-[18px] border border-[#eceef4] bg-[#fcfcfd] px-4 py-3">
+                      <div className="flex flex-wrap items-center justify-between gap-3">
+                        <div>
+                          <div className="text-[13px] font-black text-[#171717]">
+                            {isTranscriptEditMode ? "会話ブロック修正" : "文字起こし"}
+                          </div>
+                          <div className="mt-1 text-[12px] font-medium text-[#8a909b]">
+                          {isTranscriptEditMode
+                              ? "文字起こし本文は編集できません。話者変更・分割・結合だけ修正できます。"
+                              : "AIが分割した会話ブロックと話者を確認できます。"}
+                          </div>
+                        </div>
+                        <div className="flex flex-wrap items-center gap-2">
+                          {isTranscriptEditMode ? (
+                            <>
+                              <button type="button" onClick={() => setIsTranscriptEditMode(false)} className="rounded-[12px] border border-[#e4e8ef] bg-white px-4 py-2.5 text-[13px] font-black text-[#596273]">
+                                キャンセル
+                              </button>
+                              <button type="button" onClick={() => void handleSaveConversationEdits()} disabled={isSavingConversationLogs} className="rounded-[12px] border border-[#171717] bg-[#171717] px-4 py-2.5 text-[13px] font-black text-white disabled:opacity-60">
+                                {isSavingConversationLogs ? "保存中..." : "保存"}
+                              </button>
+                            </>
+                          ) : (
+                            <button type="button" onClick={() => setIsTranscriptEditMode(true)} className="rounded-[12px] border border-[#f0c655] bg-[#ffd84d] px-4 py-2.5 text-[13px] font-black text-[#171717]">
+                              修正する
+                            </button>
+                          )}
+                        </div>
+                      </div>
+
+                      {isTranscriptEditMode && selectedLogIds.length > 0 ? (
+                        <div className="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-[14px] border border-[#f0e3c1] bg-[#fffaf0] px-3 py-2.5">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className="rounded-full bg-[#171717] px-3 py-1 text-[12px] font-black text-white">{selectedLogIds.length}件選択中</span>
+                            <button type="button" onClick={handleMergeSelectedLogs} disabled={selectedLogIds.length < 2} className="rounded-[10px] border border-[#171717] bg-white px-3 py-1.5 text-[12px] font-black text-[#171717] disabled:opacity-40">結合</button>
+                            <button type="button" onClick={() => setSelectedLogIds([])} className="rounded-[10px] border border-[#e4e8ef] bg-white px-3 py-1.5 text-[12px] font-bold text-[#596273]">解除</button>
+                          </div>
+                          <div className="flex flex-wrap gap-2">
+                            {conversationSpeakerOptions.map((option) => (
+                              <button
+                                key={`bulk-${option.value}`}
+                                type="button"
+                                onClick={() => handleApplySpeakerToSelected(option.value)}
+                                className="rounded-[10px] border border-[#ead8a8] bg-white px-3 py-1.5 text-[12px] font-black text-[#6f5500]"
+                              >
+                                {option.label}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      ) : isTranscriptEditMode ? (
+                        <div className="mt-3 flex flex-wrap items-center gap-2 text-[12px] font-bold text-[#8a909b]">
+                          <button type="button" onClick={() => setSelectedLogIds(visibleEditableLogs.map(({ log }) => log.id))} className="rounded-[10px] border border-[#e4e8ef] bg-white px-3 py-1.5 text-[12px] font-bold text-[#596273]">
+                            表示中を選択
+                          </button>
+                          <span>複数選択すると、話者変更と結合ができます。</span>
+                        </div>
+                      ) : (
+                        <div className="mt-3 flex flex-wrap items-center gap-2">
+                          {conversationSpeakerOptions.map((option) => {
+                            const count = editableLogs.filter((log) => log.speaker === option.value).length;
+                            if (count === 0) return null;
+                            return (
+                              <span key={`summary-${option.value}`} className="rounded-full border border-[#e4e8ef] bg-white px-3 py-1 text-[12px] font-bold text-[#596273]">
+                                {speakerNames[option.value]} {count}件
+                              </span>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
                     <div className="relative min-h-0 flex-1">
                     <div
                       ref={transcriptScrollRef}
-                      className="always-visible-scrollbar min-h-0 h-full space-y-4 overflow-y-scroll pr-6"
+                      className="always-visible-scrollbar min-h-0 h-full space-y-3 overflow-y-scroll pr-6"
                     >
-                      {visibleTranscriptReadingBlocks.length > 0 ? (
-                        visibleTranscriptReadingBlocks.map(({ block, index }) => (
+                      {visibleEditableLogs.length > 0 ? (
+                        visibleEditableLogs.map(({ log, index }) => (
                         <article
-                          key={`reading_block_${index}`}
+                          key={log.id}
                           ref={(node) => {
                             transcriptBlockRefs.current[index] = node;
                           }}
-                          className={`max-w-[94%] rounded-[18px] border px-5 py-4 shadow-[0_3px_10px_rgba(17,24,39,0.03)] transition ${
-                            selectedTranscriptBlockIndex === index
-                              ? "border-[#171717] bg-[#f8fafc] shadow-[0_8px_22px_rgba(17,24,39,0.08)]"
-                              : "border-[#eceef4] bg-white"
+                          className={`rounded-[18px] border p-3 shadow-[0_3px_10px_rgba(17,24,39,0.03)] transition ${
+                            isTranscriptEditMode ? "grid gap-3 md:grid-cols-[132px_1fr]" : ""
+                          } ${
+                            selectedLogIds.includes(log.id)
+                              ? "border-[#f0c655] bg-[#fffaf0]"
+                              : selectedTranscriptBlockIndex === index
+                                ? "border-[#171717] bg-[#f8fafc] shadow-[0_8px_22px_rgba(17,24,39,0.08)]"
+                                : "border-[#eceef4] bg-white"
                           }`}
                         >
-                          <div className="mb-3 flex items-center gap-2">
-                            <span
-                              className={`h-2 w-2 rounded-full ${
-                                selectedTranscriptBlockIndex === index ? "bg-[#171717]" : "bg-[#ffd54a]"
-                              }`}
-                            />
-                            <span
-                              className={`text-[12px] font-semibold tracking-[0.12em] ${
-                                selectedTranscriptBlockIndex === index ? "text-[#171717]" : "text-[#9aa1ac]"
-                              }`}
-                            >
-                              {String(index + 1).padStart(3, "0")}
-                            </span>
+                          {isTranscriptEditMode ? (
+                            <div className="flex flex-col gap-3 rounded-[14px] bg-[#fcfcfd] p-3">
+                              <div className="flex items-center justify-between gap-2">
+                                <span className="text-[12px] font-black tracking-[0.12em] text-[#8a909b]">{String(index + 1).padStart(3, "0")}</span>
+                                <input
+                                  type="checkbox"
+                                  checked={selectedLogIds.includes(log.id)}
+                                  onChange={(event) => handleToggleLogSelection(log.id, event.target.checked)}
+                                  className="h-4 w-4 accent-[#ffcf33]"
+                                />
+                              </div>
+                              <select
+                                value={log.speaker}
+                                onChange={(event) => handleUpdateLogSpeaker(log.id, event.target.value as ConversationSpeaker)}
+                                className="h-10 w-full appearance-none rounded-[12px] border border-[#ead8a8] bg-[#fff7db] px-3 text-[13px] font-black text-[#6f5500] outline-none"
+                              >
+                                {conversationSpeakerOptions.map((option) => (
+                                  <option key={option.value} value={option.value}>{speakerNames[option.value]}</option>
+                                ))}
+                              </select>
+                              <div className="text-[11px] font-bold leading-5 text-[#9aa1ac]">
+                                {log.confidence === "aligned" ? "話者分離あり" : "推定/編集"}
+                              </div>
+                            </div>
+                          ) : null}
+                          <div className="min-w-0">
+                            {isTranscriptEditMode ? (
+                              <>
+                                <textarea
+                                  ref={(node) => {
+                                    logTextAreaRefs.current[log.id] = node;
+                                  }}
+                                  value={log.text}
+                                  readOnly
+                                  className="min-h-[96px] w-full resize-y rounded-[14px] border border-[#eef1f5] bg-[#fcfcfd] px-4 py-3 text-[15px] font-medium leading-8 text-[#171717] outline-none focus:border-[#e0bd4b] focus:bg-white"
+                                  spellCheck={false}
+                                  aria-label="編集不可の文字起こし本文"
+                                />
+                                <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
+                                  <div className="flex flex-wrap gap-1.5">
+                                    {conversationSpeakerOptions.map((option) => (
+                                      <button
+                                        key={`${log.id}-${option.value}`}
+                                        type="button"
+                                        onClick={() => handleUpdateLogSpeaker(log.id, option.value)}
+                                        className={`rounded-full px-2.5 py-1 text-[11px] font-black transition ${
+                                          log.speaker === option.value
+                                            ? "bg-[#ffcf33] text-[#5f4700]"
+                                            : "bg-[#f4f6f9] text-[#8a909b] hover:bg-[#fff4d6] hover:text-[#6f5500]"
+                                        }`}
+                                      >
+                                        {option.label}
+                                      </button>
+                                    ))}
+                                  </div>
+                                </div>
+                                <SplitCandidateButtons
+                                  log={log}
+                                  onSplit={(splitIndex) => handleSplitLogAtIndex(log.id, splitIndex)}
+                                />
+                              </>
+                            ) : (
+                              <div className="rounded-[14px] bg-white px-4 py-3">
+                                <div className="mb-2 flex flex-wrap items-center gap-2">
+                                  <span className="text-[11px] font-black tracking-[0.12em] text-[#b4bac5]">{String(index + 1).padStart(3, "0")}</span>
+                                  <span className="rounded-full bg-[#fff4d6] px-2.5 py-1 text-[12px] font-black text-[#7a5a00]">
+                                    {log.label || speakerNames[log.speaker]}
+                                  </span>
+                                </div>
+                                <p className="text-[15px] font-medium leading-8 text-[#171717]">
+                                  {renderHighlightedText(log.text, logSearch)}
+                                </p>
+                              </div>
+                            )}
                           </div>
-                          <p className="max-w-[95%] text-[16px] leading-[2.15] text-[#171717]">
-                            {renderHighlightedText(block.text, logSearch)}
-                          </p>
                         </article>
                         ))
                       ) : (
                         <div className="rounded-[18px] border border-dashed border-[#d9dee7] bg-[#fcfcfd] px-5 py-10 text-[14px] leading-7 text-[#7a808c]">
-                          該当する文字起こしブロックがありません。
+                          該当する会話ブロックがありません。
                         </div>
                       )}
                     </div>
@@ -1006,7 +1301,6 @@ export function MeetingDetailScreen({
                       ) : null}
                     </div>
                     </div>
-
                   </>
                 ) : (
                   <div className="px-4 py-16 text-[16px] leading-8 text-[#7a808c]">
@@ -1017,150 +1311,15 @@ export function MeetingDetailScreen({
             </div>
 
             <aside className="flex h-[760px] flex-col gap-4">
-              <div className="flex min-h-0 flex-1 flex-col rounded-[20px] border border-[#eceef4] bg-white p-4">
-                <div className="grid grid-cols-4 gap-1.5 rounded-[16px] bg-[#faf7ef] p-2 text-[12px] font-semibold text-[#7a808c]">
-                  <button
-                    type="button"
-                    onClick={() => setTranscriptSidebarTab("keywords")}
-                    className={`rounded-[12px] px-2 py-2.5 text-center transition ${transcriptSidebarTab === "keywords" ? "bg-[#ffcf33] text-[#5f4700] shadow-[0_4px_10px_rgba(240,180,0,0.18)]" : "text-[#7a808c] hover:bg-white hover:text-[#5f4700]"}`}
-                  >
-                    頻出ワード
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setTranscriptSidebarTab("focusWords")}
-                    className={`rounded-[12px] px-2 py-2.5 text-center transition ${transcriptSidebarTab === "focusWords" ? "bg-[#ffcf33] text-[#5f4700] shadow-[0_4px_10px_rgba(240,180,0,0.18)]" : "text-[#7a808c] hover:bg-white hover:text-[#5f4700]"}`}
-                  >
-                    注目ワード
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setTranscriptSidebarTab("important")}
-                    className={`rounded-[12px] px-2 py-2.5 text-center transition ${transcriptSidebarTab === "important" ? "bg-[#ffcf33] text-[#5f4700] shadow-[0_4px_10px_rgba(240,180,0,0.18)]" : "text-[#7a808c] hover:bg-white hover:text-[#5f4700]"}`}
-                  >
-                    注目発言
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setTranscriptSidebarTab("checkpoints")}
-                    className={`rounded-[12px] px-2 py-2.5 text-center transition ${transcriptSidebarTab === "checkpoints" ? "bg-[#ffcf33] text-[#5f4700] shadow-[0_4px_10px_rgba(240,180,0,0.18)]" : "text-[#7a808c] hover:bg-white hover:text-[#5f4700]"}`}
-                  >
-                    確認ポイント
-                  </button>
-                </div>
-
-                {transcriptSidebarTab === "keywords" ? (
-                  <div className="flex min-h-0 flex-1 flex-col pt-4">
-                    <div className="min-h-0 flex-1 space-y-3 overflow-y-auto pr-1">
-                      {transcriptFrequentWords.length > 0 ? (
-                        transcriptFrequentWords.map((word, index) => (
-                          <div
-                            key={word.term}
-                            className="flex items-center justify-between rounded-[18px] border border-[#efe5cd] bg-[#fffdfa] px-4 py-4 shadow-[0_3px_10px_rgba(17,24,39,0.03)]"
-                          >
-                            <div className="flex items-center gap-3">
-                              <span className="inline-flex h-8 min-w-8 items-center justify-center rounded-full bg-[#ffe9a3] px-2 text-[12px] font-semibold text-[#8d6800]">
-                                {String(index + 1).padStart(2, "0")}
-                              </span>
-                              <span className="text-[14px] font-medium text-[#171717]">{word.term}</span>
-                            </div>
-                            <span className="rounded-full border border-[#f0dfb0] bg-[#fff6dc] px-3 py-1 text-[12px] font-medium text-[#7a6330]">
-                              {word.count}回
-                            </span>
-                          </div>
-                        ))
-                      ) : (
-                        <div className="rounded-[16px] border border-dashed border-[#d9dee7] px-4 py-8 text-[14px] leading-7 text-[#7a808c]">
-                          文字起こし生成後に、よく使われた単語をここに表示します。
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                ) : transcriptSidebarTab === "focusWords" ? (
-                  <div className="flex min-h-0 flex-1 flex-col pt-4">
-                    <div className="min-h-0 flex-1 space-y-4 overflow-y-auto pr-1">
-                      {transcriptFocusWords.some((category) => category.words.length > 0) ? (
-                        transcriptFocusWords.map((category) => (
-                          <section key={category.id} className="rounded-[18px] border border-[#efe5cd] bg-[#fffdfa] p-4 shadow-[0_3px_10px_rgba(17,24,39,0.03)]">
-                            <div className="flex items-start justify-between gap-3">
-                              <div>
-                                <h3 className="text-[13px] font-bold text-[#5f4700]">{category.title}</h3>
-                                <p className="mt-1 text-[11px] leading-5 text-[#8a7a58]">{category.description}</p>
-                              </div>
-                              <span className="shrink-0 rounded-full border border-[#f0dfb0] bg-[#fff6dc] px-2.5 py-1 text-[11px] font-semibold text-[#7a6330]">
-                                {category.words.length}件
-                              </span>
-                            </div>
-                            {category.words.length > 0 ? (
-                              <div className="mt-3 space-y-2">
-                                {category.words.map((word) => (
-                                  <button
-                                    key={`${category.id}-${word.term}-${word.evidence.id}`}
-                                    type="button"
-                                    onClick={() => handleJumpToTranscriptLog(word.evidence)}
-                                    className="block w-full rounded-[14px] border border-[#f4ead0] bg-white px-3 py-3 text-left transition hover:border-[#e3d39a] hover:bg-[#fffdf7]"
-                                  >
-                                    <div className="flex items-center justify-between gap-3">
-                                      <span className="text-[14px] font-semibold text-[#171717]">{word.term}</span>
-                                      <span className="rounded-full bg-[#f7f1df] px-2.5 py-1 text-[11px] font-semibold text-[#7a6330]">{word.count}回</span>
-                                    </div>
-                                    <p className="mt-2 line-clamp-2 text-[12px] leading-6 text-[#596273]">
-                                      {word.evidence.label}: {word.evidence.text}
-                                    </p>
-                                  </button>
-                                ))}
-                              </div>
-                            ) : (
-                              <p className="mt-3 rounded-[14px] border border-dashed border-[#eadfbe] px-3 py-4 text-[12px] leading-6 text-[#8a7a58]">
-                                該当するワードはまだありません。
-                              </p>
-                            )}
-                          </section>
-                        ))
-                      ) : (
-                        <div className="rounded-[16px] border border-dashed border-[#d9dee7] px-4 py-8 text-[14px] leading-7 text-[#7a808c]">
-                          文字起こし本文から、顧客課題・反論/不安・商材/価値・次回アクションに関わるワードを表示します。
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                ) : transcriptSidebarTab === "important" ? (
-                  <div className="flex min-h-0 flex-1 flex-col pt-4">
-                    <div className="min-h-0 flex-1 space-y-3 overflow-y-auto pr-1">
-                    {transcriptImportantLogs.map((item) => (
-                      <SearchResultCard
-                        key={item.id}
-                        text={item.text}
-                        onClick={() => handleJumpToTranscriptLog(item)}
-                      />
-                    ))}
-                    </div>
-                  </div>
-                ) : (
-                  <div className="flex min-h-0 flex-1 flex-col pt-4">
-                    <div className="min-h-0 flex-1 space-y-3 overflow-y-auto pr-1">
-                      {transcriptAiExtracts.length > 0 ? (
-                        transcriptAiExtracts.map((item, index) => (
-                          <div key={item.id} className="rounded-[18px] border border-[#efe5cd] bg-[#fffdfa] px-4 py-4 shadow-[0_3px_10px_rgba(17,24,39,0.03)]">
-                            <div className="text-[12px] font-semibold text-[#9c7600]">ポイント{index + 1}</div>
-                            <button
-                              type="button"
-                              onClick={() => handleJumpToTranscriptLog(item)}
-                              className="mt-2 block w-full text-left text-[14px] leading-7 text-[#171717] transition hover:text-[#8a6500]"
-                            >
-                              {renderHighlightedText(item.text, logSearch)}
-                            </button>
-                          </div>
-                        ))
-                      ) : (
-                        <div className="rounded-[16px] border border-dashed border-[#d9dee7] px-4 py-8 text-[14px] leading-7 text-[#7a808c]">
-                          文字起こし本文から抽出できる発言がまだありません。
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                )}
-              </div>
+              <SpeakerManagementPanel
+                logs={editableLogs}
+                speakerNames={speakerNames}
+                onChangeSpeakerName={(speaker, name) => {
+                  const nextName = name.trim() || defaultSpeakerName(speaker);
+                  setSpeakerNames((current) => ({ ...current, [speaker]: nextName }));
+                  setEditableLogs((current) => current.map((log) => (log.speaker === speaker ? { ...log, label: nextName } : log)));
+                }}
+              />
 
               <div className="rounded-[18px] border border-[#f4e2a4] bg-[#fff7db] px-4 py-4 text-[14px] leading-7 text-[#7b6740]">
                 AIによる文字起こしのため、一部誤りが含まれる可能性があります。重要な内容は必ずご確認ください。
@@ -1193,18 +1352,183 @@ function mapConversationLogToDisplayLog(
     id: log.id,
     startSec,
     endSec,
-    speaker: log.speaker,
-    label: log.label,
+    speaker: normalizeEditableSpeaker(log.speaker),
+    label: log.label || defaultSpeakerName(normalizeEditableSpeaker(log.speaker)),
     text: log.text,
     confidence: log.confidence,
     kind: log.kind ?? (log.speaker === "unknown" ? "unknown" : "speech"),
   };
 }
 
+const conversationSpeakerOptions: Array<{ value: ConversationSpeaker; label: string }> = [
+  { value: "sales", label: "営業" },
+  { value: "customer", label: "顧客" },
+  { value: "participant", label: "同席者" },
+  { value: "unknown", label: "不明" },
+];
+
+function SpeakerManagementPanel({
+  logs,
+  speakerNames,
+  onChangeSpeakerName,
+}: {
+  logs: DisplayLog[];
+  speakerNames: Record<ConversationSpeaker, string>;
+  onChangeSpeakerName: (speaker: ConversationSpeaker, name: string) => void;
+}) {
+  return (
+    <section className="rounded-[20px] border border-[#eceef4] bg-white p-4">
+      <div className="flex items-center justify-between gap-3">
+        <h3 className="text-[14px] font-black text-[#171717]">話者管理</h3>
+        <span className="rounded-full bg-[#fff3cf] px-3 py-1 text-[11px] font-black text-[#8a6500]">{logs.length}ブロック</span>
+      </div>
+      <div className="mt-3 space-y-3">
+        {conversationSpeakerOptions.map((option) => {
+          const count = logs.filter((log) => log.speaker === option.value).length;
+          return (
+            <div key={option.value} className="rounded-[14px] border border-[#eef1f5] bg-[#fcfcfd] px-3 py-3">
+              <div className="flex items-center justify-between gap-3">
+                <input
+                  value={speakerNames[option.value]}
+                  onChange={(event) => onChangeSpeakerName(option.value, event.target.value)}
+                  className="min-w-0 flex-1 rounded-[10px] border border-[#e4e8ef] bg-white px-3 py-2 text-[13px] font-black text-[#343b48] outline-none focus:border-[#e0bd4b]"
+                  aria-label={`${option.label}の表示名`}
+                />
+                <span className="shrink-0 text-[12px] font-bold text-[#8a909b]">発言数: {count}</span>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
+function SplitCandidateButtons({
+  log,
+  onSplit,
+}: {
+  log: DisplayLog;
+  onSplit: (splitIndex: number) => void;
+}) {
+  const candidates = buildSplitCandidates(log.text).slice(0, 8);
+
+  if (candidates.length === 0) {
+    return (
+      <div className="mt-2 rounded-[12px] border border-dashed border-[#e4e8ef] bg-[#fcfcfd] px-3 py-2 text-[12px] font-bold text-[#9aa1ac]">
+        このブロックには自動分割候補がありません。
+      </div>
+    );
+  }
+
+  return (
+    <div className="mt-2 rounded-[12px] border border-[#eef1f5] bg-[#fcfcfd] px-3 py-2">
+      <div className="text-[11px] font-black text-[#8a909b]">分割位置</div>
+      <div className="mt-2 flex flex-wrap gap-2">
+        {candidates.map((candidate, index) => (
+          <button
+            key={`${log.id}_${candidate.index}`}
+            type="button"
+            onClick={() => onSplit(candidate.index)}
+            className="rounded-full border border-[#ead8a8] bg-white px-3 py-1.5 text-[12px] font-black text-[#6f5500] transition hover:border-[#e0bd4b] hover:bg-[#fff7db]"
+            title={candidate.preview}
+          >
+            {index + 1}つ目の区切り
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function mapDisplayLogToConversationLog(
+  log: DisplayLog,
+  index: number,
+  speakerNames: Record<ConversationSpeaker, string>,
+): NonNullable<MeetingRecord["conversationLogs"]>[number] {
+  return {
+    id: `log_${String(index + 1).padStart(3, "0")}`,
+    speaker: log.speaker,
+    label: speakerNames[log.speaker] || defaultSpeakerName(log.speaker),
+    text: log.text.trim(),
+    sourceSegmentIndexes: [],
+    confidence: log.confidence,
+    kind: log.kind,
+  };
+}
+
+function normalizeEditableSpeaker(value: unknown): ConversationSpeaker {
+  if (value === "sales" || value === "speaker_1") return "sales";
+  if (value === "customer" || value === "speaker_2") return "customer";
+  if (value === "participant") return "participant";
+  return "unknown";
+}
+
+function defaultSpeakerName(speaker: ConversationSpeaker) {
+  if (speaker === "sales") return "営業";
+  if (speaker === "customer") return "顧客";
+  if (speaker === "participant") return "同席者";
+  return "不明";
+}
+
+function buildSalesSpeakerName(name: string | null | undefined) {
+  const normalizedName = (name ?? "").trim().replace(/\s+/g, " ");
+  if (!normalizedName) {
+    return defaultSpeakerName("sales");
+  }
+
+  return normalizedName.split(" ")[0] || defaultSpeakerName("sales");
+}
+
+function buildSplitCandidates(text: string) {
+  const candidates: Array<{ index: number; preview: string }> = [];
+  const seenIndexes = new Set<number>();
+  const normalizedText = text.trim();
+
+  if (normalizedText.length < 12) {
+    return candidates;
+  }
+
+  const boundaryPattern = /[。！？!?]\s*|\n+/g;
+  let match: RegExpExecArray | null;
+
+  while ((match = boundaryPattern.exec(text)) !== null) {
+    const index = match.index + match[0].length;
+    const before = text.slice(0, index).trim();
+    const after = text.slice(index).trim();
+
+    if (before.length < 4 || after.length < 4 || seenIndexes.has(index)) {
+      continue;
+    }
+
+    seenIndexes.add(index);
+    candidates.push({
+      index,
+      preview: `${before.slice(-24)} / ${after.slice(0, 24)}`,
+    });
+  }
+
+  return candidates;
+}
+
+function deriveSpeakerNamesFromLogs(logs: DisplayLog[]) {
+  const names: Partial<Record<ConversationSpeaker, string>> = {};
+  for (const log of logs) {
+    if (!names[log.speaker] && log.label && log.label !== defaultSpeakerName(log.speaker)) {
+      names[log.speaker] = log.label;
+    }
+  }
+  return names;
+}
+
+function areConsecutiveNumbers(values: number[]) {
+  return values.every((value, index) => index === 0 || value === values[index - 1] + 1);
+}
+
 function buildConversationLogsFromSegments(
   segments: Array<{ startSec: number; endSec: number; text: string; speaker?: string | null }>,
 ): NonNullable<MeetingRecord["conversationLogs"]> {
-  const speakerMap = new Map<string, "speaker_1" | "speaker_2">();
+  const speakerMap = new Map<string, ConversationSpeaker>();
   let speakerCount = 0;
 
   return segments.map((segment, index) => {
@@ -1227,11 +1551,19 @@ function buildConversationLogsFromSegments(
 
 function normalizeTranscriptSpeaker(
   rawSpeaker: string | null,
-  speakerMap?: Map<string, "speaker_1" | "speaker_2">,
+  speakerMap?: Map<string, ConversationSpeaker>,
   nextSpeakerIndex?: () => number,
-): "speaker_1" | "speaker_2" | "unknown" {
-  if (rawSpeaker === "speaker_1" || rawSpeaker === "speaker_2") {
+): ConversationSpeaker {
+  if (rawSpeaker === "sales" || rawSpeaker === "customer" || rawSpeaker === "participant" || rawSpeaker === "unknown") {
     return rawSpeaker;
+  }
+
+  if (rawSpeaker === "speaker_1") {
+    return "sales";
+  }
+
+  if (rawSpeaker === "speaker_2") {
+    return "customer";
   }
 
   if (!rawSpeaker || !speakerMap || !nextSpeakerIndex) {
@@ -1251,28 +1583,20 @@ function normalizeTranscriptSpeaker(
 
   const index = nextSpeakerIndex();
   if (index === 1) {
-    speakerMap.set(normalizedKey, "speaker_1");
-    return "speaker_1";
+    speakerMap.set(normalizedKey, "sales");
+    return "sales";
   }
 
   if (index === 2) {
-    speakerMap.set(normalizedKey, "speaker_2");
-    return "speaker_2";
+    speakerMap.set(normalizedKey, "customer");
+    return "customer";
   }
 
   return "unknown";
 }
 
-function buildSpeakerLabel(speaker: "speaker_1" | "speaker_2" | "unknown") {
-  if (speaker === "speaker_1") {
-    return "話者1";
-  }
-
-  if (speaker === "speaker_2") {
-    return "話者2";
-  }
-
-  return "未設定";
+function buildSpeakerLabel(speaker: ConversationSpeaker) {
+  return defaultSpeakerName(speaker);
 }
 
 async function fetchWithTimeout(
@@ -1441,15 +1765,12 @@ function StatusSummaryCard({
   label,
   description,
   tone,
-  evidence,
 }: {
   title: string;
   label: string;
   description: string;
   tone: "positive" | "warning" | "neutral";
-  evidence: string[];
 }) {
-  const [isEvidenceOpen, setIsEvidenceOpen] = useState(false);
   const toneStyles =
     tone === "positive"
       ? "bg-[#eff9ef] text-[#2f8f56]"
@@ -1465,7 +1786,6 @@ function StatusSummaryCard({
         {label}
       </div>
       <div className="mt-5 text-[14px] leading-7 text-[#667085]">{description}</div>
-      <EvidenceToggle evidence={evidence} isOpen={isEvidenceOpen} onToggle={() => setIsEvidenceOpen((current) => !current)} />
     </article>
   );
 }
@@ -1474,14 +1794,11 @@ function TemperatureSummaryCard({
   title,
   stars,
   description,
-  evidence,
 }: {
   title: string;
   stars: number;
   description: string;
-  evidence: string[];
 }) {
-  const [isEvidenceOpen, setIsEvidenceOpen] = useState(false);
   return (
     <article className="rounded-[18px] border border-[#eceef4] bg-white p-5 shadow-[0_4px_12px_rgba(17,24,39,0.04)]">
       <div className="text-[14px] font-semibold text-[#171717]">{title}</div>
@@ -1493,7 +1810,6 @@ function TemperatureSummaryCard({
         ))}
       </div>
       <div className="mt-5 text-[14px] leading-7 text-[#667085]">{description}</div>
-      <EvidenceToggle evidence={evidence} isOpen={isEvidenceOpen} onToggle={() => setIsEvidenceOpen((current) => !current)} />
     </article>
   );
 }
@@ -1502,14 +1818,11 @@ function ConsiderationSummaryCard({
   title,
   score,
   description,
-  evidence,
 }: {
   title: string;
   score: number;
   description: string;
-  evidence: string[];
 }) {
-  const [isEvidenceOpen, setIsEvidenceOpen] = useState(false);
   return (
     <article className="rounded-[18px] border border-[#eceef4] bg-white p-5 shadow-[0_4px_12px_rgba(17,24,39,0.04)]">
       <div className="text-[14px] font-semibold text-[#171717]">{title}</div>
@@ -1522,7 +1835,6 @@ function ConsiderationSummaryCard({
         </div>
       </div>
       <div className="mt-5 text-[14px] leading-7 text-[#667085]">{description}</div>
-      <EvidenceToggle evidence={evidence} isOpen={isEvidenceOpen} onToggle={() => setIsEvidenceOpen((current) => !current)} />
     </article>
   );
 }
@@ -1592,7 +1904,7 @@ function ManualComplianceInsight({
   compliance: NonNullable<NonNullable<MeetingRecord["aiSummary"]>["manualCompliance"]>;
   manualDescription: string;
 }) {
-  const isManual = compliance.mode === "manual";
+  const visibleScore = getVisibleManualComplianceScore(compliance);
 
   return (
     <article className="mt-5 rounded-[24px] border border-[#f0e3c1] bg-[#fffaf0] p-6 shadow-[0_6px_18px_rgba(17,24,39,0.04)]">
@@ -1600,45 +1912,163 @@ function ManualComplianceInsight({
         <div>
           <div className="flex flex-wrap items-center gap-2">
             <h3 className="text-[18px] font-bold text-[#171717]">
-              {isManual ? "会社基準に沿った改善ポイント" : "AI汎用分析"}
+              会社基準に沿った改善ポイント
             </h3>
             <span className="rounded-full border border-[#f0d992] bg-white px-3 py-1 text-[12px] font-bold text-[#8a6500]">
-              {isManual ? "会社基準: 適用済み" : "会社基準: 未適用"}
+              会社基準: 適用済み
             </span>
           </div>
           <p className="mt-2 text-[13px] leading-6 text-[#6f6250]">
-            {isManual
-              ? manualDescription
-              : "会社基準が未登録のため、AIの一般的な営業観点で改善ポイントを整理しています。"}
+            {manualDescription}
           </p>
         </div>
         <div className="rounded-[18px] border border-[#f0d992] bg-white px-5 py-4 text-center">
           <div className="text-[12px] font-bold text-[#8a909b]">準拠スコア</div>
           <div className="mt-1 text-[28px] font-black text-[#171717]">
-            {compliance.score === null ? "-" : compliance.score}
-            {compliance.score === null ? null : <span className="ml-1 text-[14px] font-bold text-[#8a909b]">点</span>}
+            {visibleScore === null ? "-" : visibleScore}
+            {visibleScore === null ? null : <span className="ml-1 text-[14px] font-bold text-[#8a909b]">点</span>}
           </div>
+          {compliance.checklistItems && compliance.checklistItems.length > 0 ? (
+            <ManualScoreBreakdown items={compliance.checklistItems} />
+          ) : null}
         </div>
       </div>
 
-      <div className="mt-5 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        <ManualComplianceList title="できていた基準" items={compliance.matchedCriteria} />
-        <ManualComplianceList title="次に直す基準" items={compliance.missingCriteria} />
-        <ManualComplianceList title="商品・競合観点" items={compliance.productNotes} />
-        <ManualComplianceList title="次回使うフレーズ" items={compliance.improvementPhrases} />
+      <div className="mt-5">
+        {compliance.checklistItems && compliance.checklistItems.length > 0 ? (
+          <ManualChecklistPanel items={compliance.checklistItems} />
+        ) : (
+          <div className="grid gap-4 md:grid-cols-2">
+            <ManualComplianceList title="できていた基準" items={compliance.matchedCriteria} tone="passed" />
+            <ManualComplianceList title="次に直す基準" items={compliance.missingCriteria} tone="missing" />
+          </div>
+        )}
       </div>
     </article>
   );
 }
 
-function ManualComplianceList({ title, items }: { title: string; items: string[] }) {
+function getVisibleManualComplianceScore(
+  compliance: NonNullable<NonNullable<MeetingRecord["aiSummary"]>["manualCompliance"]>,
+) {
+  const impactScore = calculateScoreFromImpacts(compliance.checklistItems);
+  if (impactScore !== null) {
+    return impactScore;
+  }
+
+  if (typeof compliance.score === "number" && Number.isFinite(compliance.score)) {
+    return compliance.score;
+  }
+
+  const matchedCount = compliance.matchedCriteria.length;
+  const missingCount = compliance.missingCriteria.length;
+  const total = matchedCount + missingCount;
+  if (total <= 0) return null;
+
+  return Math.round((matchedCount / total) * 100);
+}
+
+function calculateScoreFromImpacts(
+  items: NonNullable<NonNullable<MeetingRecord["aiSummary"]>["manualCompliance"]>["checklistItems"] | undefined,
+) {
+  if (!items || items.length === 0) return null;
+
+  const positive = items.reduce((sum, item) => sum + Math.max(item.scoreImpact ?? 0, 0), 0);
+  const negative = items.reduce((sum, item) => sum + Math.min(item.scoreImpact ?? 0, 0), 0);
+  if (positive <= 0) return null;
+
+  return Math.min(100, Math.max(0, Math.round(((positive + negative) / positive) * 100)));
+}
+
+function ManualChecklistPanel({
+  items,
+}: {
+  items: NonNullable<NonNullable<NonNullable<MeetingRecord["aiSummary"]>["manualCompliance"]>["checklistItems"]>;
+}) {
+  return (
+    <div className="rounded-[18px] border border-[#f0e3c1] bg-white p-5">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <div className="text-[15px] font-black text-[#171717]">マニュアルチェック</div>
+          <div className="mt-1 text-[12px] font-bold text-[#8a909b]">登録項目ごとに、文字起こし内容を当てはめています。</div>
+        </div>
+        <div className="text-[12px] font-bold text-[#8a909b]">
+          {items.filter((item) => item.status === "done").length} / {items.length}
+        </div>
+      </div>
+      <div className="mt-4 max-h-[460px] overflow-y-auto pr-1">
+        <div className="divide-y divide-[#f3ead4]">
+          {items.map((item) => {
+            const isDone = item.status === "done";
+            return (
+              <div key={`${item.category}-${item.label}`} className="grid gap-3 py-3 md:grid-cols-[140px_1fr_72px_96px] md:items-start">
+                <span className="w-fit rounded-full border border-[#f0e3c1] bg-[#fffaf0] px-2.5 py-1 text-[11px] font-black text-[#8a6500]">
+                  {item.category}
+                </span>
+                <div className="min-w-0">
+                  <div className="text-[13px] font-bold leading-5 text-[#171717]">{item.label}</div>
+                  {item.reason ? <div className="mt-1 text-[12px] leading-5 text-[#7a808c]">{item.reason}</div> : null}
+                </div>
+                <span className={`text-[12px] font-black ${typeof item.scoreImpact === "number" ? item.scoreImpact >= 0 ? "text-[#15803d]" : "text-[#d63c2f]" : "text-[#a1a7b3]"}`}>
+                  {formatScoreImpact(item.scoreImpact)}
+                </span>
+                <span className={`inline-flex h-7 items-center justify-center rounded-full px-3 text-[11px] font-black ${isDone ? "bg-[#eaf8ef] text-[#15803d]" : "bg-[#fff0ed] text-[#d63c2f]"}`}>
+                  {isDone ? "できている" : "要改善"}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ManualScoreBreakdown({
+  items,
+}: {
+  items: NonNullable<NonNullable<NonNullable<MeetingRecord["aiSummary"]>["manualCompliance"]>["checklistItems"]>;
+}) {
+  const doneCount = items.filter((item) => item.status === "done").length;
+  const positive = items.reduce((sum, item) => sum + Math.max(item.scoreImpact ?? 0, 0), 0);
+  const negative = items.reduce((sum, item) => sum + Math.min(item.scoreImpact ?? 0, 0), 0);
+  const hasImpacts = items.some((item) => typeof item.scoreImpact === "number" && item.scoreImpact !== 0);
+
+  return (
+    <div className="mt-3 border-t border-[#f0e3c1] pt-3 text-left">
+      <div className="grid grid-cols-3 gap-2 text-center">
+        <div>
+          <div className="text-[10px] font-bold text-[#8a909b]">達成</div>
+          <div className="mt-0.5 text-[12px] font-black text-[#171717]">{doneCount}/{items.length}</div>
+        </div>
+        <div>
+          <div className="text-[10px] font-bold text-[#8a909b]">加点</div>
+          <div className="mt-0.5 text-[12px] font-black text-[#15803d]">{hasImpacts ? `+${positive}` : "-"}</div>
+        </div>
+        <div>
+          <div className="text-[10px] font-bold text-[#8a909b]">減点</div>
+          <div className="mt-0.5 text-[12px] font-black text-[#d63c2f]">{hasImpacts ? negative : "-"}</div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function formatScoreImpact(value: number | null | undefined) {
+  if (typeof value !== "number" || !Number.isFinite(value) || value === 0) return "-";
+  return value > 0 ? `+${value}` : `${value}`;
+}
+
+function ManualComplianceList({ title, items, tone = "normal" }: { title: string; items: string[]; tone?: "passed" | "missing" | "normal" }) {
+  const marker = tone === "passed" ? "✓" : tone === "missing" ? "!" : "•";
+  const markerClass = tone === "passed" ? "bg-[#17a34a] text-white" : tone === "missing" ? "bg-[#fff0ed] text-[#d63c2f]" : "bg-[#fff3cf] text-[#8a6500]";
   return (
     <div className="rounded-[18px] border border-[#f0e3c1] bg-white p-4">
       <div className="text-[13px] font-bold text-[#8a6500]">{title}</div>
       <ul className="mt-3 space-y-2 text-[13px] leading-6 text-[#343b48]">
         {(items.length > 0 ? items : ["未検出"]).map((item) => (
           <li key={item} className="flex gap-2">
-            <span className="text-[#c4991b]">•</span>
+            <span className={`mt-0.5 inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[10px] font-black ${markerClass}`}>{marker}</span>
             <span>{item}</span>
           </li>
         ))}
@@ -1653,7 +2083,6 @@ function SummaryMetricCard({
   unit,
   color,
   description,
-  evidence = [],
   variant,
 }: {
   title: string;
@@ -1661,11 +2090,8 @@ function SummaryMetricCard({
   unit?: string;
   color: string;
   description: string;
-  evidence?: string[];
   variant: "ring" | "stars" | "gauge" | "heat";
 }) {
-  const [isEvidenceOpen, setIsEvidenceOpen] = useState(false);
-
   return (
     <article className="rounded-[18px] bg-[#fcfcfd] px-4 py-4 xl:min-h-[220px] xl:border-r xl:border-[#eceef4] xl:rounded-none xl:bg-transparent last:border-r-0">
       <div className="text-center text-[15px] font-semibold text-[#171717]">{title}</div>
@@ -1698,45 +2124,7 @@ function SummaryMetricCard({
         )}
       </div>
       <div className="mt-4 text-center text-[13px] leading-6 text-[#667085]">{description}</div>
-      <EvidenceToggle evidence={evidence} isOpen={isEvidenceOpen} onToggle={() => setIsEvidenceOpen((current) => !current)} />
     </article>
-  );
-}
-
-function EvidenceToggle({
-  evidence,
-  isOpen,
-  onToggle,
-}: {
-  evidence: string[];
-  isOpen: boolean;
-  onToggle: () => void;
-}) {
-  const visibleEvidence = evidence.filter(Boolean);
-
-  if (visibleEvidence.length === 0) {
-    return null;
-  }
-
-  return (
-    <div className="mt-4 border-t border-[#eef1f5] pt-3">
-      <button
-        type="button"
-        onClick={onToggle}
-        className="text-[12px] font-semibold text-[#8a6500] transition hover:text-[#5f4700]"
-      >
-        根拠を見る{isOpen ? "を閉じる" : `（${visibleEvidence.length}件）`}
-      </button>
-      {isOpen ? (
-        <ul className="mt-3 space-y-2 text-left text-[12px] leading-6 text-[#667085]">
-          {visibleEvidence.map((item, index) => (
-            <li key={`${item}_${index}`} className="rounded-[10px] bg-[#fffaf0] px-3 py-2">
-              {item}
-            </li>
-          ))}
-        </ul>
-      ) : null}
-    </div>
   );
 }
 
@@ -1744,15 +2132,11 @@ function EvidenceInsightCard({
   title,
   icon,
   bullets,
-  evidence,
 }: {
   title: string;
   icon: React.ReactNode;
   bullets: string[];
-  evidence: string[];
 }) {
-  const [isOpen, setIsOpen] = useState(false);
-
   return (
     <article className="rounded-[18px] border border-[#eceef4] bg-white p-5 shadow-[0_4px_12px_rgba(17,24,39,0.04)]">
       <div className="flex items-center gap-3 text-[14px] font-semibold text-[#171717]">
@@ -1767,23 +2151,6 @@ function EvidenceInsightCard({
           </li>
         ))}
       </ul>
-      <button
-        type="button"
-        onClick={() => setIsOpen((current) => !current)}
-        className="mt-6 inline-flex items-center gap-2 text-[13px] font-medium text-[#4f5663]"
-      >
-        根拠となる発話{isOpen ? "を閉じる" : `を見る（${evidence.length}件）`}
-        <span aria-hidden="true">{isOpen ? "⌃" : "›"}</span>
-      </button>
-      {isOpen ? (
-        <div className="mt-4 space-y-2 rounded-[14px] border border-[#eef1f5] bg-[#fcfcfd] p-3">
-          {evidence.map((item) => (
-            <p key={item} className="text-[12px] leading-6 text-[#505866]">
-              {item}
-            </p>
-          ))}
-        </div>
-      ) : null}
     </article>
   );
 }
@@ -1821,21 +2188,121 @@ function ActionInsightCard({
   );
 }
 
+function TranscriptAnalysisInsightSection({
+  frequentWords,
+  customerFrequentWords,
+  focusWords,
+  onJumpToLog,
+}: {
+  frequentWords: Array<{ term: string; count: number }>;
+  customerFrequentWords: Array<{ term: string; count: number }>;
+  focusWords: TranscriptFocusWordCategory[];
+  onJumpToLog: (log: DisplayLog) => void;
+}) {
+  const flatFocusWords = focusWords.flatMap((category) =>
+    category.words.map((word) => ({
+      ...word,
+      categoryTitle: category.title,
+    })),
+  );
+
+  return (
+    <article className="mt-5 rounded-[24px] border border-[#eceef4] bg-white p-6 shadow-[0_6px_18px_rgba(17,24,39,0.04)]">
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <div className="text-[18px] font-bold text-[#171717]">文字起こしインサイト</div>
+          <div className="mt-2 text-[13px] leading-6 text-[#7a808c]">
+            確定した会話ブロックから、分析時に確認したい言葉をまとめています。
+          </div>
+        </div>
+        <span className="rounded-full border border-[#f0dfb0] bg-[#fff6dc] px-3 py-1 text-[12px] font-bold text-[#7a6330]">
+          AI分析ページ
+        </span>
+      </div>
+
+      <div className="mt-5 grid gap-4 xl:grid-cols-3">
+        <section className="rounded-[18px] border border-[#eceef4] bg-[#fcfcfd] p-4">
+          <div className="text-[14px] font-bold text-[#171717]">頻出ワード</div>
+          <div className="mt-4 space-y-2">
+            {frequentWords.length > 0 ? (
+              frequentWords.slice(0, 8).map((word, index) => (
+                <div key={word.term} className="flex items-center justify-between gap-3 rounded-[12px] bg-white px-3 py-2.5">
+                  <div className="flex min-w-0 items-center gap-2">
+                    <span className="w-5 shrink-0 text-[11px] font-bold text-[#b08a00]">{index + 1}</span>
+                    <span className="truncate text-[13px] font-semibold text-[#343b48]">{word.term}</span>
+                  </div>
+                  <span className="shrink-0 text-[12px] font-bold text-[#8a909b]">{word.count}回</span>
+                </div>
+              ))
+            ) : (
+              <p className="rounded-[14px] border border-dashed border-[#d9dee7] px-3 py-5 text-[13px] leading-6 text-[#7a808c]">
+                文字起こし生成後に表示します。
+              </p>
+            )}
+          </div>
+        </section>
+
+        <section className="rounded-[18px] border border-[#eceef4] bg-[#fcfcfd] p-4">
+          <div className="text-[14px] font-bold text-[#171717]">顧客側の頻出ワード</div>
+          <div className="mt-4 space-y-2">
+            {customerFrequentWords.length > 0 ? (
+              customerFrequentWords.slice(0, 8).map((word, index) => (
+                <div key={word.term} className="flex items-center justify-between gap-3 rounded-[12px] bg-white px-3 py-2.5">
+                  <div className="flex min-w-0 items-center gap-2">
+                    <span className="w-5 shrink-0 text-[11px] font-bold text-[#b08a00]">{index + 1}</span>
+                    <span className="truncate text-[13px] font-semibold text-[#343b48]">{word.term}</span>
+                  </div>
+                  <span className="shrink-0 text-[12px] font-bold text-[#8a909b]">{word.count}回</span>
+                </div>
+              ))
+            ) : (
+              <p className="rounded-[14px] border border-dashed border-[#d9dee7] px-3 py-5 text-[13px] leading-6 text-[#7a808c]">
+                顧客発話から頻出ワードを表示します。
+              </p>
+            )}
+          </div>
+        </section>
+
+        <section className="rounded-[18px] border border-[#eceef4] bg-[#fcfcfd] p-4">
+          <div className="text-[14px] font-bold text-[#171717]">注目ワード</div>
+          <div className="mt-4 space-y-2">
+            {flatFocusWords.length > 0 ? (
+              flatFocusWords.slice(0, 8).map((word) => (
+                <button
+                  key={`${word.categoryTitle}-${word.term}-${word.evidence.id}`}
+                  type="button"
+                  onClick={() => onJumpToLog(word.evidence)}
+                  className="block w-full rounded-[12px] bg-white px-3 py-2.5 text-left transition hover:bg-[#fffaf0]"
+                >
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="truncate text-[13px] font-semibold text-[#343b48]">{word.term}</span>
+                    <span className="shrink-0 text-[12px] font-bold text-[#8a909b]">{word.count}回</span>
+                  </div>
+                  <div className="mt-1 text-[11px] font-bold text-[#b08a00]">{word.categoryTitle}</div>
+                </button>
+              ))
+            ) : (
+              <p className="rounded-[14px] border border-dashed border-[#d9dee7] px-3 py-5 text-[13px] leading-6 text-[#7a808c]">
+                課題・不安・価値・次回アクションに関わる言葉を表示します。
+              </p>
+            )}
+          </div>
+        </section>
+      </div>
+    </article>
+  );
+}
+
 function FeedbackInsightCard({
   title,
   tone,
   bullets,
-  footer,
-  details,
 }: {
   title: string;
   tone: "positive" | "warning" | "info";
   bullets: string[];
-  footer: string;
-  details: string[];
 }) {
   const icon = tone === "positive" ? "👍" : tone === "warning" ? "⚠️" : "💡";
-  const [isOpen, setIsOpen] = useState(false);
 
   return (
     <article className="flex h-full flex-col rounded-[18px] border border-[#eceef4] bg-white p-5 shadow-[0_4px_12px_rgba(17,24,39,0.04)]">
@@ -1851,24 +2318,6 @@ function FeedbackInsightCard({
           </li>
         ))}
       </ul>
-      <button
-        type="button"
-        onClick={() => setIsOpen((current) => !current)}
-        className="mt-auto pt-6 text-left text-[13px] font-medium text-[#4f5663]"
-      >
-        {footer}
-        {tone === "info" ? "" : `（${details.length}件）`}
-        <span className="ml-1" aria-hidden="true">{isOpen ? "⌃" : "›"}</span>
-      </button>
-      {isOpen ? (
-        <div className="mt-4 space-y-2 rounded-[14px] border border-[#eef1f5] bg-[#fcfcfd] p-3">
-          {details.map((item) => (
-            <p key={item} className="text-[12px] leading-6 text-[#505866]">
-              {item}
-            </p>
-          ))}
-        </div>
-      ) : null}
     </article>
   );
 }
@@ -2416,7 +2865,7 @@ function buildTranscriptPreviewLogs(
 function buildTranscriptPreviewLogsFromSegments(
   segments: NonNullable<MeetingRecord["transcriptionProbeSegments"]>,
 ): DisplayLog[] {
-  const speakerMap = new Map<string, "speaker_1" | "speaker_2">();
+  const speakerMap = new Map<string, ConversationSpeaker>();
   let speakerCount = 0;
 
   return mergeShortNeighborLogs(
@@ -2629,11 +3078,11 @@ function inferConversationSide(log: DisplayLog): "sales" | "customer" | "unknown
     return "customer";
   }
 
-  if (log.speaker === "speaker_1") {
+  if (log.speaker === "sales") {
     return "sales";
   }
 
-  if (log.speaker === "speaker_2") {
+  if (log.speaker === "customer") {
     return "customer";
   }
 
@@ -2906,11 +3355,11 @@ function buildAiScorecards(
     }));
   }
 
-  const hearing = clampScore(55 + Math.min(35, metrics.entryCount * 4));
-  const discovery = clampScore(45 + Math.min(30, Math.round(metrics.averageCharactersPerEntry / 8)));
-  const proposal = clampScore(status === "won" ? 82 : status === "considering" ? 68 : 52);
-  const objection = clampScore(status === "lost" ? 42 : status === "considering" ? 58 : 74);
-  const closing = clampScore(status === "won" ? 78 : status === "considering" ? 46 : 32);
+  const hearing = clampScore(42 + Math.min(28, metrics.entryCount * 3));
+  const discovery = clampScore(36 + Math.min(24, Math.round(metrics.averageCharactersPerEntry / 10)));
+  const proposal = clampScore(status === "won" ? 70 : status === "considering" ? 56 : 42);
+  const objection = clampScore(status === "lost" ? 34 : status === "considering" ? 46 : 62);
+  const closing = clampScore(status === "won" ? 66 : status === "considering" ? 38 : 28);
   const evidence = buildTranscriptEvidence(logs, 3);
 
   return [
@@ -2928,26 +3377,26 @@ function buildScoreDescription(label: string, value: number, description?: strin
   }
 
   if (label === "ヒアリング") {
-    return value >= 80 ? "深掘り質問が多く、ニーズの把握ができています" : "ヒアリングは進んでいますが、追加確認の余地があります";
+    return value >= 80 ? "深掘り質問が多く、ニーズの把握ができています" : "質問量や確認の深さに改善余地があります";
   }
 
   if (label === "課題深掘り") {
-    return value >= 70 ? "課題の背景まで確認できています" : "課題の深掘りがやや浅い印象です";
+    return value >= 80 ? "課題の背景まで確認できています" : "課題の背景・原因・影響の確認が不足しています";
   }
 
   if (label === "提案接続") {
-    return value >= 70 ? "提案の方向性は伝わっています" : "比較優位や具体性の補強があるとより良いです";
+    return value >= 80 ? "顧客課題と提案価値を具体的に接続できています" : "顧客課題と提案価値の接続に補強が必要です";
   }
 
   if (label === "反論対応") {
-    return value >= 70 ? "懸念に対して確認や切り返しができています" : "不安や反論を掘り下げる余地があります";
+    return value >= 80 ? "懸念に対して確認や切り返しができています" : "不安や反論への確認・切り返しが不足しています";
   }
 
   if (label === "アポ打診") {
-    return value >= 60 ? "次回接点やアポイントにつながっています" : "アポ打診や次回接点化の強化余地があります";
+    return value >= 80 ? "次回接点やアポイントが明確です" : "アポ打診や次回接点化の強化余地があります";
   }
 
-  return value >= 60 ? "次回アクションまでつながっています" : "クロージングトークの強化余地があります";
+  return value >= 80 ? "次回アクションまで明確につながっています" : "クロージングトークと次回合意の強化余地があります";
 }
 
 function buildFeedbackBullets(

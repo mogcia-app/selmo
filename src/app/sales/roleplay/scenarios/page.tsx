@@ -309,6 +309,7 @@ function ScenarioCreateDialog({
         product: selectedProduct,
         category: scenarioCategory,
         targetSegment,
+        roleplayType,
         meetingInsights: buildMeetingInsights({
           meetings,
           productName: selectedProduct.name,
@@ -639,6 +640,7 @@ async function generateRoleplayScenario(input: {
   product: KnowledgeProduct;
   category: "新規" | "既存";
   targetSegment: string;
+  roleplayType: RoleplayType;
   meetingInsights?: string[];
 }) {
   const response = await fetch("/api/roleplay/generate-scenario", {
@@ -649,6 +651,7 @@ async function generateRoleplayScenario(input: {
       product: input.product,
       category: input.category,
       targetSegment: input.targetSegment,
+      roleplayType: input.roleplayType,
       meetingInsights: input.meetingInsights ?? [],
     }),
   });

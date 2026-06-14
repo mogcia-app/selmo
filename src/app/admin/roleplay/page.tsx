@@ -25,6 +25,7 @@ import {
   updateRoleplayScenario,
   updateRoleplayTalkGuide,
   type RoleplayDifficulty,
+  type RoleplayType,
   type RoleplayAssignment,
   type RoleplayScenario,
   type RoleplayScenarioCustomField,
@@ -353,7 +354,7 @@ export default function AdminRoleplayPage() {
                       <div className="min-w-0">
                         <div className="truncate text-[14px] font-black text-[#171717]">{scenario.title}</div>
                         <div className="mt-1 truncate text-[12px] text-[#7a808c]">
-                          {product?.name || scenario.productName || "商材未設定"} ・ {scenario.scenarioCategory || "分類未設定"} ・ {scenario.targetSegment || scenario.customerRole}
+                          {formatRoleplayType(scenario.roleplayType)} ・ {product?.name || scenario.productName || "商材未設定"} ・ {scenario.scenarioCategory || "分類未設定"} ・ {scenario.targetSegment || scenario.customerRole}
                         </div>
                         <div className="mt-1 truncate text-[12px] text-[#9aa1ac]">作成者: {creator?.name || creator?.email || "不明"}</div>
                       </div>
@@ -577,6 +578,7 @@ function ScenarioCreateDialog({
   onError: (message: string | null) => void;
 }) {
   const [title, setTitle] = useState(scenario?.title ?? "");
+  const [roleplayType, setRoleplayType] = useState<RoleplayType>(scenario?.roleplayType ?? "meeting");
   const [description, setDescription] = useState(scenario?.description ?? "");
   const [productId, setProductId] = useState(scenario?.productId ?? "");
   const [scenarioCategory, setScenarioCategory] = useState<"新規" | "既存" | "">(scenario?.scenarioCategory ?? "");
@@ -606,6 +608,7 @@ function ScenarioCreateDialog({
         product: selectedProduct,
         category: scenarioCategory,
         targetSegment,
+        roleplayType,
       });
       setTitle(generated.title);
       setDescription(generated.description);
@@ -642,6 +645,7 @@ function ScenarioCreateDialog({
 
       const payload = {
         companyId,
+        roleplayType,
         title: title.trim() || `${selectedProduct.name} ${scenarioCategory}ロープレ`,
         description: description.trim(),
         productId: selectedProduct.id,
@@ -685,6 +689,12 @@ function ScenarioCreateDialog({
         </div>
 
         <div className="mt-5 grid gap-4 md:grid-cols-2">
+          <Field label="種別" required>
+            <select value={roleplayType} onChange={(event) => setRoleplayType(event.target.value as RoleplayType)} className="h-12 w-full rounded-[14px] border border-[#e4e8ef] bg-white px-4 text-[14px] text-[#171717] outline-none transition focus:border-[#e0bd4b]">
+              <option value="meeting">商談</option>
+              <option value="teleapo">テレアポ</option>
+            </select>
+          </Field>
           <Field label="商材" required>
             <select value={productId} onChange={(event) => setProductId(event.target.value)} className="h-12 w-full rounded-[14px] border border-[#e4e8ef] bg-white px-4 text-[14px] text-[#171717] outline-none transition focus:border-[#e0bd4b]">
               <option value="">商材を選択</option>
@@ -859,6 +869,7 @@ async function generateRoleplayScenario(input: {
   product: KnowledgeProduct;
   category: "新規" | "既存";
   targetSegment: string;
+  roleplayType: RoleplayType;
 }) {
   const response = await fetch("/api/roleplay/generate-scenario", {
     method: "POST",
@@ -868,6 +879,7 @@ async function generateRoleplayScenario(input: {
       product: input.product,
       category: input.category,
       targetSegment: input.targetSegment,
+      roleplayType: input.roleplayType,
     }),
   });
   const payload = (await response.json()) as {
@@ -904,6 +916,10 @@ function formatDifficulty(value: string) {
   if (value === "easy") return "やさしい";
   if (value === "hard") return "難しい";
   return "標準";
+}
+
+function formatRoleplayType(value: RoleplayType) {
+  return value === "teleapo" ? "テレアポ" : "商談";
 }
 
 function ErrorBox({ message }: { message: string }) {

@@ -71,9 +71,17 @@ export type RoleplayResult = {
   userId: string;
   score: number;
   summary: string;
+  evaluationCriteria: string[];
   strengths: string[];
   improvements: string[];
   improvementPhrases: string[];
+  manualChecklistItems?: Array<{
+    category: string;
+    label: string;
+    status: "done" | "missing";
+    reason: string;
+    scoreImpact: number | null;
+  }>;
   messages: RoleplayMessage[];
   createdAt: Date | null;
 };
@@ -389,9 +397,11 @@ export async function saveRoleplayResult(input: Omit<RoleplayResult, "id" | "cre
     userId: input.userId,
     score: input.score,
     summary: input.summary,
+    evaluationCriteria: input.evaluationCriteria,
     strengths: input.strengths,
     improvements: input.improvements,
     improvementPhrases: input.improvementPhrases,
+    manualChecklistItems: input.manualChecklistItems ?? [],
     messages: input.messages,
     createdAt: serverTimestamp(),
   });
@@ -568,12 +578,36 @@ function mapRoleplayResult(snapshot: QueryDocumentSnapshot<DocumentData>): Rolep
     userId: readString(data.userId),
     score: readNumber(data.score),
     summary: readString(data.summary),
+    evaluationCriteria: readStringArray(data.evaluationCriteria),
     strengths: readStringArray(data.strengths),
     improvements: readStringArray(data.improvements),
     improvementPhrases: readStringArray(data.improvementPhrases),
+    manualChecklistItems: readManualChecklistItems(data.manualChecklistItems),
     messages: readMessages(data.messages),
     createdAt: readDate(data.createdAt),
   };
+}
+
+function readManualChecklistItems(value: unknown) {
+  if (!Array.isArray(value)) return undefined;
+
+  const items = value
+    .map((item) => {
+      if (!item || typeof item !== "object") return null;
+      const data = item as Record<string, unknown>;
+      const category = readString(data.category).trim();
+      const label = readString(data.label).trim();
+      const status = readString(data.status);
+      const reason = readString(data.reason).trim();
+      const scoreImpact = typeof data.scoreImpact === "number" && Number.isFinite(data.scoreImpact) ? Math.round(data.scoreImpact) : null;
+
+      if (!category || !label || (status !== "done" && status !== "missing")) return null;
+
+      return { category, label, status, reason, scoreImpact };
+    })
+    .filter((item): item is { category: string; label: string; status: "done" | "missing"; reason: string; scoreImpact: number | null } => Boolean(item));
+
+  return items.length > 0 ? items : undefined;
 }
 
 function readRoleplayType(value: unknown): RoleplayType {

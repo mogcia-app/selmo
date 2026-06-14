@@ -18,9 +18,12 @@ import {
 
 import { assertFirebaseClient } from "@/lib/firebase/client";
 
+export type SalesManualDomain = "meeting" | "teleapo";
+
 export type SalesManual = {
   id: string;
   companyId: string | null;
+  manualDomain: SalesManualDomain;
   title: string;
   productId: string | null;
   productName: string;
@@ -46,6 +49,7 @@ export type SalesManualCustomField = {
 
 export type SalesManualInput = {
   companyId?: string | null;
+  manualDomain?: SalesManualDomain;
   title: string;
   productId?: string | null;
   productName?: string;
@@ -91,6 +95,7 @@ export async function createSalesManual(input: SalesManualInput) {
 
   await addDoc(collection(firestore, "salesManuals"), {
     companyId: input.companyId ?? null,
+    manualDomain: input.manualDomain ?? "meeting",
     title: input.title,
     productId: input.productId ?? null,
     productName: input.productName ?? "",
@@ -117,6 +122,7 @@ export async function updateSalesManual(id: string, input: SalesManualInput) {
     doc(firestore, "salesManuals", id),
     {
       companyId: input.companyId ?? null,
+      manualDomain: input.manualDomain ?? "meeting",
       title: input.title,
       productId: input.productId ?? null,
       productName: input.productName ?? "",
@@ -143,6 +149,7 @@ function mapSalesManual(snapshot: QueryDocumentSnapshot<DocumentData>): SalesMan
   return {
     id: snapshot.id,
     companyId: readNullableString(data.companyId),
+    manualDomain: readManualDomain(data.manualDomain),
     title: readString(data.title, "営業成功基準"),
     productId: readNullableString(data.productId),
     productName: readString(data.productName),
@@ -167,6 +174,10 @@ function readString(value: unknown, fallback = "") {
 
 function readManualCategory(value: unknown) {
   return value === "新規" || value === "既存" ? value : "";
+}
+
+function readManualDomain(value: unknown) {
+  return value === "teleapo" ? "teleapo" : "meeting";
 }
 
 function readNullableString(value: unknown) {

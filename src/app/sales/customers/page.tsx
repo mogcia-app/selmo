@@ -10,11 +10,13 @@ import {
   createCustomer,
   subscribeToCustomers,
   type CustomerChurnRisk,
+  type CustomerContractStatus,
   type CustomerRecord,
   type CustomerStatus,
   type CustomerTemperature,
   type SaveCustomerInput,
 } from "@/lib/firebase/customers";
+import { subscribeToKnowledgeProducts, type KnowledgeProduct } from "@/lib/firebase/knowledge";
 
 const statusOptions: Array<{ value: CustomerStatus; label: string }> = [
   { value: "not_contacted", label: "未接触" },
@@ -39,6 +41,15 @@ const churnRiskOptions: Array<{ value: CustomerChurnRisk; label: string }> = [
   { value: "high", label: "高" },
 ];
 
+const contractStatusOptions: Array<{ value: CustomerContractStatus; label: string }> = [
+  { value: "not_contracted", label: "未契約" },
+  { value: "considering", label: "検討中" },
+  { value: "needs_consultation", label: "要相談" },
+  { value: "contracted", label: "契約中" },
+  { value: "paused", label: "保留" },
+  { value: "cancelled", label: "解約" },
+];
+
 type CustomerFormState = {
   companyName: string;
   contactName: string;
@@ -46,6 +57,7 @@ type CustomerFormState = {
   email: string;
   industry: string;
   employeeCount: string;
+  productIds: string[];
   status: CustomerStatus;
   temperature: CustomerTemperature;
   expectedAmount: string;
@@ -54,7 +66,7 @@ type CustomerFormState = {
   nextActionDate: string;
   lastContactDate: string;
   memo: string;
-  isContracted: boolean;
+  contractStatus: CustomerContractStatus;
   contractStartDate: string;
   contractPlan: string;
   monthlyAmount: string;
@@ -69,6 +81,7 @@ const initialFormState: CustomerFormState = {
   email: "",
   industry: "",
   employeeCount: "",
+  productIds: [],
   status: "not_contacted",
   temperature: "middle",
   expectedAmount: "",
@@ -77,7 +90,7 @@ const initialFormState: CustomerFormState = {
   nextActionDate: "",
   lastContactDate: "",
   memo: "",
-  isContracted: false,
+  contractStatus: "not_contracted",
   contractStartDate: "",
   contractPlan: "",
   monthlyAmount: "",
@@ -88,6 +101,7 @@ const initialFormState: CustomerFormState = {
 export default function SalesCustomersPage() {
   const { profile } = useAuth();
   const [customers, setCustomers] = useState<CustomerRecord[]>([]);
+  const [products, setProducts] = useState<KnowledgeProduct[]>([]);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [isCreating, setIsCreating] = useState(false);
@@ -110,6 +124,18 @@ export default function SalesCustomersPage() {
     );
   }, [profile?.companyId, profile?.uid]);
 
+  useEffect(() => {
+    if (!profile?.companyId) {
+      setProducts([]);
+      return;
+    }
+    return subscribeToKnowledgeProducts(
+      profile.companyId,
+      setProducts,
+      (nextError: FirebaseError) => setErrorMessage(nextError.message),
+    );
+  }, [profile?.companyId]);
+
   const owners = useMemo(() => {
     const rows = new Map<string, string>();
     customers.forEach((customer) => rows.set(customer.assignedUserId, customer.assignedUserName || "未設定"));
@@ -122,6 +148,7 @@ export default function SalesCustomersPage() {
       const matchesSearch = !normalizedSearch || [
         customer.companyName,
         customer.contactName,
+        ...customer.productNames,
         customer.phone,
         customer.email,
         customer.industry,
@@ -154,7 +181,7 @@ export default function SalesCustomersPage() {
 
     setIsCreating(true);
     try {
-      const customerId = await createCustomer(buildCustomerInput(formState, {
+      const customerId = await createCustomer(buildCustomerInput(formState, products, {
         companyId: profile.companyId,
         userId: profile.uid,
         userName: profile.name ?? profile.email ?? "未設定",
@@ -209,6 +236,7 @@ export default function SalesCustomersPage() {
               onSubmit={handleCreateCustomer}
               submitLabel={isCreating ? "追加中" : "顧客カルテを作成"}
               disabled={isCreating}
+              products={products}
             />
           </section>
         ) : null}
@@ -241,10 +269,11 @@ export default function SalesCustomersPage() {
 
           {filteredCustomers.length > 0 ? (
             <div className="overflow-x-auto">
-              <table className="w-full min-w-[1120px] text-left">
+              <table className="w-full min-w-[1240px] text-left">
                 <thead className="bg-[#fcfcfd]">
                   <tr className="border-b border-[#eef1f5] text-[12px] text-[#7a808c]">
                     <th className="px-4 py-3 font-bold">顧客名/会社名</th>
+                    <th className="px-4 py-3 font-bold">商材</th>
                     <th className="px-4 py-3 font-bold">担当営業マン</th>
                     <th className="px-4 py-3 font-bold">ステータス</th>
                     <th className="px-4 py-3 font-bold">温度感</th>
@@ -261,6 +290,9 @@ export default function SalesCustomersPage() {
                         <div className="text-[14px] font-black text-[#171717]">{customer.companyName}</div>
                         <div className="mt-1 text-[12px] font-bold text-[#8a909b]">{customer.contactName || "担当者未設定"}</div>
                       </td>
+                      <td className="px-4 py-4">
+                        <ProductNameList names={customer.productNames} />
+                      </td>
                       <td className="px-4 py-4 text-[13px] font-bold text-[#596273]">{customer.assignedUserName || "未設定"}</td>
                       <td className="px-4 py-4"><CustomerStatusBadge status={customer.status} /></td>
                       <td className="px-4 py-4"><TemperatureBadge temperature={customer.temperature} /></td>
@@ -270,9 +302,7 @@ export default function SalesCustomersPage() {
                         <div className="mt-1 text-[12px] font-bold text-[#8a909b]">{formatDate(customer.nextActionDate)}</div>
                       </td>
                       <td className="px-4 py-4">
-                        <span className={`rounded-full px-3 py-1 text-[12px] font-black ${customer.isContracted || customer.status === "contracted" ? "bg-[#edf7f0] text-[#16834f]" : "bg-[#f1f2f5] text-[#596273]"}`}>
-                          {customer.isContracted || customer.status === "contracted" ? "契約中" : "未契約"}
-                        </span>
+                        <ContractStatusBadge status={customer.contractStatus} />
                       </td>
                       <td className="px-4 py-4 text-right">
                         <Link href={`/sales/customers/${customer.id}`} className="rounded-[10px] border border-[#ead8a8] bg-[#fffaf0] px-3 py-2 text-[12px] font-black text-[#8a6500] transition hover:bg-[#fff3cd]">
@@ -299,12 +329,14 @@ function CustomerForm({
   onSubmit,
   submitLabel,
   disabled,
+  products,
 }: {
   formState: CustomerFormState;
   onChange: (state: CustomerFormState) => void;
   onSubmit: (event: React.FormEvent<HTMLFormElement>) => void;
   submitLabel: string;
   disabled?: boolean;
+  products: KnowledgeProduct[];
 }) {
   const setField = <Key extends keyof CustomerFormState>(key: Key, value: CustomerFormState[Key]) => {
     onChange({ ...formState, [key]: value });
@@ -321,6 +353,12 @@ function CustomerForm({
         <TextField label="従業員数" value={formState.employeeCount} onChange={(value) => setField("employeeCount", value)} type="number" />
       </div>
 
+      <ProductMultiSelect
+        products={products}
+        selectedIds={formState.productIds}
+        onChange={(productIds) => setField("productIds", productIds)}
+      />
+
       <div className="grid gap-4 md:grid-cols-4">
         <SelectField label="ステータス" value={formState.status} options={statusOptions} onChange={(value) => setField("status", value as CustomerStatus)} />
         <SelectField label="温度感" value={formState.temperature} options={temperatureOptions} onChange={(value) => setField("temperature", value as CustomerTemperature)} />
@@ -335,10 +373,7 @@ function CustomerForm({
       </div>
 
       <div className="grid gap-4 md:grid-cols-5">
-        <label className="flex h-[66px] items-center gap-3 rounded-[12px] border border-[#dfe4ec] bg-white px-3 text-[13px] font-black text-[#343b48]">
-          <input type="checkbox" checked={formState.isContracted} onChange={(event) => setField("isContracted", event.target.checked)} />
-          契約中
-        </label>
+        <SelectField label="契約ラベル" value={formState.contractStatus} options={contractStatusOptions} onChange={(value) => setField("contractStatus", value as CustomerContractStatus)} />
         <TextField label="契約開始日" value={formState.contractStartDate} onChange={(value) => setField("contractStartDate", value)} type="date" />
         <TextField label="契約プラン" value={formState.contractPlan} onChange={(value) => setField("contractPlan", value)} />
         <TextField label="月額金額" value={formState.monthlyAmount} onChange={(value) => setField("monthlyAmount", value)} type="number" />
@@ -366,7 +401,8 @@ function CustomerForm({
   );
 }
 
-function buildCustomerInput(formState: CustomerFormState, user: { companyId: string; userId: string; userName: string }): SaveCustomerInput {
+function buildCustomerInput(formState: CustomerFormState, products: KnowledgeProduct[], user: { companyId: string; userId: string; userName: string }): SaveCustomerInput {
+  const selectedProducts = products.filter((product) => formState.productIds.includes(product.id));
   return {
     companyId: user.companyId,
     companyName: formState.companyName.trim(),
@@ -377,7 +413,9 @@ function buildCustomerInput(formState: CustomerFormState, user: { companyId: str
     employeeCount: readOptionalNumber(formState.employeeCount),
     assignedUserId: user.userId,
     assignedUserName: user.userName,
-    status: formState.isContracted ? "contracted" : formState.status,
+    productIds: selectedProducts.map((product) => product.id),
+    productNames: selectedProducts.map((product) => product.name),
+    status: formState.contractStatus === "contracted" ? "contracted" : formState.status,
     temperature: formState.temperature,
     expectedAmount: readOptionalNumber(formState.expectedAmount),
     lostReason: formState.lostReason.trim(),
@@ -385,13 +423,61 @@ function buildCustomerInput(formState: CustomerFormState, user: { companyId: str
     nextActionDate: readOptionalDate(formState.nextActionDate),
     lastContactDate: readOptionalDate(formState.lastContactDate),
     memo: formState.memo.trim(),
-    isContracted: formState.isContracted,
+    isContracted: formState.contractStatus === "contracted",
+    contractStatus: formState.contractStatus,
     contractStartDate: readOptionalDate(formState.contractStartDate),
     contractPlan: formState.contractPlan.trim(),
     monthlyAmount: readOptionalNumber(formState.monthlyAmount),
     renewalDate: readOptionalDate(formState.renewalDate),
     churnRisk: formState.churnRisk,
   };
+}
+
+function ProductMultiSelect({
+  products,
+  selectedIds,
+  onChange,
+}: {
+  products: KnowledgeProduct[];
+  selectedIds: string[];
+  onChange: (selectedIds: string[]) => void;
+}) {
+  const selectedProducts = products.filter((product) => selectedIds.includes(product.id));
+  const toggleProduct = (productId: string) => {
+    onChange(selectedIds.includes(productId) ? selectedIds.filter((id) => id !== productId) : [...selectedIds, productId]);
+  };
+
+  return (
+    <div className="rounded-[12px] border border-[#dfe4ec] bg-[#fcfcfd] px-3 py-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <span className="text-[12px] font-black text-[#596273]">商材</span>
+        <span className="text-[11px] font-bold text-[#8a909b]">{selectedProducts.length > 0 ? `${selectedProducts.length}件選択中` : "複数選択可"}</span>
+      </div>
+      {products.length > 0 ? (
+        <div className="mt-3 flex flex-wrap gap-2">
+          {products.map((product) => {
+            const selected = selectedIds.includes(product.id);
+            return (
+              <button
+                key={product.id}
+                type="button"
+                onClick={() => toggleProduct(product.id)}
+                className={`rounded-full border px-3 py-1.5 text-[12px] font-black transition ${
+                  selected
+                    ? "border-[#f0c655] bg-[#ffd84d] text-[#171717]"
+                    : "border-[#e2e6ee] bg-white text-[#596273] hover:border-[#ead8a8]"
+                }`}
+              >
+                {product.name}
+              </button>
+            );
+          })}
+        </div>
+      ) : (
+        <p className="mt-2 text-[12px] font-bold text-[#8a909b]">商材管理に登録された商材がここに表示されます。</p>
+      )}
+    </div>
+  );
 }
 
 function TextField({ label, value, onChange, type = "text", required = false }: { label: string; value: string; onChange: (value: string) => void; type?: string; required?: boolean }) {
@@ -445,6 +531,42 @@ function TemperatureBadge({ temperature }: { temperature: CustomerTemperature })
       : temperature === "middle"
         ? "bg-[#fff3cf] text-[#8a6500]"
         : "bg-[#eef6ff] text-[#2672d9]";
+  return <span className={`rounded-full px-3 py-1 text-[12px] font-black ${className}`}>{label}</span>;
+}
+
+function ProductNameList({ names }: { names: string[] }) {
+  if (names.length === 0) {
+    return <span className="text-[12px] font-bold text-[#8a909b]">未設定</span>;
+  }
+
+  return (
+    <div className="flex max-w-[220px] flex-wrap gap-1.5">
+      {names.slice(0, 3).map((name) => (
+        <span key={name} className="rounded-full bg-[#fffaf0] px-2.5 py-1 text-[11px] font-black text-[#8a6500]">
+          {name}
+        </span>
+      ))}
+      {names.length > 3 ? (
+        <span className="rounded-full bg-[#f1f2f5] px-2.5 py-1 text-[11px] font-black text-[#596273]">+{names.length - 3}</span>
+      ) : null}
+    </div>
+  );
+}
+
+function ContractStatusBadge({ status }: { status: CustomerContractStatus }) {
+  const label = contractStatusOptions.find((option) => option.value === status)?.label ?? "未契約";
+  const className =
+    status === "contracted"
+      ? "bg-[#edf7f0] text-[#16834f]"
+      : status === "considering"
+        ? "bg-[#fff3cf] text-[#8a6500]"
+        : status === "needs_consultation"
+          ? "bg-[#fff0ed] text-[#d63c2f]"
+          : status === "paused"
+            ? "bg-[#eef6ff] text-[#2672d9]"
+            : status === "cancelled"
+              ? "bg-[#f1f2f5] text-[#7a808c]"
+              : "bg-[#f1f2f5] text-[#596273]";
   return <span className={`rounded-full px-3 py-1 text-[12px] font-black ${className}`}>{label}</span>;
 }
 

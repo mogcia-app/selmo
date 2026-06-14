@@ -266,7 +266,17 @@ export default function SalesRoleplayPage() {
     setIsSaving(true);
     setError(null);
     try {
-      const evaluation = evaluateRoleplay(scenario, messages);
+      const evaluation = await evaluateRoleplayWithAi({
+        companyId,
+        userId,
+        scenario,
+        messages,
+      }).catch((nextError) => {
+        if (nextError instanceof Error && nextError.message === monthlyLimitMessage) {
+          throw nextError;
+        }
+        return evaluateRoleplay(scenario, messages);
+      });
       await saveRoleplayResult({
         companyId,
         scenarioId: scenario.id,
@@ -276,9 +286,11 @@ export default function SalesRoleplayPage() {
         userId,
         score: evaluation.score,
         summary: evaluation.summary,
+        evaluationCriteria: scenario.evaluationCriteria,
         strengths: evaluation.strengths,
         improvements: evaluation.improvements,
         improvementPhrases: evaluation.improvementPhrases,
+        manualChecklistItems: evaluation.manualChecklistItems,
         messages,
       });
       router.push(`/sales/roleplay/results?category=${roleplayType}`);
@@ -736,6 +748,51 @@ function evaluateRoleplay(scenario: RoleplayScenario, messages: RoleplayMessage[
     ],
     improvements: improvements.length > 0 ? improvements : ["反論対応の根拠や成功事例をもう少し具体的に伝えると、さらに説得力が上がります。"],
     improvementPhrases: buildImprovementPhrases(scenario, salesText),
+    manualChecklistItems: [],
+  };
+}
+
+async function evaluateRoleplayWithAi(input: {
+  companyId: string;
+  userId: string;
+  scenario: RoleplayScenario;
+  messages: RoleplayMessage[];
+}) {
+  const response = await fetch("/api/roleplay/evaluate", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  const data = (await response.json()) as {
+    score?: number;
+    summary?: string;
+    strengths?: string[];
+    improvements?: string[];
+    improvementPhrases?: string[];
+    manualChecklistItems?: Array<{
+      category: string;
+      label: string;
+      status: "done" | "missing";
+      reason: string;
+      scoreImpact: number | null;
+    }>;
+    error?: string;
+  };
+
+  if (!response.ok) {
+    if (response.status === 429) {
+      throw new Error(monthlyLimitMessage);
+    }
+    throw new Error(data.error ?? "AI評価に失敗しました。");
+  }
+
+  return {
+    score: typeof data.score === "number" ? data.score : 40,
+    summary: data.summary ?? "ロープレ評価を生成しました。",
+    strengths: data.strengths ?? [],
+    improvements: data.improvements ?? [],
+    improvementPhrases: data.improvementPhrases ?? [],
+    manualChecklistItems: data.manualChecklistItems ?? [],
   };
 }
 

@@ -117,13 +117,13 @@ export default function AdminMeetingDetailPage() {
                                 {meeting.aiSummary.manualCompliance.mode === "manual" ? "会社基準: 適用済み" : "会社基準: 未適用"}
                               </span>
                               <div className="mt-2 text-[13px] font-black text-[#8a6500]">
-                                準拠スコア {meeting.aiSummary.manualCompliance.score === null ? "-" : `${meeting.aiSummary.manualCompliance.score}点`}
+                                準拠スコア {formatManualComplianceScore(meeting.aiSummary.manualCompliance)}
                               </div>
                             </div>
                           </div>
                           <div className="mt-3 grid gap-3 md:grid-cols-2">
-                            <ReviewList title="salesに表示された達成基準" items={meeting.aiSummary.manualCompliance.matchedCriteria} />
-                            <ReviewList title="salesに表示された不足基準" items={meeting.aiSummary.manualCompliance.missingCriteria} />
+                            <ReviewList title="salesに表示された達成基準" items={meeting.aiSummary.manualCompliance.matchedCriteria} tone="passed" />
+                            <ReviewList title="salesに表示された不足基準" items={meeting.aiSummary.manualCompliance.missingCriteria} tone="missing" />
                             <ReviewList title="商材観点" items={meeting.aiSummary.manualCompliance.productNotes} />
                             <ReviewList title="次回フレーズ" items={meeting.aiSummary.manualCompliance.improvementPhrases} />
                           </div>
@@ -200,12 +200,19 @@ function ReviewRow({ label, value }: { label: string; value: string }) {
   );
 }
 
-function ReviewList({ title, items }: { title: string; items: string[] }) {
+function ReviewList({ title, items, tone = "normal" }: { title: string; items: string[]; tone?: "passed" | "missing" | "normal" }) {
+  const marker = tone === "passed" ? "✓" : tone === "missing" ? "!" : "•";
+  const markerClass = tone === "passed" ? "bg-[#17a34a] text-white" : tone === "missing" ? "bg-[#fff0ed] text-[#d63c2f]" : "bg-[#fff3cf] text-[#8a6500]";
   return (
     <div className="rounded-[14px] border border-[#f0e3c1] bg-white px-3 py-3">
       <div className="text-[12px] font-black text-[#8a6500]">{title}</div>
-      <ul className="mt-2 space-y-1 text-[12px] leading-5 text-[#596273]">
-        {(items.length > 0 ? items : ["未検出"]).map((item) => <li key={item}>・{item}</li>)}
+      <ul className="mt-2 space-y-2 text-[12px] leading-5 text-[#596273]">
+        {(items.length > 0 ? items : ["未検出"]).map((item) => (
+          <li key={item} className="flex gap-2">
+            <span className={`mt-0.5 inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[10px] font-black ${markerClass}`}>{marker}</span>
+            <span>{item}</span>
+          </li>
+        ))}
       </ul>
     </div>
   );
@@ -276,6 +283,38 @@ function buildMeetingReview(meeting: MeetingRecord | undefined) {
     lostReason,
     adminComment: meeting?.adminComment?.trim() ?? "",
   };
+}
+
+function formatManualComplianceScore(
+  compliance: NonNullable<NonNullable<MeetingRecord["aiSummary"]>["manualCompliance"]>,
+) {
+  const impactScore = calculateScoreFromImpacts(compliance.checklistItems);
+  if (impactScore !== null) {
+    return `${impactScore}点`;
+  }
+
+  if (typeof compliance.score === "number" && Number.isFinite(compliance.score)) {
+    return `${compliance.score}点`;
+  }
+
+  const matchedCount = compliance.matchedCriteria.length;
+  const missingCount = compliance.missingCriteria.length;
+  const total = matchedCount + missingCount;
+  if (total <= 0) return "-";
+
+  return `${Math.round((matchedCount / total) * 100)}点`;
+}
+
+function calculateScoreFromImpacts(
+  items: NonNullable<NonNullable<MeetingRecord["aiSummary"]>["manualCompliance"]>["checklistItems"] | undefined,
+) {
+  if (!items || items.length === 0) return null;
+
+  const positive = items.reduce((sum, item) => sum + Math.max(item.scoreImpact ?? 0, 0), 0);
+  const negative = items.reduce((sum, item) => sum + Math.min(item.scoreImpact ?? 0, 0), 0);
+  if (positive <= 0) return null;
+
+  return Math.min(100, Math.max(0, Math.round(((positive + negative) / positive) * 100)));
 }
 
 function ErrorBox({ message }: { message: string }) {

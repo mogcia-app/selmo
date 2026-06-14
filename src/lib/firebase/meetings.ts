@@ -55,7 +55,7 @@ export type MeetingTranscriptBlock = {
 
 export type MeetingConversationLog = {
   id: string;
-  speaker: "speaker_1" | "speaker_2" | "unknown";
+  speaker: "sales" | "customer" | "participant" | "speaker_1" | "speaker_2" | "unknown";
   label: string;
   text: string;
   sourceSegmentIndexes: number[];
@@ -108,6 +108,13 @@ export type MeetingAiSummary = {
     missingCriteria: string[];
     productNotes: string[];
     improvementPhrases: string[];
+    checklistItems?: Array<{
+      category: string;
+      label: string;
+      status: "done" | "missing";
+      reason: string;
+      scoreImpact: number | null;
+    }>;
   };
 };
 
@@ -202,6 +209,9 @@ export async function createMeeting(input: CreateMeetingInput) {
   const companyId = resolveCompanyId(input.companyId);
   const salesDomain = input.salesDomain ?? "meeting";
   const normalizedAudioDurationSec = input.audioDurationSec ?? null;
+  const pastedConversationLogs = input.transcriptText?.trim()
+    ? buildConversationLogsFromText(input.transcriptText.trim())
+    : [];
 
   await setDoc(meetingRef, {
     companyId,
@@ -245,8 +255,8 @@ export async function createMeeting(input: CreateMeetingInput) {
           transcriptionProbeTestedAt: now,
           conversationLogStatus: "completed",
           conversationLogModel: "manual-paste",
-          conversationLogs: buildConversationLogsFromText(input.transcriptText.trim()),
-          conversationLogCount: 1,
+          conversationLogs: pastedConversationLogs,
+          conversationLogCount: pastedConversationLogs.length,
           conversationLogError: null,
           conversationLogTestedAt: now,
         }
@@ -444,17 +454,96 @@ async function createMeetingNotification(input: {
 }
 
 function buildConversationLogsFromText(text: string): MeetingConversationLog[] {
-  return [
-    {
-      id: "log_1",
+  const normalizedText = text.replace(/\r\n/g, "\n").replace(/\r/g, "\n").trim();
+  const lines = normalizedText.split("\n");
+  const logs: Array<{ speaker: MeetingConversationLog["speaker"]; label: string; text: string }> = [];
+  let currentSpeaker: MeetingConversationLog["speaker"] = "unknown";
+  let currentLabel = "文字起こし";
+  let currentLines: string[] = [];
+
+  function flushCurrent() {
+    const body = currentLines.join("\n").trim();
+    if (!body) {
+      currentLines = [];
+      return;
+    }
+
+    logs.push({
+      speaker: currentSpeaker,
+      label: currentLabel,
+      text: body,
+    });
+    currentLines = [];
+  }
+
+  for (const rawLine of lines) {
+    const line = rawLine.trim();
+    const speakerLabel = readPastedTranscriptSpeakerLabel(line);
+
+    if (speakerLabel) {
+      flushCurrent();
+      currentSpeaker = inferPastedTranscriptSpeaker(speakerLabel);
+      currentLabel = speakerLabel;
+      continue;
+    }
+
+    currentLines.push(rawLine);
+  }
+
+  flushCurrent();
+
+  if (logs.length === 0) {
+    logs.push({
       speaker: "unknown",
       label: "文字起こし",
-      text,
-      sourceSegmentIndexes: [0],
-      confidence: "estimated",
-      kind: "speech",
-    },
-  ];
+      text: normalizedText,
+    });
+  }
+
+  return logs.map((log, index) => ({
+    id: `log_${String(index + 1).padStart(3, "0")}`,
+    speaker: log.speaker,
+    label: log.label,
+    text: log.text,
+    sourceSegmentIndexes: [0],
+    confidence: "estimated",
+    kind: log.speaker === "unknown" ? "unknown" : "speech",
+  }));
+}
+
+function readPastedTranscriptSpeakerLabel(line: string) {
+  if (!line) {
+    return null;
+  }
+
+  const colonMatch = line.match(/^(.{1,24}?)[：:]\s*$/);
+  const label = (colonMatch?.[1] ?? line).trim();
+
+  if (/^(顧客|お客様|お客さま|クライアント|相手|先方|営業|担当|同席者|参加者|不明)$/.test(label)) {
+    return label;
+  }
+
+  if (/^[一-龠][一-龠ぁ-んァ-ヶA-Za-z\s　・.]{0,15}$/.test(label)) {
+    return label;
+  }
+
+  return null;
+}
+
+function inferPastedTranscriptSpeaker(label: string): MeetingConversationLog["speaker"] {
+  if (/^(顧客|お客様|お客さま|クライアント|相手|先方)$/.test(label)) {
+    return "customer";
+  }
+
+  if (/^(同席者|参加者)$/.test(label)) {
+    return "participant";
+  }
+
+  if (label === "不明") {
+    return "unknown";
+  }
+
+  return "sales";
 }
 
 export async function fetchMeeting(meetingId: string) {
@@ -1000,7 +1089,12 @@ function toConversationLogs(value: unknown): MeetingConversationLog[] {
 
       if (
         typeof id !== "string" ||
-        (speaker !== "speaker_1" && speaker !== "speaker_2" && speaker !== "unknown") ||
+        (speaker !== "sales" &&
+          speaker !== "customer" &&
+          speaker !== "participant" &&
+          speaker !== "speaker_1" &&
+          speaker !== "speaker_2" &&
+          speaker !== "unknown") ||
         typeof label !== "string" ||
         typeof text !== "string" ||
         !Array.isArray(sourceSegmentIndexes) ||
@@ -1115,7 +1209,38 @@ function toManualCompliance(value: unknown): MeetingAiSummary["manualCompliance"
     missingCriteria: readStringArray((value as { missingCriteria?: unknown }).missingCriteria),
     productNotes: readStringArray((value as { productNotes?: unknown }).productNotes),
     improvementPhrases: readStringArray((value as { improvementPhrases?: unknown }).improvementPhrases),
+    checklistItems: readManualChecklistItems((value as { checklistItems?: unknown }).checklistItems),
   };
+}
+
+function readManualChecklistItems(value: unknown) {
+  if (!Array.isArray(value)) return undefined;
+
+  const items = value
+    .map((item) => {
+      const record = readRecord(item);
+      if (!record) return null;
+      const category = readString(record.category).trim();
+      const label = readString(record.label).trim();
+      const status = readString(record.status);
+      const reason = readString(record.reason).trim();
+      const scoreImpact = readNumber(record.scoreImpact);
+
+      if (!category || !label || (status !== "done" && status !== "missing")) {
+        return null;
+      }
+
+      return {
+        category,
+        label,
+        status,
+        reason,
+        scoreImpact: scoreImpact === null ? null : Math.round(scoreImpact),
+      };
+    })
+    .filter((item): item is { category: string; label: string; status: "done" | "missing"; reason: string; scoreImpact: number | null } => Boolean(item));
+
+  return items.length > 0 ? items : undefined;
 }
 
 function readStringArray(value: unknown) {
