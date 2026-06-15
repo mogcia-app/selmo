@@ -7,6 +7,11 @@ import "./globals.css";
 export const metadata: Metadata = {
   title: "Selmo | Sales Meeting Analytics",
   description: "営業打ち合わせAI分析・営業可視化ツールのMVP",
+  icons: {
+    icon: "/summary.png",
+    shortcut: "/summary.png",
+    apple: "/summary.png",
+  },
 };
 
 export default function RootLayout({
