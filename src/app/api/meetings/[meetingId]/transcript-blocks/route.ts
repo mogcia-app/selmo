@@ -11,6 +11,12 @@ import {
   saveAiUsageLog,
   saveSystemErrorLog,
 } from "@/lib/server/operational-logs";
+import {
+  assertMeetingAccess,
+  handleApiAuthError,
+  requireApiUser,
+  type ApiUserContext,
+} from "@/lib/server/auth/require-api-user";
 
 export const runtime = "nodejs";
 
@@ -21,8 +27,6 @@ const defaultOverlapSec = 6;
 const supportedModels = new Set(["gpt-4o-mini-transcribe", "gpt-4o-transcribe"]);
 
 type RequestBody = {
-  companyId?: string | null;
-  userId?: string | null;
   audioDownloadUrl?: string;
   audioFileName?: string;
   audioMimeType?: string;
@@ -47,10 +51,13 @@ export async function POST(
   context: { params: Promise<{ meetingId: string }> },
 ) {
   let body: RequestBody | null = null;
+  let apiUser: ApiUserContext | null = null;
   let selectedModel = "gpt-4o-mini-transcribe";
 
   try {
+    apiUser = await requireApiUser(request);
     const { meetingId } = await context.params;
+    const meeting = await assertMeetingAccess(apiUser, meetingId);
 
     if (!process.env.OPENAI_API_KEY) {
       return NextResponse.json(
@@ -65,7 +72,8 @@ export async function POST(
       return NextResponse.json({ error: "不正なリクエストです。" }, { status: 400 });
     }
 
-    if (!body.audioDownloadUrl) {
+    const audioDownloadUrl = readString(meeting.data.audioDownloadUrl) || readString(body.audioDownloadUrl);
+    if (!audioDownloadUrl) {
       return NextResponse.json(
         { error: "音声ファイルのダウンロードURLが見つかりません。" },
         { status: 400 },
@@ -77,7 +85,7 @@ export async function POST(
       : "gpt-4o-mini-transcribe";
     selectedModel = model;
 
-    const audioResponse = await fetchWithTimeout(body.audioDownloadUrl, {
+    const audioResponse = await fetchWithTimeout(audioDownloadUrl, {
       timeoutMs: remoteFetchTimeoutMs,
     });
 
@@ -89,10 +97,10 @@ export async function POST(
     }
 
     const fileBuffer = Buffer.from(await audioResponse.arrayBuffer());
-    const fileName = body.audioFileName || `${meetingId}.mp3`;
+    const fileName = readString(meeting.data.audioFileName) || body.audioFileName || `${meetingId}.mp3`;
     const mimeType =
-      body.audioMimeType || audioResponse.headers.get("content-type") || "audio/mpeg";
-    const audioDurationSec = body.audioDurationSec ?? null;
+      readString(meeting.data.audioMimeType) || body.audioMimeType || audioResponse.headers.get("content-type") || "audio/mpeg";
+    const audioDurationSec = body.audioDurationSec ?? readNumber(meeting.data.audioDurationSec);
     const tempDir = await mkdtemp(join(tmpdir(), "selmo-transcript-blocks-"));
 
     try {
@@ -145,8 +153,8 @@ export async function POST(
         })),
       ).filter((block) => block.text);
       await saveAiUsageLog({
-        companyId: body.companyId,
-        userId: body.userId,
+        companyId: apiUser.companyId,
+        userId: apiUser.uid,
         feature: "transcription",
         model,
         audioDurationSec,
@@ -168,11 +176,16 @@ export async function POST(
       await rm(tempDir, { recursive: true, force: true });
     }
   } catch (error) {
+    const authError = handleApiAuthError(error);
+    if (authError) {
+      return NextResponse.json(authError.body, { status: authError.status });
+    }
+
     const message =
       error instanceof Error ? error.message : "本文ブロック生成に失敗しました。";
     await saveAiUsageLog({
-      companyId: body?.companyId,
-      userId: body?.userId,
+      companyId: apiUser?.companyId,
+      userId: apiUser?.uid,
       feature: "transcription",
       model: selectedModel,
       audioDurationSec: body?.audioDurationSec ?? null,
@@ -184,8 +197,8 @@ export async function POST(
       errorMessage: message,
     });
     await saveSystemErrorLog({
-      companyId: body?.companyId,
-      userId: body?.userId,
+      companyId: apiUser?.companyId,
+      userId: apiUser?.uid,
       kind: message.includes("Storage") ? "Storage" : "OpenAI",
       message,
       severity: "warning",
@@ -200,6 +213,14 @@ export async function POST(
       { status: 500 },
     );
   }
+}
+
+function readString(value: unknown) {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function readNumber(value: unknown) {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
 async function transcribeChunk({

@@ -1,5 +1,11 @@
 import { NextResponse } from "next/server";
 
+import {
+  assertAdminUser,
+  handleApiAuthError,
+  requireApiUser,
+} from "@/lib/server/auth/require-api-user";
+
 export const runtime = "nodejs";
 
 type StructureKind = "manual" | "product";
@@ -27,6 +33,15 @@ type StructuredPaste = {
 };
 
 export async function POST(request: Request) {
+  try {
+    const apiUser = await requireApiUser(request);
+    assertAdminUser(apiUser);
+  } catch (error) {
+    const authError = handleApiAuthError(error);
+    if (authError) return NextResponse.json(authError.body, { status: authError.status });
+    throw error;
+  }
+
   const body = (await request.json().catch(() => null)) as { kind?: unknown; text?: unknown } | null;
   const kind = body?.kind === "manual" || body?.kind === "product" ? body.kind : null;
   const text = typeof body?.text === "string" ? body.text.trim() : "";

@@ -9,6 +9,12 @@ import {
 } from "@/lib/server/operational-logs";
 import type { AnalysisContext } from "@/lib/server/analysis-context";
 import { buildAnalysisContextPrompt, loadAnalysisContext } from "@/lib/server/analysis-context";
+import {
+  assertSalesDomainAccess,
+  handleApiAuthError,
+  requireApiUser,
+  type ApiUserContext,
+} from "@/lib/server/auth/require-api-user";
 
 type RoleplayMessage = {
   role: "customer" | "sales";
@@ -51,16 +57,28 @@ type ManualChecklistEntry = {
   display: string;
 };
 
+type EvaluateRequestBody = {
+  companyId?: string | null;
+  userId?: string | null;
+  scenario?: RoleplayScenarioPayload;
+  messages?: RoleplayMessage[];
+};
+
 export async function POST(request: NextRequest) {
-  const body = (await request.json()) as {
-    companyId?: string | null;
-    userId?: string | null;
-    scenario?: RoleplayScenarioPayload;
-    messages?: RoleplayMessage[];
-  };
+  let apiUser: ApiUserContext | null = null;
+  let body: EvaluateRequestBody | null = null;
   const model = process.env.OPENAI_CHAT_MODEL ?? "gpt-4o-mini";
 
-  if (!body.scenario || !Array.isArray(body.messages) || body.messages.length < 2) {
+  try {
+    apiUser = await requireApiUser(request);
+    body = (await request.json()) as EvaluateRequestBody;
+  } catch (error) {
+    const authError = handleApiAuthError(error);
+    if (authError) return NextResponse.json(authError.body, { status: authError.status });
+    return NextResponse.json({ error: "不正なリクエストです。" }, { status: 400 });
+  }
+
+  if (!body?.scenario || !Array.isArray(body.messages) || body.messages.length < 2) {
     return NextResponse.json({ error: "シナリオと会話ログが必要です。" }, { status: 400 });
   }
 
@@ -69,7 +87,9 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const usageAvailability = await assertMonthlyAiUsageAvailable({ userId: body.userId });
+    const roleplayType = body.scenario.roleplayType === "teleapo" ? "teleapo" : "meeting";
+    assertSalesDomainAccess(apiUser, roleplayType);
+    const usageAvailability = await assertMonthlyAiUsageAvailable({ userId: apiUser.uid });
     if (!usageAvailability.allowed) {
       return NextResponse.json(
         {
@@ -81,9 +101,8 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const roleplayType = body.scenario.roleplayType === "teleapo" ? "teleapo" : "meeting";
     const analysisContext = await loadAnalysisContext({
-      companyId: body.companyId,
+      companyId: apiUser.companyId,
       productName: body.scenario.productName,
       manualCategory: body.scenario.scenarioCategory,
       targetSegment: body.scenario.targetSegment,
@@ -165,8 +184,8 @@ export async function POST(request: NextRequest) {
     const evaluation = normalizeEvaluation(JSON.parse(content) as EvaluationResponse, analysisContext.manual);
 
     await saveAiUsageLog({
-      companyId: body.companyId,
-      userId: body.userId,
+      companyId: apiUser.companyId,
+      userId: apiUser.uid,
       feature: "roleplay",
       model,
       inputTokens: data.usage?.prompt_tokens ?? null,
@@ -181,18 +200,23 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json(evaluation);
   } catch (error) {
+    const authError = handleApiAuthError(error);
+    if (authError) {
+      return NextResponse.json(authError.body, { status: authError.status });
+    }
+
     const message = error instanceof Error ? error.message : "AIロープレ評価に失敗しました。";
     await saveAiUsageLog({
-      companyId: body.companyId,
-      userId: body.userId,
+      companyId: apiUser?.companyId,
+      userId: apiUser?.uid,
       feature: "roleplay",
       model,
       status: "failed",
       errorMessage: message,
     });
     await saveSystemErrorLog({
-      companyId: body.companyId,
-      userId: body.userId,
+      companyId: apiUser?.companyId,
+      userId: apiUser?.uid,
       kind: "OpenAI",
       message,
       severity: "warning",

@@ -7,6 +7,12 @@ import {
   saveSystemErrorLog,
 } from "@/lib/server/operational-logs";
 import { MONTHLY_AI_LIMIT_MESSAGE } from "@/lib/ai-usage-limit";
+import {
+  assertSalesDomainAccess,
+  handleApiAuthError,
+  requireApiUser,
+  type ApiUserContext,
+} from "@/lib/server/auth/require-api-user";
 
 type RoleplayMessage = {
   role: "customer" | "sales";
@@ -15,6 +21,7 @@ type RoleplayMessage = {
 
 type RoleplayScenarioPayload = {
   title: string;
+  roleplayType?: "meeting" | "teleapo";
   customerRole: string;
   customerProfile: string;
   productName?: string;
@@ -27,16 +34,28 @@ type RoleplayScenarioPayload = {
   difficulty: "easy" | "normal" | "hard";
 };
 
+type RespondRequestBody = {
+  companyId?: string | null;
+  userId?: string | null;
+  scenario?: RoleplayScenarioPayload;
+  messages?: RoleplayMessage[];
+};
+
 export async function POST(request: NextRequest) {
-  const body = (await request.json()) as {
-    companyId?: string | null;
-    userId?: string | null;
-    scenario?: RoleplayScenarioPayload;
-    messages?: RoleplayMessage[];
-  };
+  let apiUser: ApiUserContext | null = null;
+  let body: RespondRequestBody | null = null;
   const model = process.env.OPENAI_CHAT_MODEL ?? "gpt-4o-mini";
 
-  if (!body.scenario || !Array.isArray(body.messages)) {
+  try {
+    apiUser = await requireApiUser(request);
+    body = (await request.json()) as RespondRequestBody;
+  } catch (error) {
+    const authError = handleApiAuthError(error);
+    if (authError) return NextResponse.json(authError.body, { status: authError.status });
+    return NextResponse.json({ error: "不正なリクエストです。" }, { status: 400 });
+  }
+
+  if (!body?.scenario || !Array.isArray(body.messages)) {
     return NextResponse.json({ error: "シナリオと会話ログが必要です。" }, { status: 400 });
   }
 
@@ -48,7 +67,8 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const usageAvailability = await assertMonthlyAiUsageAvailable({ userId: body.userId });
+    assertSalesDomainAccess(apiUser, body.scenario.roleplayType === "teleapo" ? "teleapo" : "meeting");
+    const usageAvailability = await assertMonthlyAiUsageAvailable({ userId: apiUser.uid });
     if (!usageAvailability.allowed) {
       return NextResponse.json(
         {
@@ -85,16 +105,16 @@ export async function POST(request: NextRequest) {
     if (!response.ok) {
       const message = `OpenAI がエラーを返しました。${response.statusText}`;
       await saveAiUsageLog({
-        companyId: body.companyId,
-        userId: body.userId,
+        companyId: apiUser.companyId,
+        userId: apiUser.uid,
         feature: "roleplay",
         model,
         status: "failed",
         errorMessage: message,
       });
       await saveSystemErrorLog({
-        companyId: body.companyId,
-        userId: body.userId,
+        companyId: apiUser.companyId,
+        userId: apiUser.uid,
         kind: "OpenAI",
         message,
         severity: "warning",
@@ -115,8 +135,8 @@ export async function POST(request: NextRequest) {
     };
     const message = data.choices?.[0]?.message?.content?.trim();
     await saveAiUsageLog({
-      companyId: body.companyId,
-      userId: body.userId,
+      companyId: apiUser.companyId,
+      userId: apiUser.uid,
       feature: "roleplay",
       model,
       inputTokens: data.usage?.prompt_tokens ?? null,
@@ -134,19 +154,24 @@ export async function POST(request: NextRequest) {
       source: message ? "openai" : "fallback",
     });
   } catch (error) {
+    const authError = handleApiAuthError(error);
+    if (authError) {
+      return NextResponse.json(authError.body, { status: authError.status });
+    }
+
     const message =
       error instanceof Error ? error.message : "AIロープレ応答の生成に失敗しました。";
     await saveAiUsageLog({
-      companyId: body.companyId,
-      userId: body.userId,
+      companyId: apiUser?.companyId,
+      userId: apiUser?.uid,
       feature: "roleplay",
       model,
       status: "failed",
       errorMessage: message,
     });
     await saveSystemErrorLog({
-      companyId: body.companyId,
-      userId: body.userId,
+      companyId: apiUser?.companyId,
+      userId: apiUser?.uid,
       kind: "OpenAI",
       message,
       severity: "warning",

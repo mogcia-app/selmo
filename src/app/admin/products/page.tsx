@@ -10,6 +10,7 @@ import {
   Panel,
   useAdminInsights,
 } from "@/app/admin/_components/admin-insights";
+import { getApiAuthHeaders } from "@/lib/client/api-auth";
 import {
   createKnowledgeProduct,
   updateKnowledgeProduct,
@@ -502,7 +503,7 @@ async function analyzeProductUrl(url: string) {
   try {
     const response = await fetch("/api/products/analyze-url", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: await getApiAuthHeaders({ "Content-Type": "application/json" }),
       body: JSON.stringify({ url }),
     });
     const payload = (await response.json()) as { summary?: string };
@@ -515,7 +516,7 @@ async function analyzeProductUrl(url: string) {
 async function structureProductPaste(text: string) {
   const response = await fetch("/api/admin/structure-paste", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: await getApiAuthHeaders({ "Content-Type": "application/json" }),
     body: JSON.stringify({ kind: "product", text }),
   });
   const payload = (await response.json()) as {

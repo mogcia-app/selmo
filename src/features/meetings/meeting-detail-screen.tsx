@@ -7,6 +7,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { useAuth } from "@/features/auth/auth-provider";
 import { MONTHLY_AI_LIMIT_MESSAGE } from "@/lib/ai-usage-limit";
+import { getApiAuthHeaders } from "@/lib/client/api-auth";
 import { saveSalesActivityEvent } from "@/lib/firebase/activity";
 import {
   saveMeetingAiSummary,
@@ -181,7 +182,7 @@ export function MeetingDetailScreen({
     };
   }, [isTranscribing, meeting?.audioDurationSec]);
 
-  const generateAiSummaryInBackground = useCallback(async (transcriptText: string, logs: DisplayLog[], options?: { countUsage?: boolean }) => {
+  const generateAiSummaryInBackground = useCallback(async (transcriptText: string, logs: DisplayLog[]) => {
     try {
       await saveMeetingAiSummary(meetingId, {
         status: "running",
@@ -192,18 +193,15 @@ export function MeetingDetailScreen({
 
       const summaryResponse = await fetchWithTimeout(`/api/meetings/${meetingId}/summary`, {
         method: "POST",
-        headers: {
+        headers: await getApiAuthHeaders({
           "Content-Type": "application/json",
-        },
+        }),
         body: JSON.stringify({
-          companyId: profile?.companyId ?? meeting?.companyId ?? null,
-          userId: profile?.uid ?? meeting?.userId ?? null,
           productName: meeting?.productType ?? null,
           meetingPurpose: meeting?.meetingPurpose ?? null,
           customerType: meeting?.customerType ?? null,
           salesDomain: meeting?.salesDomain ?? null,
           transcriptText,
-          countUsage: options?.countUsage ?? true,
           conversationLogs: logs
             .map((log) => ({
               speaker: log.speaker,
@@ -317,13 +315,10 @@ export function MeetingDetailScreen({
 
       const response = await fetchWithTimeout(`/api/meetings/${meetingId}/transcribe`, {
         method: "POST",
-        headers: {
+        headers: await getApiAuthHeaders({
           "Content-Type": "application/json",
-        },
+        }),
         body: JSON.stringify({
-          companyId: profile.companyId ?? meeting.companyId,
-          userId: profile.uid,
-          audioDownloadUrl: meeting.audioDownloadUrl,
           audioFileName: meeting.audioFileName,
           audioMimeType: meeting.audioMimeType,
           audioSizeBytes: meeting.audioSizeBytes,
@@ -521,7 +516,7 @@ export function MeetingDetailScreen({
     }
 
     summaryGenerationRequestedRef.current = true;
-    void generateAiSummaryInBackground(transcriptText, editableLogs, { countUsage: true });
+    void generateAiSummaryInBackground(transcriptText, editableLogs);
   }, [
     editableLogs,
     exportTranscriptText,
@@ -574,7 +569,7 @@ export function MeetingDetailScreen({
     }
 
     summaryGenerationRequestedRef.current = true;
-    void generateAiSummaryInBackground(transcriptText, editableLogs, { countUsage: false });
+    void generateAiSummaryInBackground(transcriptText, editableLogs);
   }
 
   function handleUpdateLogSpeaker(logId: string, speaker: ConversationSpeaker) {

@@ -286,7 +286,7 @@ service cloud.firestore {
     }
 
     match /manualChecklists/{checklistId} {
-      allow read: if isSignedIn();
+      allow read: if isOwnerRole() || isAdminRole();
       allow write: if isOwnerRole() || isAdminRole();
     }
 
@@ -426,7 +426,7 @@ service cloud.firestore {
 
     match /aiUsageLogs/{logId} {
       allow read: if isOwnerRole() || canReadCompanyData(resource.data.companyId);
-      allow create: if isOwnerRole() || (isSignedIn() && sameCompany(request.resource.data.companyId));
+      allow create: if false;
       allow update, delete: if false;
     }
 
@@ -483,7 +483,18 @@ service cloud.firestore {
 
     match /audioProcessingJobs/{jobId} {
       allow read: if isOwnerRole() || canReadCompanyData(resource.data.companyId);
-      allow create, update: if isOwnerRole() || (isSignedIn() && sameCompany(request.resource.data.companyId));
+      allow create: if isOwnerRole() || (
+        isSignedIn()
+        && request.resource.data.userId == request.auth.uid
+        && sameCompany(request.resource.data.companyId)
+      );
+      allow update: if isOwnerRole()
+        || canAdminCompanyData(resource.data.companyId)
+        || (
+          isSignedIn()
+          && resource.data.userId == request.auth.uid
+          && sameCompany(resource.data.companyId)
+        );
       allow delete: if false;
     }
 

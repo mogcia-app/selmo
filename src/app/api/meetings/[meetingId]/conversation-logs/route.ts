@@ -7,6 +7,12 @@ import {
   saveSystemErrorLog,
 } from "@/lib/server/operational-logs";
 import { MONTHLY_AI_LIMIT_MESSAGE } from "@/lib/ai-usage-limit";
+import {
+  assertMeetingAccess,
+  handleApiAuthError,
+  requireApiUser,
+  type ApiUserContext,
+} from "@/lib/server/auth/require-api-user";
 
 export const runtime = "nodejs";
 
@@ -14,8 +20,6 @@ const remoteFetchTimeoutMs = 10 * 60 * 1000;
 const maxSegmentsPerBatch = 36;
 
 type RequestBody = {
-  companyId?: string | null;
-  userId?: string | null;
   transcriptText?: string | null;
   segments?: Array<{ startSec: number; endSec: number; text: string }>;
 };
@@ -34,10 +38,13 @@ export async function POST(
   context: { params: Promise<{ meetingId: string }> },
 ) {
   let body: RequestBody | null = null;
+  let apiUser: ApiUserContext | null = null;
   const model = "gpt-4o-mini";
 
   try {
+    apiUser = await requireApiUser(request);
     const { meetingId } = await context.params;
+    await assertMeetingAccess(apiUser, meetingId);
 
     if (!process.env.OPENAI_API_KEY) {
       return NextResponse.json(
@@ -69,7 +76,7 @@ export async function POST(
       );
     }
 
-    const usageAvailability = await assertMonthlyAiUsageAvailable({ userId: body.userId });
+    const usageAvailability = await assertMonthlyAiUsageAvailable({ userId: apiUser.uid });
     if (!usageAvailability.allowed) {
       return NextResponse.json(
         {
@@ -86,8 +93,8 @@ export async function POST(
       segments,
     });
     await saveAiUsageLog({
-      companyId: body.companyId,
-      userId: body.userId,
+      companyId: apiUser.companyId,
+      userId: apiUser.uid,
       feature: "analysis",
       model,
       inputTokens: result.usage.inputTokens,
@@ -107,19 +114,24 @@ export async function POST(
       logs: result.logs,
     });
   } catch (error) {
+    const authError = handleApiAuthError(error);
+    if (authError) {
+      return NextResponse.json(authError.body, { status: authError.status });
+    }
+
     const message =
       error instanceof Error ? error.message : "会話ログ生成に失敗しました。";
     await saveAiUsageLog({
-      companyId: body?.companyId,
-      userId: body?.userId,
+      companyId: apiUser?.companyId,
+      userId: apiUser?.uid,
       feature: "analysis",
       model,
       status: "failed",
       errorMessage: message,
     });
     await saveSystemErrorLog({
-      companyId: body?.companyId,
-      userId: body?.userId,
+      companyId: apiUser?.companyId,
+      userId: apiUser?.uid,
       kind: "OpenAI",
       message,
       severity: "warning",

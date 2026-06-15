@@ -1,15 +1,18 @@
 import { FieldValue } from "firebase-admin/firestore";
 import { NextRequest, NextResponse } from "next/server";
 
-import { getFirebaseAdminAuth, getFirebaseAdminDb } from "@/lib/firebase/admin";
+import { getFirebaseAdminDb } from "@/lib/firebase/admin";
+import {
+  assertSalesUser,
+  handleApiAuthError,
+  requireApiUser,
+} from "@/lib/server/auth/require-api-user";
 
 const STANDARD_AI_QUOTA = 15;
 const PRO_AI_QUOTA = 30;
 const supportedChargeAmounts = new Set([1, 10]);
 
 export async function POST(request: NextRequest) {
-  const authHeader = request.headers.get("authorization") ?? "";
-  const token = authHeader.startsWith("Bearer ") ? authHeader.slice("Bearer ".length) : "";
   const body = (await request.json().catch(() => null)) as { amount?: unknown } | null;
   const amount = typeof body?.amount === "number" ? body.amount : 0;
 
@@ -17,42 +20,17 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "チャージ回数が不正です。" }, { status: 400 });
   }
 
-  if (!token) {
-    return NextResponse.json({ error: "ログイン情報を確認できませんでした。" }, { status: 401 });
-  }
-
-  const auth = getFirebaseAdminAuth();
   const db = getFirebaseAdminDb();
 
-  if (!auth || !db) {
+  if (!db) {
     return NextResponse.json({ error: "Firebase Admin が設定されていません。" }, { status: 500 });
   }
 
   try {
-    const decodedToken = await auth.verifyIdToken(token);
-    const userRef = db.collection("users").doc(decodedToken.uid);
-    const userSnapshot = await userRef.get();
+    const apiUser = await requireApiUser(request);
+    assertSalesUser(apiUser);
 
-    if (!userSnapshot.exists) {
-      return NextResponse.json({ error: "ユーザー情報が見つかりません。" }, { status: 404 });
-    }
-
-    const user = userSnapshot.data() as {
-      companyId?: string;
-      email?: string | null;
-      name?: string | null;
-      status?: string;
-    };
-
-    if (user.status === "inactive") {
-      return NextResponse.json({ error: "無効なユーザーです。" }, { status: 403 });
-    }
-
-    if (!user.companyId) {
-      return NextResponse.json({ error: "会社情報が見つかりません。" }, { status: 400 });
-    }
-
-    const companyRef = db.collection("companies").doc(user.companyId);
+    const companyRef = db.collection("companies").doc(apiUser.companyId);
     const chargeRef = db.collection("aiChargeEvents").doc();
     const result = await db.runTransaction(async (transaction) => {
       const companySnapshot = await transaction.get(companyRef);
@@ -80,11 +58,11 @@ export async function POST(request: NextRequest) {
         updatedAt: FieldValue.serverTimestamp(),
       });
       transaction.set(chargeRef, {
-        companyId: user.companyId,
+        companyId: apiUser.companyId,
         companyName: readString(company.companyName ?? company.name, "未設定の会社"),
-        userId: decodedToken.uid,
-        userName: readString(user.name, "未設定"),
-        userEmail: user.email ?? decodedToken.email ?? null,
+        userId: apiUser.uid,
+        userName: readString(apiUser.name, "未設定"),
+        userEmail: apiUser.email,
         amount,
         unitPriceJpy: 6500,
         priceJpy: amount * 6500,
@@ -105,6 +83,11 @@ export async function POST(request: NextRequest) {
       ...result,
     });
   } catch (error) {
+    const authError = handleApiAuthError(error);
+    if (authError) {
+      return NextResponse.json(authError.body, { status: authError.status });
+    }
+
     const message = error instanceof Error ? error.message : "チャージに失敗しました。";
     return NextResponse.json({ error: message }, { status: 500 });
   }

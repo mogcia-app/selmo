@@ -12,6 +12,7 @@ import {
   StatusBadge,
 } from "@/app/admin/_components/admin-insights";
 import { useAuth } from "@/features/auth/auth-provider";
+import { getApiAuthHeaders } from "@/lib/client/api-auth";
 import { subscribeToKnowledgeProducts, type KnowledgeProduct } from "@/lib/firebase/knowledge";
 import {
   createSalesManual,
@@ -591,7 +592,7 @@ function joinLines(value: string[] | undefined) {
 async function structureAdminPaste(kind: "manual", text: string) {
   const response = await fetch("/api/admin/structure-paste", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: await getApiAuthHeaders({ "Content-Type": "application/json" }),
     body: JSON.stringify({ kind, text }),
   });
   const payload = (await response.json()) as {

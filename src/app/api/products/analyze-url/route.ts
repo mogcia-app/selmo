@@ -1,8 +1,23 @@
 import { NextResponse } from "next/server";
 
+import {
+  assertAdminUser,
+  handleApiAuthError,
+  requireApiUser,
+} from "@/lib/server/auth/require-api-user";
+
 export const runtime = "nodejs";
 
 export async function POST(request: Request) {
+  try {
+    const apiUser = await requireApiUser(request);
+    assertAdminUser(apiUser);
+  } catch (error) {
+    const authError = handleApiAuthError(error);
+    if (authError) return NextResponse.json(authError.body, { status: authError.status });
+    throw error;
+  }
+
   const body = (await request.json().catch(() => null)) as { url?: unknown } | null;
   const url = typeof body?.url === "string" ? body.url.trim() : "";
 

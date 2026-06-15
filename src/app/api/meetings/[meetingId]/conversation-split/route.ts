@@ -7,14 +7,18 @@ import {
   saveAiUsageLog,
   saveSystemErrorLog,
 } from "@/lib/server/operational-logs";
+import {
+  assertMeetingAccess,
+  handleApiAuthError,
+  requireApiUser,
+  type ApiUserContext,
+} from "@/lib/server/auth/require-api-user";
 
 export const runtime = "nodejs";
 
 const remoteFetchTimeoutMs = 10 * 60 * 1000;
 
 type RequestBody = {
-  companyId?: string | null;
-  userId?: string | null;
   transcriptText?: string | null;
 };
 
@@ -28,10 +32,13 @@ export async function POST(
   context: { params: Promise<{ meetingId: string }> },
 ) {
   let body: RequestBody | null = null;
+  let apiUser: ApiUserContext | null = null;
   const model = "gpt-4o-mini";
 
   try {
+    apiUser = await requireApiUser(request);
     const { meetingId } = await context.params;
+    await assertMeetingAccess(apiUser, meetingId);
 
     if (!process.env.OPENAI_API_KEY) {
       return NextResponse.json({ error: "OPENAI_API_KEY が未設定です。" }, { status: 500 });
@@ -48,7 +55,7 @@ export async function POST(
       return NextResponse.json({ error: "分割対象の文字起こし本文がありません。" }, { status: 400 });
     }
 
-    const usageAvailability = await assertMonthlyAiUsageAvailable({ userId: body.userId });
+    const usageAvailability = await assertMonthlyAiUsageAvailable({ userId: apiUser.uid });
     if (!usageAvailability.allowed) {
       return NextResponse.json(
         {
@@ -115,8 +122,8 @@ export async function POST(
       : [];
 
     await saveAiUsageLog({
-      companyId: body.companyId,
-      userId: body.userId,
+      companyId: apiUser.companyId,
+      userId: apiUser.uid,
       feature: "analysis",
       model,
       inputTokens: parsed.usage?.prompt_tokens ?? null,
@@ -131,18 +138,23 @@ export async function POST(
 
     return NextResponse.json({ meetingId, model, logs });
   } catch (error) {
+    const authError = handleApiAuthError(error);
+    if (authError) {
+      return NextResponse.json(authError.body, { status: authError.status });
+    }
+
     const message = error instanceof Error ? error.message : "AI会話分割に失敗しました。";
     await saveAiUsageLog({
-      companyId: body?.companyId,
-      userId: body?.userId,
+      companyId: apiUser?.companyId,
+      userId: apiUser?.uid,
       feature: "analysis",
       model,
       status: "failed",
       errorMessage: message,
     });
     await saveSystemErrorLog({
-      companyId: body?.companyId,
-      userId: body?.userId,
+      companyId: apiUser?.companyId,
+      userId: apiUser?.uid,
       kind: "OpenAI",
       message,
       severity: "warning",

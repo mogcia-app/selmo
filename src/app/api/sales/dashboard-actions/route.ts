@@ -1,7 +1,14 @@
 import { FieldValue } from "firebase-admin/firestore";
 import { NextRequest, NextResponse } from "next/server";
 
-import { getFirebaseAdminAuth, getFirebaseAdminDb } from "@/lib/firebase/admin";
+import { getFirebaseAdminDb } from "@/lib/firebase/admin";
+import {
+  assertSalesDomainAccess,
+  assertSalesUser,
+  handleApiAuthError,
+  requireApiUser,
+  type ApiUserContext,
+} from "@/lib/server/auth/require-api-user";
 import {
   estimateChatCostUsd,
   saveAiUsageLog,
@@ -35,48 +42,25 @@ type RequestBody = {
 };
 
 export async function POST(request: NextRequest) {
-  const authHeader = request.headers.get("authorization") ?? "";
-  const token = authHeader.startsWith("Bearer ") ? authHeader.slice("Bearer ".length) : "";
   const body = (await request.json().catch(() => null)) as RequestBody | null;
   const salesDomain = body?.salesDomain === "teleapo" ? "teleapo" : "meeting";
   const fallbackCards = normalizeCards(body?.fallbackCards);
 
-  if (!token) {
-    return NextResponse.json({ error: "ログイン情報を確認できませんでした。" }, { status: 401 });
-  }
-
-  const auth = getFirebaseAdminAuth();
   const db = getFirebaseAdminDb();
 
-  if (!auth || !db) {
+  if (!db) {
     return NextResponse.json({ error: "Firebase Admin が設定されていません。" }, { status: 500 });
   }
 
-  let userId: string | null = null;
-  let companyId: string | null = null;
+  let apiUser: ApiUserContext | null = null;
 
   try {
-    const decodedToken = await auth.verifyIdToken(token);
-    userId = decodedToken.uid;
-    const userSnapshot = await db.collection("users").doc(decodedToken.uid).get();
-
-    if (!userSnapshot.exists) {
-      return NextResponse.json({ error: "ユーザー情報が見つかりません。" }, { status: 404 });
-    }
-
-    const user = userSnapshot.data() as { companyId?: string; status?: string; role?: string };
-    companyId = typeof user.companyId === "string" ? user.companyId : null;
-
-    if (user.status === "inactive") {
-      return NextResponse.json({ error: "無効なユーザーです。" }, { status: 403 });
-    }
-
-    if (!companyId) {
-      return NextResponse.json({ error: "会社情報が見つかりません。" }, { status: 400 });
-    }
+    apiUser = await requireApiUser(request);
+    assertSalesUser(apiUser);
+    assertSalesDomainAccess(apiUser, salesDomain);
 
     const dateKey = getJapanDateKey();
-    const insightRef = db.collection("salesDashboardActionInsights").doc(`${decodedToken.uid}_${salesDomain}_${dateKey}`);
+    const insightRef = db.collection("salesDashboardActionInsights").doc(`${apiUser.uid}_${salesDomain}_${dateKey}`);
     const cachedSnapshot = await insightRef.get();
 
     if (cachedSnapshot.exists) {
@@ -105,8 +89,8 @@ export async function POST(request: NextRequest) {
 
     await insightRef.set(
       {
-        companyId,
-        userId: decodedToken.uid,
+        companyId: apiUser.companyId,
+        userId: apiUser.uid,
         salesDomain,
         dateKey,
         model,
@@ -120,8 +104,8 @@ export async function POST(request: NextRequest) {
     );
 
     await saveAiUsageLog({
-      companyId,
-      userId: decodedToken.uid,
+      companyId: apiUser.companyId,
+      userId: apiUser.uid,
       feature: "dashboard_action",
       model,
       inputTokens: generated.usage.inputTokens,
@@ -141,18 +125,23 @@ export async function POST(request: NextRequest) {
       cards: generated.cards,
     });
   } catch (error) {
+    const authError = handleApiAuthError(error);
+    if (authError) {
+      return NextResponse.json(authError.body, { status: authError.status });
+    }
+
     const message = error instanceof Error ? error.message : "営業アクションの生成に失敗しました。";
     await saveAiUsageLog({
-      companyId,
-      userId,
+      companyId: apiUser?.companyId,
+      userId: apiUser?.uid,
       feature: "dashboard_action",
       model,
       status: "failed",
       errorMessage: message,
     });
     await saveSystemErrorLog({
-      companyId,
-      userId,
+      companyId: apiUser?.companyId,
+      userId: apiUser?.uid,
       kind: "OpenAI",
       message,
       severity: "warning",

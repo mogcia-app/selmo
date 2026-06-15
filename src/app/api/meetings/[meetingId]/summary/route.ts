@@ -9,21 +9,24 @@ import {
 import { MONTHLY_AI_LIMIT_MESSAGE } from "@/lib/ai-usage-limit";
 import type { AnalysisContext } from "@/lib/server/analysis-context";
 import { buildAnalysisContextPrompt, loadAnalysisContext } from "@/lib/server/analysis-context";
+import {
+  assertMeetingAccess,
+  handleApiAuthError,
+  requireApiUser,
+  type ApiUserContext,
+} from "@/lib/server/auth/require-api-user";
 
 export const runtime = "nodejs";
 
 const remoteFetchTimeoutMs = 10 * 60 * 1000;
 
 type RequestBody = {
-  companyId?: string | null;
-  userId?: string | null;
   productName?: string | null;
   meetingPurpose?: string | null;
   customerType?: "new" | "existing" | string | null;
   salesDomain?: "meeting" | "teleapo" | string | null;
   transcriptText?: string;
   conversationLogs?: ConversationLogInput[];
-  countUsage?: boolean;
 };
 
 type ConversationSpeaker = "sales" | "customer" | "participant" | "unknown";
@@ -103,10 +106,13 @@ export async function POST(
   context: { params: Promise<{ meetingId: string }> },
 ) {
   let body: RequestBody | null = null;
+  let apiUser: ApiUserContext | null = null;
   const model = "gpt-4o-mini";
 
   try {
-    await context.params;
+    apiUser = await requireApiUser(request);
+    const { meetingId } = await context.params;
+    const meeting = await assertMeetingAccess(apiUser, meetingId);
 
     if (!process.env.OPENAI_API_KEY) {
       return NextResponse.json(
@@ -129,9 +135,9 @@ export async function POST(
       );
     }
 
-    const shouldCountUsage = body.countUsage !== false;
+    const shouldCountUsage = !hasExistingAiSummary(meeting.data.aiSummary);
     if (shouldCountUsage) {
-      const usageAvailability = await assertMonthlyAiUsageAvailable({ userId: body.userId });
+      const usageAvailability = await assertMonthlyAiUsageAvailable({ userId: apiUser.uid });
       if (!usageAvailability.allowed) {
         return NextResponse.json(
           {
@@ -145,19 +151,19 @@ export async function POST(
     }
 
     const analysisContext = await loadAnalysisContext({
-      companyId: body.companyId,
-      productName: body.productName,
-      manualCategory: resolveManualCategory(body.customerType, body.meetingPurpose),
-      manualDomain: body.salesDomain === "teleapo" ? "teleapo" : "meeting",
+      companyId: apiUser.companyId,
+      productName: body.productName ?? readString(meeting.data.productType),
+      manualCategory: resolveManualCategory(body.customerType ?? readString(meeting.data.customerType), body.meetingPurpose ?? readString(meeting.data.meetingPurpose)),
+      manualDomain: meeting.salesDomain,
     });
     const result = await summarizeTranscript(conversationInput, analysisContext, {
-      meetingPurpose: body.meetingPurpose,
-      customerType: body.customerType,
-      salesDomain: body.salesDomain,
+      meetingPurpose: body.meetingPurpose ?? readString(meeting.data.meetingPurpose),
+      customerType: body.customerType ?? readString(meeting.data.customerType),
+      salesDomain: meeting.salesDomain,
     });
     await saveAiUsageLog({
-      companyId: body.companyId,
-      userId: body.userId,
+      companyId: apiUser.companyId,
+      userId: apiUser.uid,
       feature: shouldCountUsage ? "summary" : "analysis",
       model,
       inputTokens: result.usage.inputTokens,
@@ -175,18 +181,23 @@ export async function POST(
       summary: result.summary,
     });
   } catch (error) {
+    const authError = handleApiAuthError(error);
+    if (authError) {
+      return NextResponse.json(authError.body, { status: authError.status });
+    }
+
     const message = error instanceof Error ? error.message : "AI要約の生成に失敗しました。";
     await saveAiUsageLog({
-      companyId: body?.companyId,
-      userId: body?.userId,
-      feature: body?.countUsage === false ? "analysis" : "summary",
+      companyId: apiUser?.companyId,
+      userId: apiUser?.uid,
+      feature: "summary",
       model,
       status: "failed",
       errorMessage: message,
     });
     await saveSystemErrorLog({
-      companyId: body?.companyId,
-      userId: body?.userId,
+      companyId: apiUser?.companyId,
+      userId: apiUser?.uid,
       kind: "OpenAI",
       message,
       severity: "warning",
@@ -201,6 +212,14 @@ export async function POST(
       { status: 500 },
     );
   }
+}
+
+function hasExistingAiSummary(value: unknown) {
+  return Boolean(value && typeof value === "object");
+}
+
+function readString(value: unknown) {
+  return typeof value === "string" ? value : "";
 }
 
 async function summarizeTranscript(

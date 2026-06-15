@@ -7,14 +7,26 @@ import {
   saveSystemErrorLog,
 } from "@/lib/server/operational-logs";
 import { MONTHLY_AI_LIMIT_MESSAGE } from "@/lib/ai-usage-limit";
+import {
+  handleApiAuthError,
+  requireApiUser,
+  type ApiUserContext,
+} from "@/lib/server/auth/require-api-user";
 
 export const runtime = "nodejs";
 
 export async function POST(request: NextRequest) {
+  let apiUser: ApiUserContext | null = null;
+  try {
+    apiUser = await requireApiUser(request);
+  } catch (error) {
+    const authError = handleApiAuthError(error);
+    if (authError) return NextResponse.json(authError.body, { status: authError.status });
+    return NextResponse.json({ error: "ログイン情報を確認できませんでした。" }, { status: 401 });
+  }
+
   const formData = await request.formData().catch(() => null);
   const audio = formData?.get("audio");
-  const companyId = readNullableFormValue(formData?.get("companyId"));
-  const userId = readNullableFormValue(formData?.get("userId"));
   const durationSec = readNumberFormValue(formData?.get("durationSec"));
   const model = process.env.OPENAI_TRANSCRIPTION_MODEL ?? "gpt-4o-mini-transcribe";
 
@@ -27,7 +39,7 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const usageAvailability = await assertMonthlyAiUsageAvailable({ userId });
+    const usageAvailability = await assertMonthlyAiUsageAvailable({ userId: apiUser.uid });
     if (!usageAvailability.allowed) {
       return NextResponse.json(
         {
@@ -55,8 +67,8 @@ export async function POST(request: NextRequest) {
     if (!response.ok) {
       const message = `OpenAI が文字起こしエラーを返しました。${response.statusText}`;
       await saveAiUsageLog({
-        companyId,
-        userId,
+        companyId: apiUser.companyId,
+        userId: apiUser.uid,
         feature: "transcription",
         model,
         audioDurationSec: durationSec,
@@ -64,8 +76,8 @@ export async function POST(request: NextRequest) {
         errorMessage: message,
       });
       await saveSystemErrorLog({
-        companyId,
-        userId,
+        companyId: apiUser.companyId,
+        userId: apiUser.uid,
         kind: "OpenAI",
         message,
         severity: "warning",
@@ -77,8 +89,8 @@ export async function POST(request: NextRequest) {
     const payload = (await response.json()) as { text?: string };
     const text = payload.text?.trim() ?? "";
     await saveAiUsageLog({
-      companyId,
-      userId,
+      companyId: apiUser.companyId,
+      userId: apiUser.uid,
       feature: "transcription",
       model,
       audioDurationSec: durationSec,
@@ -90,8 +102,8 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     const message = error instanceof Error ? error.message : "ロープレ音声の文字起こしに失敗しました。";
     await saveAiUsageLog({
-      companyId,
-      userId,
+      companyId: apiUser.companyId,
+      userId: apiUser.uid,
       feature: "transcription",
       model,
       audioDurationSec: durationSec,
@@ -99,8 +111,8 @@ export async function POST(request: NextRequest) {
       errorMessage: message,
     });
     await saveSystemErrorLog({
-      companyId,
-      userId,
+      companyId: apiUser.companyId,
+      userId: apiUser.uid,
       kind: "OpenAI",
       message,
       severity: "warning",
@@ -108,10 +120,6 @@ export async function POST(request: NextRequest) {
     });
     return NextResponse.json({ error: "音声の文字起こしに失敗しました。" }, { status: 500 });
   }
-}
-
-function readNullableFormValue(value: FormDataEntryValue | null | undefined) {
-  return typeof value === "string" && value.trim() ? value.trim() : null;
 }
 
 function readNumberFormValue(value: FormDataEntryValue | null | undefined) {

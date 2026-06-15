@@ -6,6 +6,7 @@ import { useSearchParams } from "next/navigation";
 import { FormEvent, useEffect, useMemo, useState } from "react";
 
 import { useAuth } from "@/features/auth/auth-provider";
+import { getApiAuthHeaders } from "@/lib/client/api-auth";
 import { subscribeToKnowledgeProducts, type KnowledgeProduct } from "@/lib/firebase/knowledge";
 import { subscribeToMeetings, type MeetingRecord } from "@/lib/firebase/meetings";
 import {
@@ -645,7 +646,7 @@ async function generateRoleplayScenario(input: {
 }) {
   const response = await fetch("/api/roleplay/generate-scenario", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: await getApiAuthHeaders({ "Content-Type": "application/json" }),
     body: JSON.stringify({
       companyId: input.companyId,
       product: input.product,

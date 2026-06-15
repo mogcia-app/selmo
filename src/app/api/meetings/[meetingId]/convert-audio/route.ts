@@ -1,7 +1,13 @@
 import { FieldValue } from "firebase-admin/firestore";
 import { NextRequest, NextResponse } from "next/server";
 
-import { getFirebaseAdminAuth, getFirebaseAdminDb } from "@/lib/firebase/admin";
+import { getFirebaseAdminDb } from "@/lib/firebase/admin";
+import {
+  assertMeetingAccess,
+  handleApiAuthError,
+  requireApiUser,
+  type ApiUserContext,
+} from "@/lib/server/auth/require-api-user";
 import { saveSystemErrorLog } from "@/lib/server/operational-logs";
 
 export const runtime = "nodejs";
@@ -22,54 +28,23 @@ export async function POST(
   request: NextRequest,
   context: { params: Promise<{ meetingId: string }> },
 ) {
-  const authHeader = request.headers.get("authorization") ?? "";
-  const token = authHeader.startsWith("Bearer ") ? authHeader.slice("Bearer ".length) : "";
-
-  if (!token) {
-    return NextResponse.json({ error: "ログイン情報を確認できませんでした。" }, { status: 401 });
-  }
-
-  const auth = getFirebaseAdminAuth();
   const db = getFirebaseAdminDb();
 
-  if (!auth || !db) {
+  if (!db) {
     return NextResponse.json({ error: "Firebase Admin が設定されていません。" }, { status: 500 });
   }
 
   const { meetingId } = await context.params;
   let userId: string | null = null;
   let companyId: string | null = null;
+  let apiUser: ApiUserContext | null = null;
 
   try {
-    const decodedToken = await auth.verifyIdToken(token);
-    userId = decodedToken.uid;
-
-    const userSnapshot = await db.collection("users").doc(decodedToken.uid).get();
-    if (!userSnapshot.exists) {
-      return NextResponse.json({ error: "ユーザー情報が見つかりません。" }, { status: 404 });
-    }
-
-    const user = userSnapshot.data() as { companyId?: string | null; role?: string; status?: string };
-    companyId = typeof user.companyId === "string" ? user.companyId : null;
-    if (user.status === "inactive") {
-      return NextResponse.json({ error: "無効なユーザーです。" }, { status: 403 });
-    }
-
-    const meetingRef = db.collection("meetings").doc(meetingId);
-    const meetingSnapshot = await meetingRef.get();
-    if (!meetingSnapshot.exists) {
-      return NextResponse.json({ error: "打ち合わせが見つかりません。" }, { status: 404 });
-    }
-
-    const meeting = meetingSnapshot.data() as MeetingAudioDocument;
-    if (!companyId || meeting.companyId !== companyId) {
-      return NextResponse.json({ error: "会社情報が一致しません。" }, { status: 403 });
-    }
-
-    const isAdmin = user.role === "admin" || user.role === "owner";
-    if (!isAdmin && meeting.userId !== decodedToken.uid) {
-      return NextResponse.json({ error: "この音声を変換する権限がありません。" }, { status: 403 });
-    }
+    apiUser = await requireApiUser(request);
+    userId = apiUser.uid;
+    companyId = apiUser.companyId;
+    const authorizedMeeting = await assertMeetingAccess(apiUser, meetingId);
+    const meeting = authorizedMeeting.data as MeetingAudioDocument;
 
     if (!meeting.audioFilePath) {
       return NextResponse.json({ error: "音声ファイルが見つかりません。" }, { status: 400 });
@@ -82,7 +57,7 @@ export async function POST(
     await db.collection("audioProcessingJobs").doc(meetingId).set(
       {
         companyId,
-        userId: meeting.userId ?? decodedToken.uid,
+        userId: meeting.userId ?? apiUser.uid,
         meetingId,
         fileName: meeting.audioFileName ?? "",
         status: "convert_required",
@@ -113,7 +88,7 @@ export async function POST(
     await dispatchConversion({
       meetingId,
       companyId,
-      requestedBy: decodedToken.uid,
+      requestedBy: apiUser.uid,
     });
 
     return NextResponse.json({
@@ -121,6 +96,11 @@ export async function POST(
       dispatched: true,
     });
   } catch (error) {
+    const authError = handleApiAuthError(error);
+    if (authError) {
+      return NextResponse.json(authError.body, { status: authError.status });
+    }
+
     const message = error instanceof Error ? error.message : "音声変換ジョブの作成に失敗しました。";
     await saveSystemErrorLog({
       companyId,

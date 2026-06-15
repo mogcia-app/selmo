@@ -5,6 +5,12 @@ import {
   saveAiUsageLog,
   saveSystemErrorLog,
 } from "@/lib/server/operational-logs";
+import {
+  assertSalesDomainAccess,
+  handleApiAuthError,
+  requireApiUser,
+  type ApiUserContext,
+} from "@/lib/server/auth/require-api-user";
 
 export const runtime = "nodejs";
 
@@ -19,8 +25,6 @@ type KnowledgeSearchSource = {
 };
 
 type RequestBody = {
-  companyId?: string | null;
-  userId?: string | null;
   query?: string;
   sources?: KnowledgeSearchSource[];
 };
@@ -33,9 +37,13 @@ type KnowledgeSearchAnswer = {
 
 export async function POST(request: Request) {
   let body: RequestBody | null = null;
+  let apiUser: ApiUserContext | null = null;
   const model = "gpt-4o-mini";
 
   try {
+    apiUser = await requireApiUser(request);
+    assertSalesDomainAccess(apiUser, "meeting");
+
     if (!process.env.OPENAI_API_KEY) {
       return NextResponse.json(
         { error: "OPENAI_API_KEY が未設定です。" },
@@ -62,8 +70,8 @@ export async function POST(request: Request) {
 
     const result = await generateKnowledgeSearchAnswer(query, sources);
     await saveAiUsageLog({
-      companyId: body.companyId,
-      userId: body.userId,
+      companyId: apiUser.companyId,
+      userId: apiUser.uid,
       feature: "knowledge_search",
       model,
       inputTokens: result.usage.inputTokens,
@@ -81,18 +89,23 @@ export async function POST(request: Request) {
       answer: result.answer,
     });
   } catch (error) {
+    const authError = handleApiAuthError(error);
+    if (authError) {
+      return NextResponse.json(authError.body, { status: authError.status });
+    }
+
     const message = error instanceof Error ? error.message : "AI回答の生成に失敗しました。";
     await saveAiUsageLog({
-      companyId: body?.companyId,
-      userId: body?.userId,
+      companyId: apiUser?.companyId,
+      userId: apiUser?.uid,
       feature: "knowledge_search",
       model,
       status: "failed",
       errorMessage: message,
     });
     await saveSystemErrorLog({
-      companyId: body?.companyId,
-      userId: body?.userId,
+      companyId: apiUser?.companyId,
+      userId: apiUser?.uid,
       kind: "OpenAI",
       message,
       severity: "warning",

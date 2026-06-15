@@ -1,6 +1,11 @@
 import { NextResponse } from "next/server";
 
 import { loadAnalysisContext } from "@/lib/server/analysis-context";
+import {
+  assertSalesDomainAccess,
+  handleApiAuthError,
+  requireApiUser,
+} from "@/lib/server/auth/require-api-user";
 
 export const runtime = "nodejs";
 
@@ -33,6 +38,14 @@ type GeneratedScenario = {
 };
 
 export async function POST(request: Request) {
+  const apiUser = await requireApiUser(request).catch((error) => {
+    const authError = handleApiAuthError(error);
+    if (authError) return authError;
+    throw error;
+  });
+  if ("body" in apiUser) {
+    return NextResponse.json(apiUser.body, { status: apiUser.status });
+  }
   const body = (await request.json().catch(() => null)) as {
     companyId?: unknown;
     product?: ProductPayload;
@@ -41,7 +54,6 @@ export async function POST(request: Request) {
     roleplayType?: unknown;
     meetingInsights?: unknown;
   } | null;
-  const companyId = typeof body?.companyId === "string" ? body.companyId : null;
   const product = body?.product ?? {};
   const category = body?.category === "新規" || body?.category === "既存" ? body.category : null;
   const targetSegment = typeof body?.targetSegment === "string" ? body.targetSegment.trim() : "";
@@ -52,8 +64,16 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "商材、カテゴリーを入力してください。" }, { status: 400 });
   }
 
+  try {
+    assertSalesDomainAccess(apiUser, roleplayType);
+  } catch (error) {
+    const authError = handleApiAuthError(error);
+    if (authError) return NextResponse.json(authError.body, { status: authError.status });
+    throw error;
+  }
+
   const analysisContext = await loadAnalysisContext({
-    companyId,
+    companyId: apiUser.companyId,
     productName: product.name,
     manualCategory: category,
     targetSegment,

@@ -7,6 +7,7 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 
 import { useAuth } from "@/features/auth/auth-provider";
+import { getApiAuthHeaders } from "@/lib/client/api-auth";
 import { getKnowledgeBasePath } from "@/lib/knowledge-paths";
 import {
   buildKnowledgeSearchTerms,
@@ -129,24 +130,23 @@ export default function SalesKnowledgeSearchPage() {
     setAiStatus("loading");
     setAiError(null);
 
-    fetch("/api/knowledge/search-answer", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        companyId: profile?.companyId ?? null,
-        userId,
-        query,
-        sources: evidence.slice(0, 8).map((item) => ({
-          id: item.id,
-          title: item.title,
-          kind: item.kind,
-          scope: item.scope,
-          snippets: item.snippets,
-        })),
-      }),
-    })
+    getApiAuthHeaders({ "Content-Type": "application/json" })
+      .then((headers) =>
+        fetch("/api/knowledge/search-answer", {
+          method: "POST",
+          headers,
+          body: JSON.stringify({
+            query,
+            sources: evidence.slice(0, 8).map((item) => ({
+              id: item.id,
+              title: item.title,
+              kind: item.kind,
+              scope: item.scope,
+              snippets: item.snippets,
+            })),
+          }),
+        }),
+      )
       .then(async (response) => {
         const payload = (await response.json()) as {
           answer?: AiAnswer;
@@ -172,7 +172,7 @@ export default function SalesKnowledgeSearchPage() {
     return () => {
       isActive = false;
     };
-  }, [evidence, profile?.companyId, query, userId]);
+  }, [evidence, query]);
 
   const handleSearch = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();

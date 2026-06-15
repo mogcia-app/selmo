@@ -7,6 +7,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { useAuth } from "@/features/auth/auth-provider";
+import { getApiAuthHeaders } from "@/lib/client/api-auth";
 import { MONTHLY_AI_LIMIT_MESSAGE } from "@/lib/ai-usage-limit";
 import {
   saveRoleplayResult,
@@ -187,6 +188,7 @@ export default function SalesRoleplayPage() {
 
       const response = await fetch("/api/roleplay/transcribe", {
         method: "POST",
+        headers: await getApiAuthHeaders(),
         body: formData,
       });
       const data = (await response.json()) as { text?: string; error?: string };
@@ -224,7 +226,7 @@ export default function SalesRoleplayPage() {
     try {
       const response = await fetch("/api/roleplay/respond", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: await getApiAuthHeaders({ "Content-Type": "application/json" }),
         body: JSON.stringify({
           companyId: profile?.companyId ?? null,
           userId,
@@ -760,7 +762,7 @@ async function evaluateRoleplayWithAi(input: {
 }) {
   const response = await fetch("/api/roleplay/evaluate", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: await getApiAuthHeaders({ "Content-Type": "application/json" }),
     body: JSON.stringify(input),
   });
   const data = (await response.json()) as {
