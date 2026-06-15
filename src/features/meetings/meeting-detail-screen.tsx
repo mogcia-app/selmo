@@ -47,16 +47,6 @@ type TranscriptFocusWord = {
   evidence: DisplayLog;
 };
 
-type TranscriptReadingBlock = {
-  text: string;
-  startSec: number | null;
-  endSec: number | null;
-  ranges: Array<{
-    startSec: number | null;
-    endSec: number | null;
-  }>;
-};
-
 type ScrollbarMetrics = {
   thumbHeight: number;
   thumbTop: number;
@@ -547,7 +537,6 @@ export function MeetingDetailScreen({
   const transcriptFocusWords = useMemo(() => buildTranscriptFocusWords(editableLogs), [editableLogs]);
   const isAiSummaryRunning = meeting?.aiSummaryStatus === "running";
   const canRunAiSummary = exportTranscriptText.trim().length > 0 || Boolean(meeting?.transcriptionProbeText?.trim());
-  const transcriptReadingBlocks = useMemo(() => buildTranscriptReadingBlocks(editableLogs), [editableLogs]);
   const normalizedLogSearch = logSearch.trim().toLowerCase();
   const visibleEditableLogs = useMemo(() => {
     const indexedLogs = editableLogs.map((log, index) => ({ log, index }));
@@ -2322,29 +2311,6 @@ function FeedbackInsightCard({
   );
 }
 
-function SearchResultCard({
-  text,
-  timestamp,
-  keyword = "",
-  onClick,
-}: {
-  text: string;
-  timestamp?: string;
-  keyword?: string;
-  onClick?: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className="w-full rounded-[16px] border border-[#eceef4] bg-white px-4 py-4 text-left shadow-[0_2px_8px_rgba(17,24,39,0.03)] transition hover:border-[#e3d39a] hover:bg-[#fffdf7]"
-    >
-      <div className="text-[14px] leading-7 text-[#171717]">{renderHighlightedText(text, keyword)}</div>
-      {timestamp ? <div className="mt-3 text-[13px] text-[#98a2b3]">{timestamp}</div> : null}
-    </button>
-  );
-}
-
 function SummaryFolderGlyph() {
   return (
     <svg viewBox="0 0 24 24" aria-hidden="true" className="h-4 w-4 fill-none stroke-current stroke-[1.8]">
@@ -2500,143 +2466,6 @@ function renderHighlightedText(text: string, keyword: string) {
   );
 }
 
-function buildImportantTranscriptLogs(logs: DisplayLog[]) {
-  return logs
-    .map((log, index) => ({
-      log,
-      index,
-      score: scoreImportantTranscriptLog(log.text),
-    }))
-    .filter(({ score }) => score > 0)
-    .sort((left, right) => right.score - left.score || left.index - right.index)
-    .map(({ log }) => log);
-}
-
-function buildGroundedTranscriptExtractLogs(logs: DisplayLog[]) {
-  const extracted = logs.flatMap((log, logIndex) =>
-    splitIntoSentences(log.text)
-      .map((sentence) => sentence.trim())
-      .filter(Boolean)
-      .map((sentence, sentenceIndex) => ({
-        log: {
-          ...log,
-          id: `${log.id}_extract_${sentenceIndex}`,
-          text: sentence,
-        },
-        logIndex,
-        sentenceIndex,
-        score: scoreGroundedTranscriptExtract(sentence),
-      })),
-  );
-  const scored = extracted
-    .filter(({ score }) => score > 0)
-    .sort((left, right) => right.score - left.score || left.logIndex - right.logIndex || left.sentenceIndex - right.sentenceIndex);
-
-  if (scored.length > 0) {
-    return dedupeTranscriptExtracts(scored.map(({ log }) => log));
-  }
-
-  return dedupeTranscriptExtracts(
-    extracted
-      .filter(({ log }) => cleanTranscriptSentence(log.text).length >= 16)
-      .sort((left, right) => left.logIndex - right.logIndex || left.sentenceIndex - right.sentenceIndex)
-      .map(({ log }) => log),
-  );
-}
-
-function scoreGroundedTranscriptExtract(text: string) {
-  const normalized = cleanTranscriptSentence(text);
-
-  if (!normalized || normalized.length < 8) {
-    return 0;
-  }
-
-  let score = 0;
-  const rules: Array<{ pattern: RegExp; weight: number }> = [
-    { pattern: /課題|問題|困って|悩んで|ネック|ボトルネック|負担|時間がかかる/, weight: 5 },
-    { pattern: /要望|希望|したい|ほしい|欲しい|必要|求めて|楽に|効率化/, weight: 5 },
-    { pattern: /不安|懸念|心配|リスク|止まる|故障|属人|共有|更新/, weight: 4 },
-    { pattern: /見積|見積もり|費用|コスト|金額|価格|予算|月額|リース/, weight: 4 },
-    { pattern: /次回|宿題|送付|提出|確認|共有|資料|事例|スケジュール/, weight: 4 },
-    { pattern: /決裁|承認|稟議|社内|比較|検討|導入/, weight: 3 },
-    { pattern: /[?？]$|できますか|でしょうか|ありますか|可能ですか|いかが/, weight: 2 },
-  ];
-
-  for (const rule of rules) {
-    if (rule.pattern.test(normalized)) {
-      score += rule.weight;
-    }
-  }
-
-  if (normalized.length >= 24) {
-    score += 1;
-  }
-
-  if (/^(はい|ええ|なるほど|了解|承知しました|ありがとうございます)[。！! ]*$/.test(normalized)) {
-    score -= 4;
-  }
-
-  return Math.max(score, 0);
-}
-
-function dedupeTranscriptExtracts(logs: DisplayLog[]) {
-  const seen = new Set<string>();
-  const deduped: DisplayLog[] = [];
-
-  for (const log of logs) {
-    const key = normalizeTranscriptMatchText(log.text);
-    if (!key || seen.has(key)) {
-      continue;
-    }
-    seen.add(key);
-    deduped.push(log);
-  }
-
-  return deduped;
-}
-
-function findTranscriptReadingBlockIndexForLog(log: DisplayLog, blocks: TranscriptReadingBlock[]) {
-  const normalizedLogText = normalizeTranscriptMatchText(log.text);
-  const textIndex = normalizedLogText
-    ? blocks.findIndex((block) => normalizeTranscriptMatchText(block.text).includes(normalizedLogText))
-    : -1;
-
-  if (textIndex >= 0) {
-    return textIndex;
-  }
-
-  const { startSec, endSec } = log;
-
-  if (typeof startSec === "number" && typeof endSec === "number") {
-    const rangedIndex = blocks.findIndex((block) =>
-      block.ranges.some(
-        (range) =>
-          typeof range.startSec === "number" &&
-          typeof range.endSec === "number" &&
-          startSec >= range.startSec &&
-          endSec <= range.endSec,
-      ),
-    );
-
-    if (rangedIndex >= 0) {
-      return rangedIndex;
-    }
-  }
-
-  return -1;
-}
-
-function normalizeTranscriptMatchText(text: string) {
-  return text.replace(/[（）]/g, "").replace(/\s+/g, " ").trim();
-}
-
-function cleanTranscriptSentence(text: string) {
-  return text
-    .replace(/^(えっと|あのー|あの|その|まー|まあ|ま|それこそ|要は|基本的には|ちょっと)+/g, "")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
 function scoreImportantTranscriptLog(text: string) {
   const normalized = text.trim();
 
@@ -2685,65 +2514,6 @@ function scoreImportantTranscriptLog(text: string) {
   }
 
   return Math.max(score, 0);
-}
-
-function buildTranscriptReadingBlocks(logs: DisplayLog[]) {
-  const blocks: TranscriptReadingBlock[] = [];
-  let currentBlock = "";
-  let currentStartSec: number | null = null;
-  let currentEndSec: number | null = null;
-  let currentRanges: TranscriptReadingBlock["ranges"] = [];
-
-  for (const log of logs) {
-    const nextText = log.kind === "backchannel" ? `（${log.text}）` : log.text;
-    const normalizedText = nextText.trim();
-
-    if (!normalizedText) {
-      continue;
-    }
-
-    const candidate = currentBlock ? `${currentBlock} ${normalizedText}` : normalizedText;
-
-    if (currentBlock && candidate.length > 140) {
-      blocks.push({
-        text: currentBlock.trim(),
-        startSec: currentStartSec,
-        endSec: currentEndSec,
-        ranges: currentRanges,
-      });
-      currentBlock = normalizedText;
-      currentStartSec = log.startSec ?? null;
-      currentEndSec = log.endSec ?? log.startSec ?? null;
-      currentRanges = [
-        {
-          startSec: log.startSec ?? null,
-          endSec: log.endSec ?? log.startSec ?? null,
-        },
-      ];
-      continue;
-    }
-
-    currentBlock = candidate;
-    if (currentStartSec === null) {
-      currentStartSec = log.startSec ?? null;
-    }
-    currentEndSec = log.endSec ?? log.startSec ?? currentEndSec;
-    currentRanges.push({
-      startSec: log.startSec ?? null,
-      endSec: log.endSec ?? log.startSec ?? null,
-    });
-  }
-
-  if (currentBlock.trim()) {
-    blocks.push({
-      text: currentBlock.trim(),
-      startSec: currentStartSec,
-      endSec: currentEndSec,
-      ranges: currentRanges,
-    });
-  }
-
-  return blocks;
 }
 
 function buildMeetingStatusSummary(
@@ -3442,19 +3212,6 @@ function buildTranscriptEvidence(logs: DisplayLog[], limit: number) {
     .map((item) => item.text);
 
   return (evidence.length > 0 ? evidence : ["根拠となる発話はまだ抽出できていません。"]).slice(0, limit);
-}
-
-function buildDetailedAdvice(scores: Array<{ label: string; value: number }>, actions: string[]) {
-  const lowestScore = [...scores].sort((left, right) => left.value - right.value)[0];
-  const primaryAction = actions[0] ?? "次回アクションを商談の最後に明確に合意する";
-
-  return [
-    lowestScore
-      ? `${lowestScore.label}が相対的に弱いので、次回はこの観点を重点的に改善してください。`
-      : "次回は商談の目的と着地を冒頭で揃えてから進めてください。",
-    `商談終盤では「${primaryAction}」まで具体的に確認すると、次の動きにつながりやすくなります。`,
-    "顧客の発言を言い換えて確認し、課題・不安・判断条件を相手の言葉で残してください。",
-  ];
 }
 
 function truncateText(value: string, maxLength: number) {
