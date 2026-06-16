@@ -3,7 +3,7 @@
 import { FirebaseError } from "firebase/app";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import { useAuth } from "@/features/auth/auth-provider";
 import { resolveRoleSafePath } from "@/features/auth/role-routing";
@@ -22,7 +22,7 @@ export function LoginForm({
 }) {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const { firebaseError, isFirebaseReady, missingEnvKeys, signIn, signOut } = useAuth();
+  const { firebaseError, isAuthenticated, isFirebaseReady, missingEnvKeys, profile, signIn, signOut } = useAuth();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
@@ -32,6 +32,20 @@ export function LoginForm({
   const formClassName = isAdmin ? "mt-6 w-full space-y-4 text-left sm:mt-7" : "mt-7 w-full space-y-4.5 text-left sm:mt-8";
 
   const nextPath = searchParams.get("next");
+
+  useEffect(() => {
+    if (!isAuthenticated || !profile) {
+      return;
+    }
+
+    const allowedRoles = getAllowedLoginRoles(variant);
+    if (!allowedRoles.includes(profile.role)) {
+      router.replace(resolveRoleSafePath(null, profile.role));
+      return;
+    }
+
+    router.replace(resolveRoleSafePath(nextPath, profile.role));
+  }, [isAuthenticated, nextPath, profile, router, variant]);
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();

@@ -577,41 +577,40 @@ export function subscribeToMeetings(
       ? [query(meetingsRef, where("companyId", "==", input.companyId))]
       : [query(meetingsRef, where("companyId", "==", input.companyId), where("userId", "==", input.userId))];
 
-  let isActive = true;
-
-  Promise.all(meetingsQueries.map((meetingsQuery) => getDocs(meetingsQuery)))
-    .then((snapshots) => {
-      if (!isActive) {
-        return;
-      }
-
-      const recordsById = new Map<string, MeetingRecord>();
-      snapshots.forEach((snapshot) => {
-        snapshot.docs.forEach((docSnapshot) => {
-          recordsById.set(
-            docSnapshot.id,
+  const snapshotsByIndex = new Map<number, MeetingRecord[]>();
+  const unsubscribers = meetingsQueries.map((meetingsQuery, index) =>
+    onSnapshot(
+      meetingsQuery,
+      (snapshot) => {
+        snapshotsByIndex.set(
+          index,
+          snapshot.docs.map((docSnapshot) =>
             mapMeetingRecord(docSnapshot.id, docSnapshot.data() as Record<string, unknown>),
-          );
-        });
-      });
+          ),
+        );
 
-      const meetings = Array.from(recordsById.values())
-        .sort((left, right) => {
-          const leftTime = left.recordedAt?.getTime() ?? 0;
-          const rightTime = right.recordedAt?.getTime() ?? 0;
-          return rightTime - leftTime;
+        const recordsById = new Map<string, MeetingRecord>();
+        snapshotsByIndex.forEach((records) => {
+          records.forEach((record) => recordsById.set(record.id, record));
         });
 
-      callback(meetings);
-    })
-    .catch((error: FirestoreError) => {
-      if (isActive) {
+        const meetings = Array.from(recordsById.values())
+          .sort((left, right) => {
+            const leftTime = left.recordedAt?.getTime() ?? 0;
+            const rightTime = right.recordedAt?.getTime() ?? 0;
+            return rightTime - leftTime;
+          });
+
+        callback(meetings);
+      },
+      (error) => {
         onError?.(error);
-      }
-    });
+      },
+    ),
+  );
 
   return () => {
-    isActive = false;
+    unsubscribers.forEach((unsubscribe) => unsubscribe());
   };
 }
 
