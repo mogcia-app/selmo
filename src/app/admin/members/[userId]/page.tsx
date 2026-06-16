@@ -1018,7 +1018,7 @@ function MemberWinRateTrend({ meetings }: { meetings: MeetingRecord[] }) {
         <div key={row.label} className="grid grid-cols-[80px_minmax(0,1fr)_64px] items-center gap-3">
           <div className="text-[12px] font-black text-[#596273]">{row.label}</div>
           <div className="h-3 overflow-hidden rounded-full bg-[#eef1f5]">
-            <div className="h-full rounded-full bg-[#ffd84d]" style={{ width: `${Math.max(row.winRate, 4)}%` }} />
+            <div className="h-full rounded-full bg-[#ffd84d]" style={{ width: `${row.winRate}%` }} />
           </div>
           <div className="text-right text-[13px] font-black text-[#171717]">{row.winRate}%</div>
           <div className="col-start-2 text-[11px] font-bold text-[#8a909b]">{row.wonCount}/{row.totalCount}件 成約</div>

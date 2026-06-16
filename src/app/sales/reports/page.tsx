@@ -318,6 +318,15 @@ function MiniMetric({ metric }: { metric: MetricCardData }) {
 }
 
 function SkillScorePanel({ scores }: { scores: SkillScore[] }) {
+  if (scores.length === 0) {
+    return (
+      <EmptyReportState
+        title="分析後に表示されます"
+        body="このアカウントの商談・テレアポ分析が完了すると、スキル別評価レーダーが表示されます。"
+      />
+    );
+  }
+
   const averageScore = Math.round(scores.reduce((sum, score) => sum + score.score, 0) / Math.max(1, scores.length));
   const topSkill = [...scores].sort((left, right) => right.score - left.score)[0];
   const focusSkill = [...scores].sort((left, right) => left.score - right.score)[0];
@@ -372,11 +381,27 @@ function EvaluationScoreCard({ scores }: { scores: SkillScore[] }) {
           {scores.length}項目
         </span>
       </div>
+      {scores.length === 0 ? (
+        <EmptyReportState
+          title="評価データはまだありません"
+          body="分析済みの商談・テレアポが登録されると、評価スコアが表示されます。"
+          compact
+        />
+      ) : null}
       <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-1 2xl:grid-cols-2">
         {scores.map((score) => (
           <SkillScoreRow key={score.label} score={score} />
         ))}
       </div>
+    </div>
+  );
+}
+
+function EmptyReportState({ title, body, compact = false }: { title: string; body: string; compact?: boolean }) {
+  return (
+    <div className={`${compact ? "mt-4 px-4 py-6" : "rounded-[24px] px-5 py-10"} rounded-[18px] border border-dashed border-[#dfe4ec] bg-[#fcfcfd] text-center`}>
+      <div className="text-[14px] font-bold text-[#20242c]">{title}</div>
+      <p className="mx-auto mt-2 max-w-[440px] text-[12px] leading-6 text-[#7a808c]">{body}</p>
     </div>
   );
 }
@@ -524,7 +549,7 @@ function VerticalBarRanking({ title, items }: { title: string; items: RankingIte
               <div className="flex h-[128px] w-full max-w-[54px] items-end rounded-t-[14px] bg-[#f1f2f5]">
                 <div
                   className="w-full rounded-t-[14px] bg-[#ffc400] transition-all"
-                  style={{ height: `${Math.max(10, percentage)}%` }}
+                  style={{ height: `${percentage}%` }}
                 />
               </div>
               <div className="line-clamp-2 min-h-[34px] text-center text-[11px] font-bold leading-4 text-[#596273]">
@@ -758,13 +783,17 @@ function buildInstructionReport(
     customerTypePerformances: buildCustomerTypePerformances(monthlyMeetings),
     purposePerformances: buildPurposePerformances(monthlyMeetings),
     coachingPriority: {
-      title: `${lowestSkill.label}を最優先で指導する状態です。`,
-      body: topUnmet
-        ? `未達項目では「${topUnmet.label}」が目立っています。まずは商談中にこの確認が抜けていないかを見て、ロープレで再現練習するのが良さそうです。`
-        : `現時点では${lowestSkill.label}のスコアが低めです。分析データが増えるほど、指導ポイントはより具体化されます。`,
-      evidence: topImprovement
-        ? `改善指摘: ${topImprovement.label} / ${topImprovement.value}`
-        : `${lowestSkill.caption} / ${lowestSkill.score}点`,
+      title: lowestSkill ? `${lowestSkill.label}を最優先で指導する状態です。` : "分析データを蓄積中です。",
+      body: lowestSkill
+        ? topUnmet
+          ? `未達項目では「${topUnmet.label}」が目立っています。まずは商談中にこの確認が抜けていないかを見て、ロープレで再現練習するのが良さそうです。`
+          : `現時点では${lowestSkill.label}のスコアが低めです。分析データが増えるほど、指導ポイントはより具体化されます。`
+        : "商談・テレアポ分析が完了すると、重点テーマが表示されます。",
+      evidence: lowestSkill
+        ? topImprovement
+          ? `改善指摘: ${topImprovement.label} / ${topImprovement.value}`
+          : `${lowestSkill.caption} / ${lowestSkill.score}点`
+        : "分析済みデータなし",
     },
   };
 }
@@ -772,21 +801,30 @@ function buildInstructionReport(
 function buildSkillScores(meetings: MeetingRecord[], previousMeetings: MeetingRecord[]): SkillScore[] {
   const evaluations = meetings.flatMap((meeting) => meeting.aiSummary?.diagnosis?.salesEvaluation ?? []);
   const previousEvaluations = previousMeetings.flatMap((meeting) => meeting.aiSummary?.diagnosis?.salesEvaluation ?? []);
+  if (meetings.length === 0 || evaluations.length === 0) {
+    return [];
+  }
+
   const baseSkills = [
-    { label: "ヒアリング", fallback: 62, keyword: "ヒアリング" },
-    { label: "課題提示", fallback: 56, keyword: "課題" },
-    { label: "提案接続", fallback: 60, keyword: "提案" },
-    { label: "切り返し", fallback: 54, keyword: "反論" },
-    { label: "クロージング", fallback: 50, keyword: "クロージング" },
-    { label: "マニュアル準拠", fallback: readManualComplianceScore(meetings) ?? 58, keyword: "マニュアル" },
+    { label: "ヒアリング", keyword: "ヒアリング" },
+    { label: "課題提示", keyword: "課題" },
+    { label: "提案接続", keyword: "提案" },
+    { label: "切り返し", keyword: "反論" },
+    { label: "クロージング", keyword: "クロージング" },
+    { label: "マニュアル準拠", keyword: "マニュアル" },
   ];
 
-  return baseSkills.map((skill) => {
+  return baseSkills.flatMap((skill) => {
     const matched = evaluations.filter((evaluation) => evaluation.label.includes(skill.keyword));
+    const manualScore = skill.keyword === "マニュアル" ? readManualComplianceScore(meetings) : null;
+    if (matched.length === 0 && manualScore === null) {
+      return [];
+    }
+
     const score =
       matched.length > 0
         ? Math.round(matched.reduce((sum, evaluation) => sum + evaluation.score, 0) / matched.length)
-        : skill.fallback;
+        : manualScore ?? 0;
     const previousMatched = previousEvaluations.filter((evaluation) => evaluation.label.includes(skill.keyword));
     const previousScore =
       previousMatched.length > 0
@@ -798,13 +836,13 @@ function buildSkillScores(meetings: MeetingRecord[], previousMeetings: MeetingRe
       score,
       previousScore,
       stars: score >= 80 ? "★★★" : score >= 60 ? "★★☆" : "★☆☆",
-      caption: matched[0]?.description ?? "分析データが少ないため、共通基準で仮評価しています。",
+      caption: matched[0]?.description ?? "マニュアル準拠スコアを表示しています。",
     };
   });
 }
 
 function buildAiDiagnosis(input: {
-  lowestSkill: SkillScore;
+  lowestSkill?: SkillScore;
   topUnmet?: RankingItem;
   topImprovement?: RankingItem;
   productPerformances: RankingItem[];
@@ -816,6 +854,14 @@ function buildAiDiagnosis(input: {
     input.averageRoleplayScore !== null && input.averageScore !== null && input.averageRoleplayScore - input.averageScore >= 15
       ? "ロープレでは点が出ていますが、商談スコアに転換しきれていません。"
       : "ロープレと商談の差分は大きくありません。";
+
+  if (!input.lowestSkill) {
+    return {
+      title: "分析データを蓄積中です。",
+      body: "このアカウントの商談・テレアポ分析が完了すると、弱点や改善指摘が表示されます。",
+      evidence: "分析済みデータなし",
+    };
+  }
 
   return {
     title: `${input.lowestSkill.label}が今月の主要課題です。`,
@@ -837,7 +883,7 @@ function buildUnmetRankings(meetings: MeetingRecord[]) {
     }
   }
 
-  return mapCountsToRanking(counts, "マニュアル未達として検出されています。", ["決裁者確認", "予算確認", "導入時期確認"]);
+  return mapCountsToRanking(counts, "マニュアル未達として検出されています。");
 }
 
 function buildUnmetCrossRanking(meetings: MeetingRecord[], mode: "product" | "customerType") {
@@ -859,7 +905,6 @@ function buildUnmetCrossRanking(meetings: MeetingRecord[], mode: "product" | "cu
   return mapCountsToRanking(
     counts,
     mode === "product" ? "商材ごとの未達傾向です。" : "顧客種別ごとの未達傾向です。",
-    mode === "product" ? ["予算確認 × 商材未設定", "決裁者確認 × 商材未設定", "導入時期確認 × 商材未設定"] : ["予算確認 × 新規", "決裁者確認 × 新規", "次回アクション × 既存"],
   );
 }
 
@@ -888,7 +933,7 @@ function buildObjectionRankings(meetings: MeetingRecord[]) {
     }
   }
 
-  return mapCountsToRanking(counts, "顧客の不安・反論として出ています。", ["費用が不安", "社内確認が必要", "効果が不安"]);
+  return mapCountsToRanking(counts, "顧客の不安・反論として出ています。");
 }
 
 function buildImprovementRankings(meetings: MeetingRecord[], roleplays: RoleplayResult[]) {
@@ -908,7 +953,7 @@ function buildImprovementRankings(meetings: MeetingRecord[], roleplays: Roleplay
     }
   }
 
-  return mapCountsToRanking(counts, "AIが繰り返し改善指摘しています。", ["次回アクション", "課題深掘り", "予算確認"]);
+  return mapCountsToRanking(counts, "AIが繰り返し改善指摘しています。");
 }
 
 function buildRoleplayPatternRankings(roleplays: RoleplayResult[]) {
@@ -921,7 +966,7 @@ function buildRoleplayPatternRankings(roleplays: RoleplayResult[]) {
     }
   }
 
-  return mapCountsToRanking(counts, "ロープレで繰り返し出ている改善点です。", ["予算確認", "課題深掘り", "次回アクション"]);
+  return mapCountsToRanking(counts, "ロープレで繰り返し出ている改善点です。");
 }
 
 function buildRoleplayVariance(roleplays: RoleplayResult[]) {
@@ -948,7 +993,7 @@ function buildKnowledgeSearchRankings(searchHistory: KnowledgeSearchHistory[]) {
     counts.set(item.term, (counts.get(item.term) ?? 0) + 1);
   }
 
-  return mapCountsToRanking(counts, "今月よく調べた検索ワードです。", ["料金", "競合", "反論"]);
+  return mapCountsToRanking(counts, "今月よく調べた検索ワードです。");
 }
 
 function buildKnowledgeSearchInsights(searchHistory: KnowledgeSearchHistory[], meetings: MeetingRecord[]) {
@@ -964,7 +1009,7 @@ function buildKnowledgeSearchInsights(searchHistory: KnowledgeSearchHistory[], m
     }
   }
 
-  return mapCountsToRanking(counts, "調べているのに失注している可能性がある領域です。", ["料金 × 失注", "競合 × 失注", "反論 × 失注"]);
+  return mapCountsToRanking(counts, "調べているのに失注している可能性がある領域です。");
 }
 
 function buildProductPerformances(meetings: MeetingRecord[]) {
@@ -1009,7 +1054,7 @@ function buildPurposePerformances(meetings: MeetingRecord[]) {
     .slice(0, 5);
 }
 
-function mapCountsToRanking(counts: Map<string, number>, caption: string, fallback: string[]): RankingItem[] {
+function mapCountsToRanking(counts: Map<string, number>, caption: string): RankingItem[] {
   const sorted = [...counts.entries()].sort((left, right) => right[1] - left[1]);
   const maxCount = sorted[0]?.[1] ?? 0;
   const items = sorted
@@ -1020,12 +1065,12 @@ function mapCountsToRanking(counts: Map<string, number>, caption: string, fallba
     return items;
   }
 
-  return fallback.map((label) => ({
-    label,
-    value: "蓄積待ち",
+  return [{
+    label: "蓄積待ち",
+    value: "-",
     caption: "分析データが増えると頻度が表示されます。",
-    percentage: 10,
-  }));
+    percentage: 0,
+  }];
 }
 
 function readAverageMeetingScore(meetings: MeetingRecord[]) {
@@ -1213,10 +1258,10 @@ function formatScore(score: number | null) {
 function readPercentFromText(value: string) {
   const match = value.match(/(\d+)/);
   if (!match) {
-    return 12;
+    return 0;
   }
 
-  return Math.max(8, Math.min(100, Number(match[1])));
+  return Math.min(100, Number(match[1]));
 }
 
 function isCurrentMonth(date: Date | null) {

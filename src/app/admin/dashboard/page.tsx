@@ -755,7 +755,7 @@ function TrendBars({ rows }: { rows: Array<{ label: string; meetingCount: number
             <div className="h-8 overflow-hidden rounded-[9px] bg-[#edf0f5]">
               <div
                 className={`flex h-full min-w-[34px] items-center justify-end rounded-[9px] px-2 text-[11px] font-black ${row.winRate >= 30 ? "bg-[#23a96d] text-white" : "bg-[#ffd84d] text-[#171717]"}`}
-                style={{ width: `${Math.max(Math.min(row.winRate, 100), 4)}%` }}
+                style={{ width: `${Math.min(row.winRate, 100)}%` }}
               >
                 {row.winRate}%
               </div>

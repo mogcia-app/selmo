@@ -2,11 +2,11 @@
 
 import { FirebaseError } from "firebase/app";
 import Link from "next/link";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
 import { useAuth } from "@/features/auth/auth-provider";
-import { resolveRoleSafePath } from "@/features/auth/role-routing";
+import { getRoleHomePath } from "@/features/auth/role-routing";
 import type { UserRole } from "@/types/domain";
 
 const errorMessageMap: Record<string, string> = {
@@ -21,7 +21,6 @@ export function LoginForm({
   variant?: "default" | "admin";
 }) {
   const router = useRouter();
-  const searchParams = useSearchParams();
   const { firebaseError, isAuthenticated, isFirebaseReady, missingEnvKeys, profile, signIn, signOut } = useAuth();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -31,8 +30,6 @@ export function LoginForm({
   const isAdmin = variant === "admin";
   const formClassName = isAdmin ? "mt-6 w-full space-y-4 text-left sm:mt-7" : "mt-7 w-full space-y-4.5 text-left sm:mt-8";
 
-  const nextPath = searchParams.get("next");
-
   useEffect(() => {
     if (!isAuthenticated || !profile) {
       return;
@@ -40,12 +37,12 @@ export function LoginForm({
 
     const allowedRoles = getAllowedLoginRoles(variant);
     if (!allowedRoles.includes(profile.role)) {
-      router.replace(resolveRoleSafePath(null, profile.role));
+      router.replace(getRoleHomePath(profile.role));
       return;
     }
 
-    router.replace(resolveRoleSafePath(nextPath, profile.role));
-  }, [isAuthenticated, nextPath, profile, router, variant]);
+    router.replace(getRoleHomePath(profile.role));
+  }, [isAuthenticated, profile, router, variant]);
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -75,7 +72,7 @@ export function LoginForm({
       }
 
       await waitForAuthStateFlush();
-      router.replace(resolveRoleSafePath(nextPath, nextProfile.role));
+      router.replace(getRoleHomePath(nextProfile.role));
     } catch (error) {
       if (error instanceof FirebaseError) {
         setErrorMessage(errorMessageMap[error.code] ?? "ログインに失敗しました。設定とアカウントを確認してください。");

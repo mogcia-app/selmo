@@ -428,6 +428,12 @@ function SkillScoreCard({ scores }: { scores: SkillScore[] }) {
         title="スキル別評価"
         body="商談分析の評価項目をスキル別に表示します。"
       />
+      {scores.length === 0 ? (
+        <EmptyMetricState
+          title="分析後に表示されます"
+          body="このアカウントの商談・テレアポ分析が完了すると、スキル別評価が表示されます。"
+        />
+      ) : null}
       <div className="mt-5 space-y-4">
         {scores.map((score) => (
           <div key={score.label}>
@@ -722,20 +728,18 @@ function buildDashboardInsight(input: {
       },
     ],
     coachInsight,
-    priorityActions: [
-      {
-        title: improveTargets[0] ?? "提案前に顧客課題を一度要約する",
-        reason: coachInsight.evidence,
-      },
-      {
-        title: improveTargets[1] ?? "料金説明の前に導入時期を確認する",
-        reason: "条件確認が浅いまま金額に入ると、比較検討で止まりやすくなります。",
-      },
-      {
-        title: improveTargets[2] ?? "競合比較の有無を先に聞く",
-        reason: "比較軸を早めに把握すると、切り返しではなく価値接続で話せます。",
-      },
-    ],
+    priorityActions:
+      completedMeetings.length > 0
+        ? improveTargets.map((target) => ({
+            title: target,
+            reason: coachInsight.evidence,
+          }))
+        : [
+            {
+              title: `まず${input.unitLabel}分析を追加する`,
+              reason: `このアカウントの${input.unitLabel}分析が完了すると、優先アクションが表示されます。`,
+            },
+          ],
     oodaCards: [
       {
         label: "Observe",
@@ -770,9 +774,9 @@ function buildDashboardInsight(input: {
         title: "改善テーマ",
         description: "未達項目と優先確認項目を表示します。",
         items: [
-          { label: "優先項目", value: improveTargets[0] ?? coachInsight.nextAction },
+          { label: "優先項目", value: improveTargets[0] ?? "分析データ蓄積待ち" },
           { label: "必ず聞くこと", value: topMissingCriteria },
-          { label: "避けたい流れ", value: "課題確認前に料金説明へ入る" },
+          { label: "避けたい流れ", value: completedMeetings.length > 0 ? "課題確認前に料金説明へ入る" : "分析データ蓄積待ち" },
           { label: "関連ロープレ", value: input.recommendedScenario?.title ?? coachInsight.training },
           { label: "確認タイミング", value: "提案前とクロージング前" },
         ],
@@ -832,25 +836,25 @@ function buildDashboardInsight(input: {
         label: "AIスコア推移",
         value: formatScore(averageScore),
         caption: averageScore === null ? "蓄積待ち" : "今月平均",
-        percentage: averageScore ?? 24,
+        percentage: averageScore ?? 0,
       },
       {
         label: "成約率推移",
         value: `${conversionRate}%`,
         caption: "今月",
-        percentage: Math.max(8, conversionRate),
+        percentage: conversionRate,
       },
       {
         label: "分析件数",
         value: `${completedMeetings.length}件`,
         caption: `今月${input.monthlyMeetings.length}件中`,
-        percentage: input.monthlyMeetings.length > 0 ? Math.round((completedMeetings.length / input.monthlyMeetings.length) * 100) : 10,
+        percentage: input.monthlyMeetings.length > 0 ? Math.round((completedMeetings.length / input.monthlyMeetings.length) * 100) : 0,
       },
       {
         label: "ロープレ回数",
         value: `${input.monthlyRoleplayCount}回`,
         caption: "今月",
-        percentage: Math.min(100, Math.max(10, input.monthlyRoleplayCount * 12)),
+        percentage: Math.min(100, input.monthlyRoleplayCount * 12),
       },
     ],
   };
@@ -917,32 +921,43 @@ function buildImproveTargets(actionMeetings: MeetingRecord[], skills: SkillScore
     targets.push("失注商談の反論パターンをロープレで復習する");
   }
 
-  return unique([
-    ...targets,
-    "料金説明の前に導入時期を確認する",
-    "決裁者と社内確認フローを聞く",
-    "顧客の言葉で課題を整理してから提案する",
-  ]).slice(0, 3);
+  return unique(targets).slice(0, 3);
 }
 
 function buildSkillScores(meetings: MeetingRecord[]): SkillScore[] {
   const evaluations = meetings.flatMap((meeting) => meeting.aiSummary?.diagnosis?.salesEvaluation ?? []);
-  const readScore = (label: string, fallback: number) => {
+  if (meetings.length === 0 || evaluations.length === 0) {
+    return [];
+  }
+
+  const readScore = (label: string) => {
     const matched = evaluations.filter((evaluation) => evaluation.label.includes(label));
     if (matched.length === 0) {
-      return fallback;
+      return null;
     }
 
     return Math.round(matched.reduce((sum, evaluation) => sum + evaluation.score, 0) / matched.length);
   };
 
   return [
-    { label: "ヒアリング", score: readScore("ヒアリング", 62), comment: "現状・背景・課題を聞けているか" },
-    { label: "課題整理", score: readScore("課題", 58), comment: "顧客の言葉で課題を整理できているか" },
-    { label: "提案力", score: readScore("提案", 60), comment: "商材価値を課題に接続できているか" },
-    { label: "切り返し", score: readScore("反論", 54), comment: "不安や比較に対して確認できているか" },
-    { label: "クロージング", score: readScore("クロージング", 50), comment: "次回日程・宿題・決裁確認まで進めたか" },
-  ];
+    { label: "ヒアリング", keyword: "ヒアリング", comment: "現状・背景・課題を聞けているか" },
+    { label: "課題整理", keyword: "課題", comment: "顧客の言葉で課題を整理できているか" },
+    { label: "提案力", keyword: "提案", comment: "商材価値を課題に接続できているか" },
+    { label: "切り返し", keyword: "反論", comment: "不安や比較に対して確認できているか" },
+    { label: "クロージング", keyword: "クロージング", comment: "次回日程・宿題・決裁確認まで進めたか" },
+  ].flatMap((skill) => {
+    const score = readScore(skill.keyword);
+    return score === null ? [] : [{ label: skill.label, score, comment: skill.comment }];
+  });
+}
+
+function EmptyMetricState({ title, body }: { title: string; body: string }) {
+  return (
+    <div className="mt-5 rounded-[18px] border border-dashed border-[#dfe4ec] bg-[#fcfcfd] px-5 py-8 text-center">
+      <div className="text-[15px] font-bold text-[#20242c]">{title}</div>
+      <p className="mx-auto mt-2 max-w-[460px] text-[13px] leading-6 text-[#7a808c]">{body}</p>
+    </div>
+  );
 }
 
 function buildCoachInsight(input: {
@@ -962,7 +977,7 @@ function buildCoachInsight(input: {
   );
   const evidence = pickStrongestEvidence(input.completedMeetings, weakestSkill?.label);
   const stalledCount = input.actionMeetings.filter((meeting) => meeting.status === "considering" || meeting.status === "lost").length;
-  const primaryTarget = input.improveTargets[0] ?? "提案前に顧客課題を一度要約する";
+  const primaryTarget = input.improveTargets[0] ?? `${input.unitLabel}分析を追加して改善点を確認する`;
 
   if (input.completedMeetings.length === 0) {
     return {
@@ -1142,7 +1157,7 @@ function readTopManualCriteria(meetings: MeetingRecord[]) {
   }
 
   const topCriterion = [...counts.entries()].sort((left, right) => right[1] - left[1])[0]?.[0];
-  return topCriterion ?? "予算・決裁者・導入時期を確認";
+  return topCriterion ?? "蓄積待ち";
 }
 
 function readTopMeetingStatus(meetings: MeetingRecord[]) {
