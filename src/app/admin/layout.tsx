@@ -12,6 +12,10 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
     return <>{children}</>;
   }
 
+  if (pathname.startsWith("/admin/demo")) {
+    return <DashboardShell variant="admin">{children}</DashboardShell>;
+  }
+
   return (
     <RouteGuard allowedRoles={["admin"]}>
       <DashboardShell variant="admin">{children}</DashboardShell>

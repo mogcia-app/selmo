@@ -532,15 +532,16 @@ function getCategoryLabel(searchParams: { get: (name: string) => string | null }
 }
 
 function isNavItemActive(pathname: string, href: string, searchParams: { get: (name: string) => string | null }) {
+  const currentPathname = normalizeDemoPathname(pathname);
   const target = new URL(href, "https://selmo.local");
   const hasQuery = target.searchParams.size > 0;
 
   if (hasQuery) {
-    if (pathname !== target.pathname) return false;
+    if (currentPathname !== target.pathname) return false;
 
     const targetCategory = target.searchParams.get("category");
     const targetView = target.searchParams.get("view") ?? "";
-    const currentCategory = searchParams.get("category") ?? getDefaultSalesCategory(pathname);
+    const currentCategory = searchParams.get("category") ?? getDefaultSalesCategory(currentPathname);
     const currentView = searchParams.get("view") ?? "";
 
     if (targetCategory && currentCategory !== targetCategory) return false;
@@ -548,26 +549,35 @@ function isNavItemActive(pathname: string, href: string, searchParams: { get: (n
   }
 
   if (href === "/meetings") {
-    return pathname === href;
+    return currentPathname === href;
   }
 
   if (href === "/meetings/upload") {
-    return pathname === href;
+    return currentPathname === href;
   }
 
   if (href.includes("/meetings/")) {
-    return pathname.startsWith("/meetings/") && pathname !== "/meetings/upload";
+    return currentPathname.startsWith("/meetings/") && currentPathname !== "/meetings/upload";
   }
 
   if (href.startsWith("/sales/")) {
-    return pathname === href || pathname.startsWith(`${href}/`);
+    return currentPathname === href || currentPathname.startsWith(`${href}/`);
   }
 
   if (href.startsWith("/admin/")) {
-    return pathname === href || pathname.startsWith(`${href}/`);
+    return currentPathname === href || currentPathname.startsWith(`${href}/`);
   }
 
-  return pathname === href;
+  return currentPathname === href;
+}
+
+function normalizeDemoPathname(pathname: string) {
+  if (pathname === "/admin/demo" || pathname === "/admin/demo/dashboard") return "/admin/dashboard";
+  if (pathname === "/sales/demo" || pathname === "/sales/demo/dashboard") return "/sales/dashboard";
+  if (pathname === "/sales/demo/customers") return "/sales/customers";
+  if (pathname === "/sales/demo/knowledge") return "/sales/knowledge";
+  if (pathname === "/sales/demo/roleplay") return "/sales/roleplay/scenarios";
+  return pathname;
 }
 
 function filterSalesSections(
