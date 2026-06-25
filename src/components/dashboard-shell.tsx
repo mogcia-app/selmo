@@ -109,6 +109,8 @@ const salesSections: Array<{ label: string; items: NavItem[] }> = [
   },
 ];
 
+const nowLabelPlaceholder = "----/--/-- --:--";
+
 export function DashboardShell({ children, variant }: DashboardShellProps) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -121,20 +123,20 @@ export function DashboardShell({ children, variant }: DashboardShellProps) {
     roleplayCount: 0,
     isLoading: true,
   });
+  const [nowLabel, setNowLabel] = useState(nowLabelPlaceholder);
   const sections = variant === "admin" ? adminSections : filterSalesSections(salesSections, profile);
   const initials = (profile?.name ?? profile?.email ?? "S").slice(0, 1);
   const unreadNotificationCount = notifications.filter((notification) => !notification.read).length;
   const currentLabel = resolveCurrentLabel(pathname, searchParams, sections);
   const shouldShowKnowledgeChat = variant === "sales" && !pathname.startsWith("/sales/knowledge");
-  const nowLabel = new Intl.DateTimeFormat("ja-JP", {
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    weekday: "short",
-    hour: "2-digit",
-    minute: "2-digit",
-    timeZoneName: "short",
-  }).format(new Date());
+
+  useEffect(() => {
+    const updateNowLabel = () => setNowLabel(formatNowLabel());
+
+    updateNowLabel();
+    const timer = window.setInterval(updateNowLabel, 60 * 1000);
+    return () => window.clearInterval(timer);
+  }, []);
 
   useEffect(() => {
     if (variant !== "sales" || !profile?.companyId || !profile.uid) {
@@ -529,6 +531,18 @@ function resolveCurrentLabel(
 
 function getCategoryLabel(searchParams: { get: (name: string) => string | null }, suffix: string) {
   return searchParams.get("category") === "teleapo" ? `テレアポ${suffix}` : `商談${suffix}`;
+}
+
+function formatNowLabel() {
+  return new Intl.DateTimeFormat("ja-JP", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    weekday: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+    timeZoneName: "short",
+  }).format(new Date());
 }
 
 function isNavItemActive(pathname: string, href: string, searchParams: { get: (name: string) => string | null }) {

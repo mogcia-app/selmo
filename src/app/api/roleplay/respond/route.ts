@@ -6,6 +6,11 @@ import {
   saveAiUsageLog,
   saveSystemErrorLog,
 } from "@/lib/server/operational-logs";
+import {
+  RoleplayLimitError,
+  normalizeRoleplaySessionId,
+  reserveRoleplayAiResponse,
+} from "@/lib/server/roleplay-cost-control";
 import { MONTHLY_AI_LIMIT_MESSAGE } from "@/lib/ai-usage-limit";
 import {
   assertSalesDomainAccess,
@@ -20,6 +25,7 @@ type RoleplayMessage = {
 };
 
 type RoleplayScenarioPayload = {
+  id?: string;
   title: string;
   roleplayType?: "meeting" | "teleapo";
   customerRole: string;
@@ -37,6 +43,7 @@ type RoleplayScenarioPayload = {
 type RespondRequestBody = {
   companyId?: string | null;
   userId?: string | null;
+  sessionId?: string | null;
   scenario?: RoleplayScenarioPayload;
   messages?: RoleplayMessage[];
 };
@@ -68,6 +75,11 @@ export async function POST(request: NextRequest) {
 
   try {
     assertSalesDomainAccess(apiUser, body.scenario.roleplayType === "teleapo" ? "teleapo" : "meeting");
+    const sessionId = normalizeRoleplaySessionId(body.sessionId);
+    if (!sessionId) {
+      return NextResponse.json({ error: "ロープレセッション情報が必要です。" }, { status: 400 });
+    }
+
     const usageAvailability = await assertMonthlyAiUsageAvailable({ userId: apiUser.uid });
     if (!usageAvailability.allowed) {
       return NextResponse.json(
@@ -80,6 +92,14 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    await reserveRoleplayAiResponse({
+      companyId: apiUser.companyId,
+      userId: apiUser.uid,
+      sessionId,
+      scenarioId: body.scenario.id ?? null,
+      roleplayType: body.scenario.roleplayType ?? null,
+    });
+
     const response = await fetchWithTimeout("https://api.openai.com/v1/chat/completions", {
       method: "POST",
       headers: {
@@ -89,16 +109,7 @@ export async function POST(request: NextRequest) {
       body: JSON.stringify({
         model,
         temperature: 0.75,
-        messages: [
-          {
-            role: "system",
-            content: buildSystemPrompt(body.scenario),
-          },
-          ...body.messages.map((message) => ({
-            role: message.role === "sales" ? "user" : "assistant",
-            content: message.content,
-          })),
-        ],
+        messages: buildOpenAiMessages(body.scenario, body.messages),
       }),
     });
 
@@ -154,6 +165,10 @@ export async function POST(request: NextRequest) {
       source: message ? "openai" : "fallback",
     });
   } catch (error) {
+    if (error instanceof RoleplayLimitError) {
+      return NextResponse.json({ error: error.message }, { status: error.status });
+    }
+
     const authError = handleApiAuthError(error);
     if (authError) {
       return NextResponse.json(authError.body, { status: authError.status });
@@ -182,6 +197,48 @@ export async function POST(request: NextRequest) {
       source: "fallback",
     });
   }
+}
+
+function buildOpenAiMessages(scenario: RoleplayScenarioPayload, messages: RoleplayMessage[]) {
+  const recentMessages = messages.slice(-8);
+  const earlierMessages = messages.slice(0, -8);
+
+  return [
+    {
+      role: "system",
+      content: buildSystemPrompt(scenario),
+    },
+    ...(earlierMessages.length > 0
+      ? [
+          {
+            role: "system",
+            content: `これまでの会話要約: ${summarizeEarlierMessages(earlierMessages)}`,
+          },
+        ]
+      : []),
+    ...recentMessages.map((message) => ({
+      role: message.role === "sales" ? "user" : "assistant",
+      content: truncateMessageContent(message.content, 900),
+    })),
+  ];
+}
+
+function summarizeEarlierMessages(messages: RoleplayMessage[]) {
+  const salesTurns = messages.filter((message) => message.role === "sales").length;
+  const customerTurns = messages.filter((message) => message.role === "customer").length;
+  const latestCustomerConcern = [...messages].reverse().find((message) => message.role === "customer")?.content ?? "";
+  const latestSalesPoint = [...messages].reverse().find((message) => message.role === "sales")?.content ?? "";
+
+  return [
+    `営業発話${salesTurns}回、顧客発話${customerTurns}回。`,
+    latestCustomerConcern ? `直近の顧客懸念: ${truncateMessageContent(latestCustomerConcern, 220)}` : "",
+    latestSalesPoint ? `直近の営業説明: ${truncateMessageContent(latestSalesPoint, 220)}` : "",
+  ].filter(Boolean).join(" ");
+}
+
+function truncateMessageContent(value: string, maxLength: number) {
+  const trimmed = value.trim();
+  return trimmed.length > maxLength ? `${trimmed.slice(0, maxLength)}...` : trimmed;
 }
 
 function buildSystemPrompt(scenario: RoleplayScenarioPayload) {

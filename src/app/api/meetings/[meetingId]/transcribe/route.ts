@@ -26,11 +26,7 @@ const maxTranscriptionFileSizeBytes = 25 * 1024 * 1024;
 const targetChunkSizeBytes = 12 * 1024 * 1024;
 const maxOpenAiRetries = 2;
 const remoteFetchTimeoutMs = 10 * 60 * 1000;
-const transcriptionModels = new Set([
-  "gpt-4o-mini-transcribe",
-  "gpt-4o-transcribe",
-  "gpt-4o-transcribe-diarize",
-]);
+const transcriptionModel = "gpt-4o-mini-transcribe";
 const execFileAsync = promisify(execFile);
 
 type TranscriptionSegment = {
@@ -56,7 +52,7 @@ export async function POST(
 ) {
   let body: RequestBody | null = null;
   let apiUser: ApiUserContext | null = null;
-  let selectedModel = "gpt-4o-mini-transcribe";
+  const selectedModel = transcriptionModel;
 
   try {
     apiUser = await requireApiUser(request);
@@ -99,13 +95,7 @@ export async function POST(
       );
     }
 
-    const model = transcriptionModels.has(body.model ?? "")
-      ? (body.model as
-          | "gpt-4o-mini-transcribe"
-          | "gpt-4o-transcribe"
-          | "gpt-4o-transcribe-diarize")
-      : "gpt-4o-mini-transcribe";
-    selectedModel = model;
+    const model = transcriptionModel;
 
     const audioResponse = await fetchWithTimeout(audioDownloadUrl, {
       timeoutMs: remoteFetchTimeoutMs,
@@ -264,10 +254,7 @@ async function transcribeChunk({
   mimeType: string;
   fileBuffer: Buffer;
   language: string | null;
-  model:
-    | "gpt-4o-mini-transcribe"
-    | "gpt-4o-transcribe"
-    | "gpt-4o-transcribe-diarize";
+  model: typeof transcriptionModel;
 }) {
   const bytes = new Uint8Array(fileBuffer);
   const file = new File([bytes], fileName, { type: mimeType });
@@ -282,12 +269,7 @@ async function transcribeChunk({
       formData.append("language", language);
     }
 
-    if (model === "gpt-4o-transcribe-diarize") {
-      formData.append("response_format", "diarized_json");
-      formData.append("chunking_strategy", "auto");
-    } else {
-      formData.append("response_format", "json");
-    }
+    formData.append("response_format", "json");
 
     const openAiResponse = await fetchWithTimeout("https://api.openai.com/v1/audio/transcriptions", {
       method: "POST",

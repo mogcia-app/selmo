@@ -144,10 +144,6 @@ export function estimateTranscriptionCostUsd(input: {
     return null;
   }
 
-  if (input.model === "gpt-4o-transcribe" || input.model === "gpt-4o-transcribe-diarize") {
-    return minutes * 0.006;
-  }
-
   if (input.model === "gpt-4o-mini-transcribe") {
     return minutes * 0.003;
   }

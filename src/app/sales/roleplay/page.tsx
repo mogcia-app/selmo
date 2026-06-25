@@ -19,6 +19,10 @@ import {
 } from "@/lib/firebase/roleplay";
 
 const monthlyLimitMessage = MONTHLY_AI_LIMIT_MESSAGE;
+const minRoleplayUtteranceSec = 2;
+const maxRoleplayUtteranceSec = 60;
+const maxRoleplaySessionAudioSec = 10 * 60;
+const maxRoleplayAiResponses = 12;
 
 type VoicePreference = "female" | "male" | "default";
 type SpeechSpeed = "slow" | "normal" | "fast";
@@ -33,6 +37,8 @@ export default function SalesRoleplayPage() {
   const [assignments, setAssignments] = useState<RoleplayAssignment[]>([]);
   const [messages, setMessages] = useState<RoleplayMessage[]>([]);
   const [recordingElapsedSec, setRecordingElapsedSec] = useState(0);
+  const [sessionAudioSec, setSessionAudioSec] = useState(0);
+  const [roleplaySessionId, setRoleplaySessionId] = useState(() => createRoleplaySessionId());
   const [isRecording, setIsRecording] = useState(false);
   const [isTranscribing, setIsTranscribing] = useState(false);
   const [isThinking, setIsThinking] = useState(false);
@@ -46,6 +52,7 @@ export default function SalesRoleplayPage() {
   const recorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<BlobPart[]>([]);
   const recordingStartedAtRef = useRef<number | null>(null);
+  const maxRecordingTimerRef = useRef<number | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const scenarioId = searchParams.get("scenarioId") ?? "";
   const roleplayType = readRoleplayType(searchParams.get("category"));
@@ -83,6 +90,8 @@ export default function SalesRoleplayPage() {
     if (!scenario) return;
     setMessages([]);
     setRecordingElapsedSec(0);
+    setSessionAudioSec(0);
+    setRoleplaySessionId(createRoleplaySessionId());
   }, [scenario]);
 
   useEffect(() => {
@@ -96,6 +105,9 @@ export default function SalesRoleplayPage() {
 
   useEffect(() => {
     return () => {
+      if (maxRecordingTimerRef.current !== null) {
+        window.clearTimeout(maxRecordingTimerRef.current);
+      }
       recorderRef.current?.stop();
       streamRef.current?.getTracks().forEach((track) => track.stop());
       if (typeof window !== "undefined" && "speechSynthesis" in window) {
@@ -118,6 +130,14 @@ export default function SalesRoleplayPage() {
 
   const handleStartRecording = async () => {
     if (!scenario || isRecording || isThinking || isTranscribing) return;
+    if (messages.filter((message) => message.role === "sales").length >= maxRoleplayAiResponses) {
+      setError("このロープレのAI応答上限に達しました。終了して採点してください。");
+      return;
+    }
+    if (sessionAudioSec >= maxRoleplaySessionAudioSec) {
+      setError("このロープレの録音上限に達しました。終了して採点してください。");
+      return;
+    }
     if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === "undefined") {
       setError("このブラウザでは音声録音に対応していません。Chromeなどのブラウザでお試しください。");
       return;
@@ -145,6 +165,10 @@ export default function SalesRoleplayPage() {
         }
       };
       recorder.onstop = () => {
+        if (maxRecordingTimerRef.current !== null) {
+          window.clearTimeout(maxRecordingTimerRef.current);
+          maxRecordingTimerRef.current = null;
+        }
         const durationSec = recordingStartedAtRef.current
           ? Math.max(1, Math.round((Date.now() - recordingStartedAtRef.current) / 1000))
           : recordingElapsedSec;
@@ -162,6 +186,11 @@ export default function SalesRoleplayPage() {
         }
       };
       recorder.start();
+      maxRecordingTimerRef.current = window.setTimeout(() => {
+        if (recorder.state !== "inactive") {
+          recorder.stop();
+        }
+      }, maxRoleplayUtteranceSec * 1000);
       setIsRecording(true);
     } catch {
       setError("マイクの利用が許可されていません。ブラウザのマイク権限を確認してください。");
@@ -169,6 +198,10 @@ export default function SalesRoleplayPage() {
   };
 
   const handleStopRecording = () => {
+    if (maxRecordingTimerRef.current !== null) {
+      window.clearTimeout(maxRecordingTimerRef.current);
+      maxRecordingTimerRef.current = null;
+    }
     if (recorderRef.current && recorderRef.current.state !== "inactive") {
       recorderRef.current.stop();
     }
@@ -176,15 +209,28 @@ export default function SalesRoleplayPage() {
 
   const transcribeAndSend = async (audioBlob: Blob, durationSec: number) => {
     if (!scenario) return;
-    setIsTranscribing(true);
     setError(null);
 
     try {
+      if (durationSec < minRoleplayUtteranceSec) {
+        throw new Error(`${minRoleplayUtteranceSec}秒以上話してから送信してください。`);
+      }
+      if (durationSec > maxRoleplayUtteranceSec) {
+        throw new Error(`1回の録音は${maxRoleplayUtteranceSec}秒以内にしてください。`);
+      }
+      if (sessionAudioSec + durationSec > maxRoleplaySessionAudioSec) {
+        throw new Error("このロープレの録音上限に達しました。終了して採点してください。");
+      }
+
+      setIsTranscribing(true);
       const formData = new FormData();
       formData.append("audio", audioBlob, `roleplay-${Date.now()}.${getAudioExtension(audioBlob.type)}`);
       formData.append("companyId", profile?.companyId ?? "");
       formData.append("userId", userId ?? "");
       formData.append("durationSec", String(durationSec));
+      formData.append("sessionId", roleplaySessionId);
+      formData.append("scenarioId", scenario.id);
+      formData.append("roleplayType", scenario.roleplayType);
 
       const response = await fetch("/api/roleplay/transcribe", {
         method: "POST",
@@ -200,6 +246,7 @@ export default function SalesRoleplayPage() {
       if (!text) {
         throw new Error("発話を認識できませんでした。もう少しはっきり話して再録音してください。");
       }
+      setSessionAudioSec((current) => current + durationSec);
       await sendSalesMessage(text);
     } catch (nextError) {
       setError(nextError instanceof Error ? nextError.message : "音声ロープレの送信に失敗しました。");
@@ -210,6 +257,10 @@ export default function SalesRoleplayPage() {
 
   const sendSalesMessage = async (content: string) => {
     if (!content.trim() || !scenario) return;
+    if (messages.filter((message) => message.role === "sales").length >= maxRoleplayAiResponses) {
+      setError("このロープレのAI応答上限に達しました。終了して採点してください。");
+      return;
+    }
 
     const nextMessages: RoleplayMessage[] = [
       ...messages,
@@ -230,6 +281,7 @@ export default function SalesRoleplayPage() {
         body: JSON.stringify({
           companyId: profile?.companyId ?? null,
           userId,
+          sessionId: roleplaySessionId,
           scenario,
           messages: nextMessages,
         }),
@@ -237,7 +289,7 @@ export default function SalesRoleplayPage() {
       const data = (await response.json()) as { message?: string; error?: string };
       if (!response.ok) {
         if (response.status === 429) {
-          throw new Error(monthlyLimitMessage);
+          throw new Error(data.error ?? monthlyLimitMessage);
         }
 
         throw new Error(data.error ?? "AI顧客の応答に失敗しました。");
@@ -271,6 +323,7 @@ export default function SalesRoleplayPage() {
       const evaluation = await evaluateRoleplayWithAi({
         companyId,
         userId,
+        sessionId: roleplaySessionId,
         scenario,
         messages,
       }).catch((nextError) => {
@@ -653,6 +706,13 @@ function getAudioExtension(mimeType: string) {
   return "webm";
 }
 
+function createRoleplaySessionId() {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+  return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
 type RoleplayType = "meeting" | "teleapo";
 
 function readRoleplayType(value: string | null): RoleplayType {
@@ -757,6 +817,7 @@ function evaluateRoleplay(scenario: RoleplayScenario, messages: RoleplayMessage[
 async function evaluateRoleplayWithAi(input: {
   companyId: string;
   userId: string;
+  sessionId: string;
   scenario: RoleplayScenario;
   messages: RoleplayMessage[];
 }) {
@@ -783,7 +844,7 @@ async function evaluateRoleplayWithAi(input: {
 
   if (!response.ok) {
     if (response.status === 429) {
-      throw new Error(monthlyLimitMessage);
+      throw new Error(data.error ?? monthlyLimitMessage);
     }
     throw new Error(data.error ?? "AI評価に失敗しました。");
   }

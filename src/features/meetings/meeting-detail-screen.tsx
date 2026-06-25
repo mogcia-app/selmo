@@ -276,7 +276,7 @@ export function MeetingDetailScreen({
   async function runTranscription({
     model,
   }: {
-    model: "gpt-4o-mini-transcribe" | "gpt-4o-transcribe-diarize";
+    model: "gpt-4o-mini-transcribe";
   }) {
     if (!meeting) {
       return;

@@ -24,7 +24,7 @@ const execFileAsync = promisify(execFile);
 const remoteFetchTimeoutMs = 10 * 60 * 1000;
 const defaultChunkDurationSec = 75;
 const defaultOverlapSec = 6;
-const supportedModels = new Set(["gpt-4o-mini-transcribe", "gpt-4o-transcribe"]);
+const transcriptionModel = "gpt-4o-mini-transcribe";
 
 type RequestBody = {
   audioDownloadUrl?: string;
@@ -52,7 +52,7 @@ export async function POST(
 ) {
   let body: RequestBody | null = null;
   let apiUser: ApiUserContext | null = null;
-  let selectedModel = "gpt-4o-mini-transcribe";
+  const selectedModel = transcriptionModel;
 
   try {
     apiUser = await requireApiUser(request);
@@ -80,10 +80,7 @@ export async function POST(
       );
     }
 
-    const model = supportedModels.has(body.model ?? "")
-      ? (body.model as "gpt-4o-mini-transcribe" | "gpt-4o-transcribe")
-      : "gpt-4o-mini-transcribe";
-    selectedModel = model;
+    const model = transcriptionModel;
 
     const audioResponse = await fetchWithTimeout(audioDownloadUrl, {
       timeoutMs: remoteFetchTimeoutMs,
@@ -234,7 +231,7 @@ async function transcribeChunk({
   mimeType: string;
   fileBuffer: Buffer;
   language: string;
-  model: "gpt-4o-mini-transcribe" | "gpt-4o-transcribe";
+  model: typeof transcriptionModel;
 }) {
   const file = new File([new Uint8Array(fileBuffer)], fileName, { type: mimeType });
   const formData = new FormData();

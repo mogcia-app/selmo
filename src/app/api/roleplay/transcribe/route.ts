@@ -6,6 +6,11 @@ import {
   saveAiUsageLog,
   saveSystemErrorLog,
 } from "@/lib/server/operational-logs";
+import {
+  RoleplayLimitError,
+  normalizeRoleplaySessionId,
+  reserveRoleplayAudioUsage,
+} from "@/lib/server/roleplay-cost-control";
 import { MONTHLY_AI_LIMIT_MESSAGE } from "@/lib/ai-usage-limit";
 import {
   handleApiAuthError,
@@ -14,6 +19,8 @@ import {
 } from "@/lib/server/auth/require-api-user";
 
 export const runtime = "nodejs";
+
+const transcriptionModel = "gpt-4o-mini-transcribe";
 
 export async function POST(request: NextRequest) {
   let apiUser: ApiUserContext | null = null;
@@ -28,7 +35,10 @@ export async function POST(request: NextRequest) {
   const formData = await request.formData().catch(() => null);
   const audio = formData?.get("audio");
   const durationSec = readNumberFormValue(formData?.get("durationSec"));
-  const model = process.env.OPENAI_TRANSCRIPTION_MODEL ?? "gpt-4o-mini-transcribe";
+  const sessionId = normalizeRoleplaySessionId(formData?.get("sessionId"));
+  const scenarioId = readStringFormValue(formData?.get("scenarioId"));
+  const roleplayType = readStringFormValue(formData?.get("roleplayType"));
+  const model = transcriptionModel;
 
   if (!(audio instanceof File) || audio.size <= 0) {
     return NextResponse.json({ error: "音声データが必要です。" }, { status: 400 });
@@ -36,6 +46,10 @@ export async function POST(request: NextRequest) {
 
   if (!process.env.OPENAI_API_KEY) {
     return NextResponse.json({ error: "音声文字起こしのAPIキーが設定されていません。" }, { status: 500 });
+  }
+
+  if (!sessionId) {
+    return NextResponse.json({ error: "ロープレセッション情報が必要です。" }, { status: 400 });
   }
 
   try {
@@ -50,6 +64,15 @@ export async function POST(request: NextRequest) {
         { status: 429 },
       );
     }
+
+    await reserveRoleplayAudioUsage({
+      companyId: apiUser.companyId,
+      userId: apiUser.uid,
+      sessionId,
+      scenarioId,
+      roleplayType,
+      durationSec: durationSec ?? 0,
+    });
 
     const openAiFormData = new FormData();
     openAiFormData.append("file", audio, audio.name || "roleplay.webm");
@@ -100,6 +123,10 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({ text });
   } catch (error) {
+    if (error instanceof RoleplayLimitError) {
+      return NextResponse.json({ error: error.message }, { status: error.status });
+    }
+
     const message = error instanceof Error ? error.message : "ロープレ音声の文字起こしに失敗しました。";
     await saveAiUsageLog({
       companyId: apiUser.companyId,
@@ -126,6 +153,10 @@ function readNumberFormValue(value: FormDataEntryValue | null | undefined) {
   if (typeof value !== "string") return null;
   const number = Number(value);
   return Number.isFinite(number) && number > 0 ? number : null;
+}
+
+function readStringFormValue(value: FormDataEntryValue | null | undefined) {
+  return typeof value === "string" ? value.trim() : "";
 }
 
 function fetchWithTimeout(url: string, init: RequestInit, timeoutMs = 30000) {

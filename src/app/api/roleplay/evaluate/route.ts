@@ -7,6 +7,8 @@ import {
   saveAiUsageLog,
   saveSystemErrorLog,
 } from "@/lib/server/operational-logs";
+import { getFirebaseAdminDb } from "@/lib/firebase/admin";
+import { hashRoleplayPayload } from "@/lib/server/roleplay-cost-control";
 import type { AnalysisContext } from "@/lib/server/analysis-context";
 import { buildAnalysisContextPrompt, loadAnalysisContext } from "@/lib/server/analysis-context";
 import {
@@ -51,6 +53,21 @@ type EvaluationResponse = {
   }>;
 };
 
+type RoleplayEvaluation = {
+  score: number;
+  summary: string;
+  strengths: string[];
+  improvements: string[];
+  improvementPhrases: string[];
+  manualChecklistItems: Array<{
+    category: string;
+    label: string;
+    status: "done" | "missing";
+    reason: string;
+    scoreImpact: number | null;
+  }>;
+};
+
 type ManualChecklistEntry = {
   category: string;
   label: string;
@@ -60,6 +77,7 @@ type ManualChecklistEntry = {
 type EvaluateRequestBody = {
   companyId?: string | null;
   userId?: string | null;
+  sessionId?: string | null;
   scenario?: RoleplayScenarioPayload;
   messages?: RoleplayMessage[];
 };
@@ -89,6 +107,17 @@ export async function POST(request: NextRequest) {
   try {
     const roleplayType = body.scenario.roleplayType === "teleapo" ? "teleapo" : "meeting";
     assertSalesDomainAccess(apiUser, roleplayType);
+    const cacheKey = buildEvaluationCacheKey({
+      companyId: apiUser.companyId,
+      userId: apiUser.uid,
+      scenario: body.scenario,
+      messages: body.messages,
+    });
+    const cachedEvaluation = await readCachedEvaluation(cacheKey);
+    if (cachedEvaluation) {
+      return NextResponse.json(cachedEvaluation);
+    }
+
     const usageAvailability = await assertMonthlyAiUsageAvailable({ userId: apiUser.uid });
     if (!usageAvailability.allowed) {
       return NextResponse.json(
@@ -182,6 +211,13 @@ export async function POST(request: NextRequest) {
       throw new Error("AI評価本文が返りませんでした。");
     }
     const evaluation = normalizeEvaluation(JSON.parse(content) as EvaluationResponse, analysisContext.manual);
+    await saveCachedEvaluation({
+      cacheKey,
+      companyId: apiUser.companyId,
+      userId: apiUser.uid,
+      scenarioTitle: body.scenario.title,
+      evaluation,
+    });
 
     await saveAiUsageLog({
       companyId: apiUser.companyId,
@@ -270,6 +306,72 @@ function formatMessages(messages: RoleplayMessage[]) {
   return messages
     .map((message, index) => `${index + 1}. ${message.role === "sales" ? "営業" : "顧客"}: ${message.content}`)
     .join("\n");
+}
+
+function buildEvaluationCacheKey(input: {
+  companyId?: string | null;
+  userId: string;
+  scenario: RoleplayScenarioPayload;
+  messages: RoleplayMessage[];
+}) {
+  return hashRoleplayPayload({
+    companyId: input.companyId ?? null,
+    userId: input.userId,
+    scenario: {
+      title: input.scenario.title,
+      roleplayType: input.scenario.roleplayType ?? "meeting",
+      productName: input.scenario.productName ?? "",
+      scenarioCategory: input.scenario.scenarioCategory ?? "",
+      targetSegment: input.scenario.targetSegment ?? "",
+      evaluationCriteria: input.scenario.evaluationCriteria ?? [],
+      customFields: input.scenario.customFields ?? [],
+    },
+    messages: input.messages.map((message) => ({
+      role: message.role,
+      content: message.content.trim(),
+    })),
+  });
+}
+
+async function readCachedEvaluation(cacheKey: string): Promise<RoleplayEvaluation | null> {
+  const db = getFirebaseAdminDb();
+  if (!db) return null;
+
+  const snapshot = await db.collection("roleplayEvaluationCache").doc(cacheKey).get();
+  const data = snapshot.data();
+  if (!snapshot.exists || !data) return null;
+
+  return isRoleplayEvaluation(data.evaluation) ? data.evaluation : null;
+}
+
+async function saveCachedEvaluation(input: {
+  cacheKey: string;
+  companyId?: string | null;
+  userId: string;
+  scenarioTitle: string;
+  evaluation: RoleplayEvaluation;
+}) {
+  const db = getFirebaseAdminDb();
+  if (!db) return;
+
+  await db.collection("roleplayEvaluationCache").doc(input.cacheKey).set({
+    companyId: input.companyId ?? null,
+    userId: input.userId,
+    scenarioTitle: input.scenarioTitle,
+    evaluation: input.evaluation,
+    createdAt: new Date(),
+  });
+}
+
+function isRoleplayEvaluation(value: unknown): value is RoleplayEvaluation {
+  if (!value || typeof value !== "object") return false;
+  const data = value as RoleplayEvaluation;
+  return typeof data.score === "number" &&
+    typeof data.summary === "string" &&
+    Array.isArray(data.strengths) &&
+    Array.isArray(data.improvements) &&
+    Array.isArray(data.improvementPhrases) &&
+    Array.isArray(data.manualChecklistItems);
 }
 
 function normalizeEvaluation(value: EvaluationResponse, manual: AnalysisContext["manual"]) {

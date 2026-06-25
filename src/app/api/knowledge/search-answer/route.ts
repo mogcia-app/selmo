@@ -5,6 +5,8 @@ import {
   saveAiUsageLog,
   saveSystemErrorLog,
 } from "@/lib/server/operational-logs";
+import { getFirebaseAdminDb } from "@/lib/firebase/admin";
+import { hashRoleplayPayload } from "@/lib/server/roleplay-cost-control";
 import {
   assertSalesDomainAccess,
   handleApiAuthError,
@@ -15,6 +17,7 @@ import {
 export const runtime = "nodejs";
 
 const remoteFetchTimeoutMs = 60 * 1000;
+const knowledgeAnswerCacheTtlMs = 7 * 24 * 60 * 60 * 1000;
 
 type KnowledgeSearchSource = {
   id: string;
@@ -68,7 +71,31 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "回答に使えるナレッジがありません。" }, { status: 400 });
     }
 
+    const cacheKey = buildKnowledgeAnswerCacheKey({
+      companyId: apiUser.companyId,
+      userId: apiUser.uid,
+      query,
+      sources,
+    });
+    const cachedAnswer = await readCachedKnowledgeAnswer(cacheKey);
+    if (cachedAnswer) {
+      return NextResponse.json({
+        model,
+        answer: cachedAnswer,
+        source: "cache",
+      });
+    }
+
     const result = await generateKnowledgeSearchAnswer(query, sources);
+    await saveCachedKnowledgeAnswer({
+      cacheKey,
+      companyId: apiUser.companyId,
+      userId: apiUser.uid,
+      query,
+      sources,
+      answer: result.answer,
+    });
+
     await saveAiUsageLog({
       companyId: apiUser.companyId,
       userId: apiUser.uid,
@@ -235,6 +262,74 @@ async function generateKnowledgeSearchAnswer(query: string, sources: KnowledgeSe
       outputTokens: parsed.usage?.completion_tokens ?? null,
     },
   };
+}
+
+function buildKnowledgeAnswerCacheKey(input: {
+  companyId?: string | null;
+  userId: string;
+  query: string;
+  sources: KnowledgeSearchSource[];
+}) {
+  return hashRoleplayPayload({
+    companyId: input.companyId ?? null,
+    userId: input.userId,
+    query: normalizeKnowledgeQuery(input.query),
+    sourceIds: input.sources.slice(0, 8).map((source) => source.id).sort(),
+  });
+}
+
+async function readCachedKnowledgeAnswer(cacheKey: string): Promise<KnowledgeSearchAnswer | null> {
+  const db = getFirebaseAdminDb();
+  if (!db) return null;
+
+  const snapshot = await db.collection("knowledgeSearchAnswerCache").doc(cacheKey).get();
+  const data = snapshot.data();
+  if (!snapshot.exists || !data || !isKnowledgeSearchAnswer(data.answer)) return null;
+
+  const createdAt = readCacheDate(data.createdAt);
+  if (!createdAt || Date.now() - createdAt.getTime() > knowledgeAnswerCacheTtlMs) return null;
+
+  return data.answer;
+}
+
+async function saveCachedKnowledgeAnswer(input: {
+  cacheKey: string;
+  companyId?: string | null;
+  userId: string;
+  query: string;
+  sources: KnowledgeSearchSource[];
+  answer: KnowledgeSearchAnswer;
+}) {
+  const db = getFirebaseAdminDb();
+  if (!db) return;
+
+  await db.collection("knowledgeSearchAnswerCache").doc(input.cacheKey).set({
+    companyId: input.companyId ?? null,
+    userId: input.userId,
+    query: input.query,
+    sourceIds: input.sources.slice(0, 8).map((source) => source.id),
+    answer: input.answer,
+    createdAt: new Date(),
+  });
+}
+
+function normalizeKnowledgeQuery(value: string) {
+  return value.trim().replace(/\s+/g, " ").toLowerCase();
+}
+
+function readCacheDate(value: unknown) {
+  if (value instanceof Date) return value;
+  if (typeof (value as { toDate?: unknown } | null)?.toDate === "function") {
+    return (value as { toDate: () => Date }).toDate();
+  }
+
+  return null;
+}
+
+function isKnowledgeSearchAnswer(value: unknown): value is KnowledgeSearchAnswer {
+  if (!value || typeof value !== "object") return false;
+  const data = value as KnowledgeSearchAnswer;
+  return typeof data.overview === "string" && Array.isArray(data.bullets) && Array.isArray(data.followUps);
 }
 
 function mapOpenAiErrorMessage(rawMessage: string) {
