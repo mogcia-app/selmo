@@ -2,6 +2,10 @@ import { Timestamp, type DocumentData } from "firebase-admin/firestore";
 
 import { getFirebaseAdminDb } from "@/lib/firebase/admin";
 import {
+  DEFAULT_MONTHLY_ROLEPLAY_QUOTA,
+  DEFAULT_MONTHLY_TRANSCRIPTION_QUOTA,
+} from "@/lib/ai-usage-limit";
+import {
   buildAppUrl,
   escapeHtml,
   hasSentEmailEvent,
@@ -9,7 +13,8 @@ import {
   sendEmail,
 } from "@/lib/server/email";
 
-const STANDARD_AI_QUOTA = 15;
+const STANDARD_TRANSCRIPTION_QUOTA = DEFAULT_MONTHLY_TRANSCRIPTION_QUOTA;
+const STANDARD_ROLEPLAY_QUOTA = DEFAULT_MONTHLY_ROLEPLAY_QUOTA;
 const PRO_AI_QUOTA = 30;
 const remainingUsageWarningThreshold = 5;
 
@@ -49,6 +54,13 @@ type RoleplayRecord = {
   userId: string | null;
   scenarioTitle: string;
   score: number | null;
+  createdAt: Date | null;
+};
+
+type RoleplaySessionRecord = {
+  id: string;
+  companyId: string | null;
+  userId: string | null;
   createdAt: Date | null;
 };
 
@@ -186,17 +198,19 @@ export async function sendAiUsageWarningEmails() {
         continue;
       }
 
-      const usageLogs = context.aiUsageLogs.filter(
-        (log) =>
-          log.companyId === company.id &&
-          log.userId === salesUser.id &&
-          log.status === "success" &&
-          (log.feature === "transcription" || log.feature === "roleplay") &&
-          isInRange(log.createdAt, start, end),
-      );
-      const meetingCount = usageLogs.filter((log) => log.feature === "transcription").length;
-      const roleplayCount = usageLogs.filter((log) => log.feature === "roleplay").length;
-      const used = usageLogs.length;
+      const meetingCount = context.meetings.filter(
+        (meeting) =>
+          meeting.companyId === company.id &&
+          meeting.userId === salesUser.id &&
+          isInRange(meeting.createdAt ?? meeting.recordedAt, start, end),
+      ).length;
+      const roleplayCount = context.roleplaySessions.filter(
+        (session) =>
+          session.companyId === company.id &&
+          session.userId === salesUser.id &&
+          isInRange(session.createdAt, start, end),
+      ).length;
+      const used = meetingCount + roleplayCount;
       const remaining = quota - used;
 
       if (remaining > remainingUsageWarningThreshold || remaining < 0) {
@@ -238,7 +252,6 @@ export async function sendAiUsageWarningEmails() {
               `${recipient.user.name}さん`,
               `${salesUser.name}さんのAI利用回数が残り${remaining}回になりました。`,
               `使用 ${used}回 / 月${quota}回`,
-              "必要に応じてチャージをご検討ください。",
               buildAppUrl("/sales/account"),
             ].join("\n"),
             tags: [{ name: "kind", value: "ai_usage_warning" }],
@@ -291,6 +304,7 @@ async function loadReportContext() {
     usersSnapshot,
     meetingsSnapshot,
     roleplaysSnapshot,
+    roleplaySessionsSnapshot,
     searchSnapshot,
     aiUsageSnapshot,
   ] =
@@ -299,6 +313,7 @@ async function loadReportContext() {
       db.collection("users").get(),
       db.collection("meetings").get(),
       db.collection("roleplayResults").get(),
+      db.collection("roleplaySessions").get(),
       db.collection("knowledgeSearchEvents").get(),
       db.collection("aiUsageLogs").get(),
     ]);
@@ -308,6 +323,7 @@ async function loadReportContext() {
     users: usersSnapshot.docs.map((doc) => mapUser(doc.id, doc.data())),
     meetings: meetingsSnapshot.docs.map((doc) => mapMeeting(doc.id, doc.data())),
     roleplays: roleplaysSnapshot.docs.map((doc) => mapRoleplay(doc.id, doc.data())),
+    roleplaySessions: roleplaySessionsSnapshot.docs.map((doc) => mapRoleplaySession(doc.id, doc.data())),
     aiUsageLogs: aiUsageSnapshot.docs.map((doc) => mapAiUsage(doc.id, doc.data())),
     searchEvents: searchSnapshot.docs.map((doc) => ({
       id: doc.id,
@@ -383,7 +399,6 @@ function buildUsageWarningHtml(input: {
         <div><strong>${input.meetingCount}</strong><span>商談分析</span></div>
         <div><strong>${input.roleplayCount}</strong><span>ロープレ</span></div>
       </div>
-      <p>今月もAIコーチを使い続ける場合は、必要に応じてチャージをご検討ください。</p>
       <a class="button" href="${escapeHtml(buildAppUrl("/sales/account"))}">利用状況を確認する</a>
     `,
   });
@@ -441,8 +456,8 @@ function mapCompany(id: string, data: DocumentData): CompanyRecord {
     id,
     companyName: readString(data.companyName ?? data.name, "未設定の会社"),
     plan,
-    monthlyTranscriptionQuota: readQuota(data.monthlyTranscriptionQuota, plan),
-    monthlyRoleplayQuota: readQuota(data.monthlyRoleplayQuota, plan),
+    monthlyTranscriptionQuota: readQuota(data.monthlyTranscriptionQuota, plan, STANDARD_TRANSCRIPTION_QUOTA),
+    monthlyRoleplayQuota: readQuota(data.monthlyRoleplayQuota, plan, STANDARD_ROLEPLAY_QUOTA),
     notificationEmails: readEmailArray(data.notificationEmails).slice(0, 3),
   };
 }
@@ -482,6 +497,15 @@ function mapRoleplay(id: string, data: DocumentData): RoleplayRecord {
     userId: readNullableString(data.userId),
     scenarioTitle: readString(data.scenarioTitle, "ロープレ"),
     score: typeof data.score === "number" ? data.score : null,
+    createdAt: readDate(data.createdAt),
+  };
+}
+
+function mapRoleplaySession(id: string, data: DocumentData): RoleplaySessionRecord {
+  return {
+    id,
+    companyId: readNullableString(data.companyId),
+    userId: readNullableString(data.userId),
     createdAt: readDate(data.createdAt),
   };
 }
@@ -535,7 +559,7 @@ function readSharedQuota(company: CompanyRecord) {
     return null;
   }
 
-  return Math.min(company.monthlyTranscriptionQuota, company.monthlyRoleplayQuota);
+  return company.monthlyTranscriptionQuota + company.monthlyRoleplayQuota;
 }
 
 function readPlan(value: unknown): CompanyRecord["plan"] {
@@ -546,7 +570,7 @@ function readPlan(value: unknown): CompanyRecord["plan"] {
   return "standard";
 }
 
-function readQuota(value: unknown, plan: CompanyRecord["plan"]) {
+function readQuota(value: unknown, plan: CompanyRecord["plan"], standardFallback: number) {
   if (typeof value === "number" && Number.isFinite(value) && value >= 0) {
     return Math.floor(value);
   }
@@ -559,7 +583,7 @@ function readQuota(value: unknown, plan: CompanyRecord["plan"]) {
     return null;
   }
 
-  return STANDARD_AI_QUOTA;
+  return standardFallback;
 }
 
 function readString(value: unknown, fallback = "") {

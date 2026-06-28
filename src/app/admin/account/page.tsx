@@ -11,7 +11,14 @@ import { assertFirebaseClient } from "@/lib/firebase/client";
 import {
   fetchCompanyNotificationSettings,
   updateCompanyNotificationEmails,
+  updateCompanyUploadDurationLimit,
 } from "@/lib/firebase/company-settings";
+import {
+  defaultUploadDurationLimitMinutes,
+  uploadDurationGraceMinutes,
+  uploadDurationLimitOptions,
+  type UploadDurationLimitMinutes,
+} from "@/lib/upload-duration-limit";
 
 export default function AdminAccountPage() {
   const router = useRouter();
@@ -32,6 +39,10 @@ export default function AdminAccountPage() {
   const [notificationMessage, setNotificationMessage] = useState<string | null>(null);
   const [notificationError, setNotificationError] = useState<string | null>(null);
   const [isSavingNotifications, setIsSavingNotifications] = useState(false);
+  const [uploadDurationLimitMinutes, setUploadDurationLimitMinutes] = useState<UploadDurationLimitMinutes>(defaultUploadDurationLimitMinutes);
+  const [uploadDurationMessage, setUploadDurationMessage] = useState<string | null>(null);
+  const [uploadDurationError, setUploadDurationError] = useState<string | null>(null);
+  const [isSavingUploadDurationLimit, setIsSavingUploadDurationLimit] = useState(false);
   const initials = (profile?.name ?? profile?.email ?? "A").slice(0, 1).toUpperCase();
 
   useEffect(() => {
@@ -52,6 +63,7 @@ export default function AdminAccountPage() {
           settings.notificationEmails[1] ?? "",
           settings.notificationEmails[2] ?? "",
         ]);
+        setUploadDurationLimitMinutes(settings.uploadDurationLimitMinutes);
       })
       .catch(() => {
         if (isActive) {
@@ -180,6 +192,30 @@ export default function AdminAccountPage() {
       setNotificationError(error instanceof Error ? error.message : "通知先メールの保存に失敗しました。");
     } finally {
       setIsSavingNotifications(false);
+    }
+  }
+
+  async function handleSaveUploadDurationLimit() {
+    setUploadDurationMessage(null);
+    setUploadDurationError(null);
+
+    if (!profile?.companyId) {
+      setUploadDurationError("会社情報を取得できませんでした。");
+      return;
+    }
+
+    setIsSavingUploadDurationLimit(true);
+    try {
+      const result = await updateCompanyUploadDurationLimit({
+        companyId: profile.companyId,
+        uploadDurationLimitMinutes,
+      });
+      setUploadDurationLimitMinutes(result.uploadDurationLimitMinutes);
+      setUploadDurationMessage("アップロード時間上限を保存しました。");
+    } catch (error) {
+      setUploadDurationError(error instanceof Error ? error.message : "アップロード時間上限の保存に失敗しました。");
+    } finally {
+      setIsSavingUploadDurationLimit(false);
     }
   }
 
@@ -333,6 +369,37 @@ export default function AdminAccountPage() {
               </button>
               {notificationError ? <div className="mt-3"><MessageBox tone="error">{notificationError}</MessageBox></div> : null}
               {notificationMessage ? <div className="mt-3"><MessageBox tone="success">{notificationMessage}</MessageBox></div> : null}
+            </SettingsCard>
+
+            <SettingsCard iconSrc="/mojiokoshi.png" title="アップロード時間上限">
+              <p className="mb-4 text-[13px] leading-6 text-[#596273]">
+                1ファイルあたりの音声・文字起こし保存時間を会社全体で制限します。処理上は設定値に{uploadDurationGraceMinutes}分の猶予を持たせます。
+              </p>
+              <label className="block">
+                <span className="text-[13px] font-bold text-[#3d4350]">1ファイルあたりの上限</span>
+                <select
+                  value={uploadDurationLimitMinutes}
+                  onChange={(event) => setUploadDurationLimitMinutes(Number(event.target.value) as UploadDurationLimitMinutes)}
+                  className="mt-2 h-12 w-full rounded-[12px] border border-[#e4e7ed] bg-white px-4 text-[14px] text-[#171717] outline-none transition focus:border-[#f0c655] focus:shadow-[0_0_0_3px_rgba(255,196,0,0.14)]"
+                >
+                  {uploadDurationLimitOptions.map((minutes) => (
+                    <option key={minutes} value={minutes}>{minutes}分</option>
+                  ))}
+                </select>
+              </label>
+              <div className="mt-3 rounded-[14px] border border-[#f2e6ba] bg-[#fffaf0] px-4 py-3 text-[12px] leading-5 text-[#6f5500]">
+                画面表示は{uploadDurationLimitMinutes}分まで、実際の判定は{uploadDurationLimitMinutes + uploadDurationGraceMinutes}分まで許可します。
+              </div>
+              <button
+                type="button"
+                onClick={() => void handleSaveUploadDurationLimit()}
+                disabled={isSavingUploadDurationLimit}
+                className="mt-4 h-12 w-full rounded-[14px] bg-[#ffc400] px-5 text-[14px] font-bold text-[#171717] transition hover:bg-[#f0b400] disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {isSavingUploadDurationLimit ? "保存中" : "上限を保存"}
+              </button>
+              {uploadDurationError ? <div className="mt-3"><MessageBox tone="error">{uploadDurationError}</MessageBox></div> : null}
+              {uploadDurationMessage ? <div className="mt-3"><MessageBox tone="success">{uploadDurationMessage}</MessageBox></div> : null}
             </SettingsCard>
 
             <SettingsCard iconSrc="/gaido.png" title="サポート">

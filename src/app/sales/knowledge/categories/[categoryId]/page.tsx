@@ -18,7 +18,7 @@ import {
 const DEFAULT_CATEGORY = {
   id: "how-to",
   title: "使い方",
-  description: "Selmoの使い方やナレッジ整理の基本を確認できます。",
+  description: "営業・管理者それぞれの初期設定、分析、ロープレ、ナレッジ運用の手順を確認できます。",
 } as const;
 
 export default function SalesKnowledgeCategoryPage() {

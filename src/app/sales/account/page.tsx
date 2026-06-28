@@ -15,11 +15,6 @@ type ActivityCounts = {
   knowledgeSearch: number;
 };
 
-const chargePlans = [
-  { label: "ライト", count: "1回", price: "6,500円", amount: 1, caption: "あと少しだけ試したい時に" },
-  { label: "ブースト", count: "10回", price: "65,000円", amount: 10, caption: "今月の商談準備を一気に進める" },
-];
-
 export default function SalesAccountPage() {
   const { profile } = useAuth();
   const [meetings, setMeetings] = useState<MeetingRecord[]>([]);
@@ -37,9 +32,6 @@ export default function SalesAccountPage() {
   const [passwordMessage, setPasswordMessage] = useState<string | null>(null);
   const [passwordError, setPasswordError] = useState<string | null>(null);
   const [isChangingPassword, setIsChangingPassword] = useState(false);
-  const [chargeMessage, setChargeMessage] = useState<string | null>(null);
-  const [chargeError, setChargeError] = useState<string | null>(null);
-  const [chargingAmount, setChargingAmount] = useState<number | null>(null);
   const initials = (profile?.name ?? profile?.email ?? "S").slice(0, 1).toUpperCase();
   const monthlyMeetings = useMemo(
     () => meetings.filter((meeting) => isCurrentMonth(meeting.recordedAt)),
@@ -178,41 +170,6 @@ export default function SalesAccountPage() {
       setPasswordError(readPasswordErrorMessage(error));
     } finally {
       setIsChangingPassword(false);
-    }
-  }
-
-  async function handleCharge(amount: number) {
-    setChargeMessage(null);
-    setChargeError(null);
-    setChargingAmount(amount);
-
-    try {
-      const { firebaseAuth } = assertFirebaseClient();
-      const token = await firebaseAuth.currentUser?.getIdToken();
-
-      if (!token) {
-        throw new Error("ログイン情報を確認できませんでした。");
-      }
-
-      const response = await fetch("/api/ai-usage/charge", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({ amount }),
-      });
-      const payload = (await response.json()) as { error?: string };
-
-      if (!response.ok) {
-        throw new Error(payload.error ?? "チャージに失敗しました。");
-      }
-
-      setChargeMessage(`${amount}回分をチャージしました。`);
-    } catch (error) {
-      setChargeError(error instanceof Error ? error.message : "チャージに失敗しました。");
-    } finally {
-      setChargingAmount(null);
     }
   }
 
@@ -366,66 +323,6 @@ export default function SalesAccountPage() {
                 <ActivityCard label="ナレッジ検索" value={`${activityCounts.knowledgeSearch}回`} />
               </div>
             </SettingsCard>
-
-            <section className="overflow-hidden rounded-[26px] border border-[#f0c655] bg-white shadow-[0_16px_34px_rgba(245,189,7,0.12)]">
-              <div className="bg-[#171717] px-5 py-5 text-white md:px-6">
-                <div className="flex items-center justify-between gap-4">
-                  <div>
-                    <p className="text-[12px] font-bold uppercase tracking-[0.2em] text-[#ffd84d]">Charge</p>
-                    <h2 className="mt-1 text-[24px] font-black">AI回数をチャージ</h2>
-                  </div>
-                  <Image src="/kiiro.png" alt="" width={72} height={72} className="h-[58px] w-[58px] object-contain" />
-                </div>
-                <p className="mt-3 text-[13px] leading-6 text-white/72">
-                  次の商談前に、分析とロープレの余白を増やしましょう。
-                </p>
-              </div>
-              <div className="grid gap-3 p-5 sm:grid-cols-2 md:p-6">
-                {chargePlans.map((plan) => (
-                  <button
-                    key={plan.label}
-                    type="button"
-                    onClick={() => void handleCharge(plan.amount)}
-                    disabled={chargingAmount !== null}
-                    className={`group relative overflow-hidden rounded-[22px] border px-5 py-5 text-left transition disabled:cursor-not-allowed disabled:opacity-60 ${
-                      plan.amount === 10
-                        ? "border-[#f0c655] bg-[#fff1a8] shadow-[0_14px_28px_rgba(245,189,7,0.2)] hover:bg-[#ffe978]"
-                        : "border-[#eadfbf] bg-[#fffdf7] hover:border-[#f0c655] hover:bg-[#fff7d6]"
-                    }`}
-                  >
-                    {plan.amount === 10 ? (
-                      <div className="absolute right-4 top-4 rounded-full bg-white/80 px-3 py-1 text-[11px] font-bold text-[#8a6500]">
-                        おすすめ
-                      </div>
-                    ) : null}
-                    <div className="flex items-center gap-3">
-                      <div className="flex h-12 w-12 items-center justify-center rounded-full bg-white text-[22px] font-black text-[#171717] shadow-[0_8px_18px_rgba(17,24,39,0.08)]">
-                        +
-                      </div>
-                      <div>
-                        <div className="text-[12px] font-bold text-[#8a6500]">{plan.label}</div>
-                        <div className="text-[20px] font-black text-[#171717]">{plan.count}</div>
-                      </div>
-                    </div>
-                    <div className="mt-5 text-[30px] font-black text-[#171717]">
-                      {chargingAmount === plan.amount ? "処理中" : plan.price}
-                    </div>
-                    <div className="mt-3 text-[12px] font-bold leading-5 text-[#6f5500]">{plan.caption}</div>
-                  </button>
-                ))}
-              </div>
-
-              {chargeError ? (
-                <div className="mx-5 mb-5 rounded-[14px] border border-[#ffd2cc] bg-[#fff7f5] px-4 py-3 text-[13px] font-bold text-[#cf4b39] md:mx-6">
-                  {chargeError}
-                </div>
-              ) : null}
-              {chargeMessage ? (
-                <div className="mx-5 mb-5 rounded-[14px] border border-[#d9edc8] bg-[#f7fff2] px-4 py-3 text-[13px] font-bold text-[#4e7a24] md:mx-6">
-                  {chargeMessage}
-                </div>
-              ) : null}
-            </section>
 
             <SettingsCard iconSrc="/gaido.png" title="サポート">
               <div className="rounded-[18px] border border-[#f2e6ba] bg-[#fffaf0] px-4 py-4">

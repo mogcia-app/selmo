@@ -11,11 +11,11 @@ import {
   query,
   where,
   type DocumentData,
+  type Query,
   type QueryDocumentSnapshot,
 } from "firebase/firestore";
 
 import { useAuth } from "@/features/auth/auth-provider";
-import { SALES_MONTHLY_AI_USAGE_LIMIT, isSalesMonthlyAiUsageFeature } from "@/lib/ai-usage-limit";
 import type { AppUserProfile } from "@/lib/firebase/auth";
 import { assertFirebaseClient } from "@/lib/firebase/client";
 import {
@@ -46,8 +46,6 @@ type AiUsageState = {
 
 type AiUsageLog = {
   id: string;
-  feature: string;
-  status: string;
   createdAt: Date | null;
 };
 
@@ -159,24 +157,39 @@ export function DashboardShell({ children, variant }: DashboardShellProps) {
 
     setAiUsage((current) => ({ ...current, isLoading: true }));
 
+    const canUseMeeting = canUseSalesDomain(profile, "meeting");
+    const canUseTeleapo = canUseSalesDomain(profile, "teleapo");
+    const canUseRoleplay = canUseMeeting || canUseTeleapo;
     const { firestore } = assertFirebaseClient();
-    const logsQuery = query(
-      collection(firestore, "aiUsageLogs"),
-      where("companyId", "==", profile.companyId),
-      where("userId", "==", profile.uid),
-      where("status", "==", "success"),
-    );
-    const roleplayResultsQuery = query(
-      collection(firestore, "roleplayResults"),
-      where("companyId", "==", profile.companyId),
-      where("userId", "==", profile.uid),
-    );
-    let usageLogs: AiUsageLog[] = [];
+    const meetingsRef = collection(firestore, "meetings");
+    const meetingsQueries: Query<DocumentData>[] = [
+      ...(canUseMeeting
+        ? [
+            query(
+              meetingsRef,
+              where("companyId", "==", profile.companyId),
+              where("userId", "==", profile.uid),
+              where("salesDomain", "==", "meeting"),
+            ),
+          ]
+        : []),
+      ...(canUseTeleapo
+        ? [
+            query(
+              meetingsRef,
+              where("companyId", "==", profile.companyId),
+              where("userId", "==", profile.uid),
+              where("salesDomain", "==", "teleapo"),
+            ),
+          ]
+        : []),
+    ];
+    let meetingDates: Array<Date | null> = [];
     let roleplayResultDates: Array<Date | null> = [];
+    const meetingDatesByIndex = new Map<number, Array<Date | null>>();
 
     function updateUsage() {
-      const monthlyLogs = usageLogs.filter((log) => isCurrentMonth(log.createdAt));
-      const meetingAnalysisCount = monthlyLogs.filter((log) => isSalesMonthlyAiUsageFeature(log.feature)).length;
+      const meetingAnalysisCount = meetingDates.filter((date) => isCurrentMonth(date)).length;
       const roleplayCount = roleplayResultDates.filter((date) => isCurrentMonth(date)).length;
 
       setAiUsage({
@@ -187,47 +200,60 @@ export function DashboardShell({ children, variant }: DashboardShellProps) {
       });
     }
 
-    const unsubscribeUsage = onSnapshot(
-      logsQuery,
-      (snapshot) => {
-        usageLogs = snapshot.docs.map(mapAiUsageLog);
-        updateUsage();
-      },
-      () => {
-        setAiUsage({ used: 0, meetingAnalysisCount: 0, roleplayCount: 0, isLoading: false });
-      },
+    const unsubscribeMeetings = meetingsQueries.map((meetingsQuery, index) =>
+      onSnapshot(
+        meetingsQuery,
+        (snapshot) => {
+          meetingDatesByIndex.set(index, snapshot.docs.map(mapCreatedAtDate));
+          meetingDates = Array.from(meetingDatesByIndex.values()).flat();
+          updateUsage();
+        },
+        () => {
+          setAiUsage({ used: 0, meetingAnalysisCount: 0, roleplayCount: 0, isLoading: false });
+        },
+      ),
     );
-    const unsubscribeRoleplay = onSnapshot(
-      roleplayResultsQuery,
-      (snapshot) => {
-        roleplayResultDates = snapshot.docs.map((docSnapshot) => {
-          const createdAt = docSnapshot.data().createdAt;
-          return createdAt instanceof Timestamp ? createdAt.toDate() : null;
-        });
-        updateUsage();
-      },
-      () => {
-        setAiUsage({ used: 0, meetingAnalysisCount: 0, roleplayCount: 0, isLoading: false });
-      },
-    );
+    const unsubscribeRoleplay = canUseRoleplay
+      ? onSnapshot(
+          query(
+            collection(firestore, "roleplaySessions"),
+            where("companyId", "==", profile.companyId),
+            where("userId", "==", profile.uid),
+          ),
+          (snapshot) => {
+            roleplayResultDates = snapshot.docs.map((docSnapshot) => {
+              const createdAt = docSnapshot.data().createdAt;
+              return createdAt instanceof Timestamp ? createdAt.toDate() : null;
+            });
+            updateUsage();
+          },
+          () => {
+            setAiUsage({ used: 0, meetingAnalysisCount: 0, roleplayCount: 0, isLoading: false });
+          },
+        )
+      : undefined;
+
+    if (meetingsQueries.length === 0 && !canUseRoleplay) {
+      setAiUsage({ used: 0, meetingAnalysisCount: 0, roleplayCount: 0, isLoading: false });
+    }
 
     return () => {
-      unsubscribeUsage();
-      unsubscribeRoleplay();
+      unsubscribeMeetings.forEach((unsubscribe) => unsubscribe());
+      unsubscribeRoleplay?.();
     };
-  }, [profile?.companyId, profile?.role, profile?.uid, variant]);
+  }, [profile, profile?.companyId, profile?.role, profile?.uid, variant]);
 
   return (
     <div
       className={
         variant === "sales"
-          ? "mx-auto max-w-[1680px] bg-white md:block"
-          : "mx-auto grid min-h-screen max-w-[1680px] md:grid-cols-[240px_1fr]"
+          ? "mx-auto max-w-[1680px] bg-white"
+          : "mx-auto min-h-screen max-w-[1680px] lg:grid lg:grid-cols-[220px_1fr]"
       }
     >
       {variant === "sales" ? (
         <>
-          <aside className="always-visible-scrollbar relative border-b border-[#eceef4] bg-white px-5 py-8 md:fixed md:bottom-0 md:left-[max(0px,calc((100vw-1680px)/2))] md:top-0 md:w-[260px] md:overflow-y-auto md:border-b-0 md:border-r">
+          <aside className="always-visible-scrollbar fixed bottom-0 top-0 left-[max(0px,calc((100vw-1680px)/2))] hidden w-[232px] overflow-y-auto border-r border-[#eceef4] bg-white px-4 py-7 lg:block">
             <div className="text-[13px] font-semibold tracking-[0.34em] text-[#171717]">
               selmo<span className="text-[#ffc400]">.</span>
             </div>
@@ -319,74 +345,83 @@ export function DashboardShell({ children, variant }: DashboardShellProps) {
             </Link>
           </aside>
 
-          <div className="min-w-0 bg-[#f5f5f6] md:ml-[260px] md:min-h-screen">
-            <header className="sticky top-0 z-20 flex flex-col gap-4 border-b border-[#eceef4] bg-white/92 px-5 py-4 backdrop-blur md:flex-row md:items-center md:justify-between md:px-8">
-              <div className="flex items-center gap-2 text-[12px] font-semibold uppercase tracking-[0.18em] text-[#9aa1ad]">
-                <span>selmo<span className="text-[#ffc400]">.</span></span>
-                <span className="text-[#d8dde6]">/</span>
-                <span className="text-[#171717]">{currentLabel}</span>
-              </div>
+          <div className="min-w-0 bg-[#f5f5f6] lg:ml-[232px] lg:min-h-screen">
+            <header className="sticky top-0 z-20 border-b border-[#eceef4] bg-white/92 px-4 py-3 backdrop-blur md:px-6 lg:px-8">
+              <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                <div className="flex items-center gap-2 text-[12px] font-semibold uppercase tracking-[0.18em] text-[#9aa1ad]">
+                  <span>selmo<span className="text-[#ffc400]">.</span></span>
+                  <span className="text-[#d8dde6]">/</span>
+                  <span className="text-[#171717]">{currentLabel}</span>
+                </div>
 
-              <div className="flex flex-wrap items-center gap-3 md:gap-[14px]">
-                <AiUsageGauge profile={profile} usage={aiUsage} />
-                <span className="rounded-full border border-[#e8ebf0] bg-[#f7f7fa] px-3 py-2 text-[12px] font-semibold text-[#7d8490]">
-                  {nowLabel}
-                </span>
-                <div className="relative">
-                  <button
-                    type="button"
-                    onClick={() => setIsNotificationOpen((current) => !current)}
-                    className="relative inline-flex h-12 w-12 items-center justify-center rounded-[16px] border border-[#e8ebf0] bg-white shadow-[0_8px_20px_rgba(17,24,39,0.04)] transition hover:border-[#f0c655] hover:bg-[#fffdf7]"
-                    aria-label="通知を開く"
-                    aria-expanded={isNotificationOpen}
-                  >
-                    <Image src="/nareji.png" alt="" width={30} height={30} className="h-[30px] w-[30px] object-contain" />
-                    {unreadNotificationCount > 0 ? (
-                      <span className="absolute -right-1 -top-1 inline-flex h-5 min-w-[20px] items-center justify-center rounded-full bg-[#ff3b30] px-1 text-[11px] font-black leading-none text-white shadow-[0_4px_10px_rgba(255,59,48,0.3)]">
-                        {unreadNotificationCount > 9 ? "9+" : unreadNotificationCount}
-                      </span>
-                    ) : null}
-                  </button>
+                <div className="flex flex-wrap items-center gap-2 md:gap-[14px]">
+                  <AiUsageGauge profile={profile} usage={aiUsage} />
+                  <span className="rounded-full border border-[#e8ebf0] bg-[#f7f7fa] px-3 py-2 text-[12px] font-semibold text-[#7d8490]">
+                    {nowLabel}
+                  </span>
+                  <div className="relative">
+                    <button
+                      type="button"
+                      onClick={() => setIsNotificationOpen((current) => !current)}
+                      className="relative inline-flex h-12 w-12 items-center justify-center rounded-[16px] border border-[#e8ebf0] bg-white shadow-[0_8px_20px_rgba(17,24,39,0.04)] transition hover:border-[#f0c655] hover:bg-[#fffdf7]"
+                      aria-label="通知を開く"
+                      aria-expanded={isNotificationOpen}
+                    >
+                      <Image src="/nareji.png" alt="" width={30} height={30} className="h-[30px] w-[30px] object-contain" />
+                      {unreadNotificationCount > 0 ? (
+                        <span className="absolute -right-1 -top-1 inline-flex h-5 min-w-[20px] items-center justify-center rounded-full bg-[#ff3b30] px-1 text-[11px] font-black leading-none text-white shadow-[0_4px_10px_rgba(255,59,48,0.3)]">
+                          {unreadNotificationCount > 9 ? "9+" : unreadNotificationCount}
+                        </span>
+                      ) : null}
+                    </button>
 
-                  {isNotificationOpen ? (
-                    <div className="absolute right-0 top-[58px] z-30 w-[min(340px,calc(100vw-32px))] rounded-[20px] border border-[#eceef4] bg-white p-3 shadow-[0_18px_42px_rgba(17,24,39,0.14)]">
-                      <div className="flex items-center justify-between px-2 py-1">
-                        <div className="text-[13px] font-black text-[#171717]">通知</div>
-                        <div className="text-[11px] font-bold text-[#8a909b]">{notifications.length}件</div>
-                      </div>
-                      <div className="mt-2 space-y-2">
-                        {notifications.length > 0 ? (
-                          notifications.map((notification) => (
-                            <Link
-                              key={notification.id}
-                              href={notification.href}
-                              onClick={() => {
-                                setIsNotificationOpen(false);
-                                void markAppNotificationRead(notification.id);
-                              }}
-                              className={`block rounded-[16px] border px-4 py-3 transition hover:border-[#f0c655] hover:bg-[#fffdf7] ${
-                                notification.read ? "border-[#eef1f5] bg-[#fcfcfd]" : "border-[#f0c655] bg-[#fffaf0]"
-                              }`}
-                            >
-                              <div className="flex items-start gap-2">
-                                {!notification.read ? <span className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-[#ff3b30]" /> : null}
-                                <div className="min-w-0">
-                                  <div className="truncate text-[13px] font-black text-[#171717]">{notification.title}</div>
-                                  <div className="mt-1 line-clamp-2 text-[12px] leading-5 text-[#6f7480]">{notification.body}</div>
+                    {isNotificationOpen ? (
+                      <div className="absolute right-0 top-[58px] z-30 w-[min(340px,calc(100vw-32px))] rounded-[20px] border border-[#eceef4] bg-white p-3 shadow-[0_18px_42px_rgba(17,24,39,0.14)]">
+                        <div className="flex items-center justify-between px-2 py-1">
+                          <div className="text-[13px] font-black text-[#171717]">通知</div>
+                          <div className="text-[11px] font-bold text-[#8a909b]">{notifications.length}件</div>
+                        </div>
+                        <div className="mt-2 space-y-2">
+                          {notifications.length > 0 ? (
+                            notifications.map((notification) => (
+                              <Link
+                                key={notification.id}
+                                href={notification.href}
+                                onClick={() => {
+                                  setIsNotificationOpen(false);
+                                  void markAppNotificationRead(notification.id);
+                                }}
+                                className={`block rounded-[16px] border px-4 py-3 transition hover:border-[#f0c655] hover:bg-[#fffdf7] ${
+                                  notification.read ? "border-[#eef1f5] bg-[#fcfcfd]" : "border-[#f0c655] bg-[#fffaf0]"
+                                }`}
+                              >
+                                <div className="flex items-start gap-2">
+                                  {!notification.read ? <span className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-[#ff3b30]" /> : null}
+                                  <div className="min-w-0">
+                                    <div className="truncate text-[13px] font-black text-[#171717]">{notification.title}</div>
+                                    <div className="mt-1 line-clamp-2 text-[12px] leading-5 text-[#6f7480]">{notification.body}</div>
+                                  </div>
                                 </div>
-                              </div>
-                            </Link>
-                          ))
-                        ) : (
-                          <div className="rounded-[16px] border border-dashed border-[#dfe4ec] bg-[#fcfcfd] px-4 py-6 text-center text-[13px] font-bold text-[#8a909b]">
-                            新しい通知はありません
-                          </div>
-                        )}
+                              </Link>
+                            ))
+                          ) : (
+                            <div className="rounded-[16px] border border-dashed border-[#dfe4ec] bg-[#fcfcfd] px-4 py-6 text-center text-[13px] font-bold text-[#8a909b]">
+                              新しい通知はありません
+                            </div>
+                          )}
+                        </div>
                       </div>
-                    </div>
-                  ) : null}
+                    ) : null}
+                  </div>
                 </div>
               </div>
+              <MobileNav
+                sections={sections}
+                pathname={pathname}
+                searchParams={searchParams}
+                accountHref="/sales/account"
+                accountLabel="アカウント"
+              />
             </header>
 
             {children}
@@ -395,7 +430,7 @@ export function DashboardShell({ children, variant }: DashboardShellProps) {
         </>
       ) : (
         <>
-      <aside className="always-visible-scrollbar relative border-b border-[#eceef4] bg-white px-5 py-8 md:min-h-screen md:overflow-y-auto md:border-b-0 md:border-r">
+      <aside className="always-visible-scrollbar hidden min-h-screen overflow-y-auto border-r border-[#eceef4] bg-white px-4 py-7 lg:block">
         <div className="text-[13px] font-semibold tracking-[0.34em] text-[#171717]">
           selmo<span className="text-[#ffc400]">.</span>
         </div>
@@ -460,7 +495,7 @@ export function DashboardShell({ children, variant }: DashboardShellProps) {
 
         <Link
           href="/admin/account"
-          className={`mt-8 block rounded-[20px] border px-4 py-3.5 shadow-[0_8px_22px_rgba(17,24,39,0.04)] transition hover:border-[#f0c655] hover:bg-[#fffdf7] md:absolute md:bottom-6 md:left-5 md:right-5 md:mt-0 ${
+          className={`mt-8 block rounded-[20px] border px-4 py-3.5 shadow-[0_8px_22px_rgba(17,24,39,0.04)] transition hover:border-[#f0c655] hover:bg-[#fffdf7] ${
             pathname === "/admin/account" ? "border-[#f0c655] bg-[#fff8e4]" : "border-[#e8ebf0] bg-white"
           }`}
         >
@@ -482,19 +517,28 @@ export function DashboardShell({ children, variant }: DashboardShellProps) {
       </aside>
 
       <div className={`min-w-0 ${pathname.startsWith("/admin/knowledge") ? "bg-white" : "bg-[#f5f5f6]"}`}>
-        <header className="sticky top-0 z-10 flex flex-col gap-4 border-b border-[#eceef4] bg-white/92 px-5 py-4 backdrop-blur md:flex-row md:items-center md:justify-between md:px-8">
-          <div className="flex items-center gap-2 text-[12px] font-semibold uppercase tracking-[0.18em] text-[#9aa1ad]">
-            <span>Selmo</span>
-            <span className="text-[#d8dde6]">/</span>
-            <span className="text-[#171717]">{currentLabel}</span>
-          </div>
+        <header className="sticky top-0 z-10 border-b border-[#eceef4] bg-white/92 px-4 py-3 backdrop-blur md:px-6 lg:px-8">
+          <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+            <div className="flex items-center gap-2 text-[12px] font-semibold uppercase tracking-[0.18em] text-[#9aa1ad]">
+              <span>Selmo</span>
+              <span className="text-[#d8dde6]">/</span>
+              <span className="text-[#171717]">{currentLabel}</span>
+            </div>
 
-          <div className="flex flex-wrap items-center gap-3 md:gap-[14px]">
-            <AiUsageGauge profile={profile} usage={aiUsage} />
-            <span className="rounded-full border border-[#e8ebf0] bg-[#f7f7fa] px-3 py-2 text-[12px] font-semibold text-[#7d8490]">
-              {nowLabel}
-            </span>
+            <div className="flex flex-wrap items-center gap-3 md:gap-[14px]">
+              <AiUsageGauge profile={profile} usage={aiUsage} />
+              <span className="rounded-full border border-[#e8ebf0] bg-[#f7f7fa] px-3 py-2 text-[12px] font-semibold text-[#7d8490]">
+                {nowLabel}
+              </span>
+            </div>
           </div>
+          <MobileNav
+            sections={sections}
+            pathname={pathname}
+            searchParams={searchParams}
+            accountHref="/admin/account"
+            accountLabel="アカウント"
+          />
         </header>
 
         {children}
@@ -502,6 +546,54 @@ export function DashboardShell({ children, variant }: DashboardShellProps) {
         </>
       )}
     </div>
+  );
+}
+
+function MobileNav({
+  sections,
+  pathname,
+  searchParams,
+  accountHref,
+  accountLabel,
+}: {
+  sections: Array<{ label: string; items: NavItem[] }>;
+  pathname: string;
+  searchParams: { get: (name: string) => string | null };
+  accountHref: string;
+  accountLabel: string;
+}) {
+  const items = [
+    ...sections.flatMap((section) => section.items),
+    { href: accountHref, label: accountLabel, num: "" },
+  ];
+
+  return (
+    <nav className="-mx-4 mt-3 flex gap-2 overflow-x-auto border-t border-[#eef1f5] px-4 pt-3 lg:hidden">
+      {items.map((item) => {
+        const isActive = item.href === accountHref
+          ? pathname === accountHref
+          : isNavItemActive(pathname, item.href, searchParams);
+
+        return (
+          <Link
+            key={item.href}
+            href={item.href}
+            className={`inline-flex h-10 shrink-0 items-center gap-2 rounded-[12px] border px-3 text-[13px] font-bold transition ${
+              isActive
+                ? "border-[#f0c655] bg-[#fff1bf] text-[#171717]"
+                : "border-[#e8ebf0] bg-white text-[#596273] hover:border-[#f0c655] hover:bg-[#fffdf7]"
+            }`}
+          >
+            {item.num ? (
+              <span className={`text-[11px] ${isActive ? "text-[#8a6500]" : "text-[#9aa1ad]"}`}>
+                {item.num}
+              </span>
+            ) : null}
+            <span>{item.label}</span>
+          </Link>
+        );
+      })}
+    </nav>
   );
 }
 
@@ -649,17 +741,21 @@ function AiUsageGauge({ profile, usage }: { profile: AppUserProfile | null; usag
 }
 
 function resolveMonthlyAiQuota(profile: AppUserProfile) {
-  return profile.role === "sales" ? SALES_MONTHLY_AI_USAGE_LIMIT : null;
+  if (profile.role !== "sales") return null;
+  if (profile.monthlyTranscriptionQuota === null || profile.monthlyRoleplayQuota === null) return null;
+  return profile.monthlyTranscriptionQuota + profile.monthlyRoleplayQuota;
 }
 
 function mapAiUsageLog(snapshot: QueryDocumentSnapshot<DocumentData>): AiUsageLog {
   const data = snapshot.data();
   return {
     id: snapshot.id,
-    feature: typeof data.feature === "string" ? data.feature : "",
-    status: typeof data.status === "string" ? data.status : "",
-    createdAt: data.createdAt instanceof Timestamp ? data.createdAt.toDate() : null,
+    createdAt: data.createdAt instanceof Timestamp ? data.createdAt.toDate() : data.recordedAt instanceof Timestamp ? data.recordedAt.toDate() : null,
   };
+}
+
+function mapCreatedAtDate(snapshot: QueryDocumentSnapshot<DocumentData>) {
+  return mapAiUsageLog(snapshot).createdAt;
 }
 
 function isCurrentMonth(date: Date | null) {

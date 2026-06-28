@@ -170,6 +170,7 @@ export type MeetingRecord = {
   adminComment?: string;
   adminCommentUpdatedAt?: Date | null;
   adminCommentUpdatedBy?: string | null;
+  createdAt: Date | null;
 };
 
 export type CreateMeetingInput = {
@@ -920,6 +921,7 @@ function mapMeetingRecord(id: string, data: Record<string, unknown>): MeetingRec
     adminComment: String(data.adminComment ?? ""),
     adminCommentUpdatedAt: toDateValue(data.adminCommentUpdatedAt),
     adminCommentUpdatedBy: toNullableString(data.adminCommentUpdatedBy),
+    createdAt: toDateValue(data.createdAt),
   };
 }
 

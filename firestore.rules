@@ -50,6 +50,10 @@ service cloud.firestore {
       return plan == "standard" || plan == "pro" || plan == "enterprise";
     }
 
+    function isValidUploadDurationLimitMinutes(value) {
+      return value == 60 || value == 120 || value == 180 || value == 240;
+    }
+
     function sameCompany(companyId) {
       return isSignedIn() && companyId is string && companyId == currentCompanyId();
     }
@@ -91,6 +95,28 @@ service cloud.firestore {
         || (
           (!("salesDomain" in data) || data.salesDomain != "teleapo")
           && canUseMeetingDomain()
+        );
+    }
+
+    function companyData(companyId) {
+      return get(/databases/$(database)/documents/companies/$(companyId)).data;
+    }
+
+    function canUseUploadDurationLimit(data) {
+      return (
+          (!("audioDurationSec" in data) || data.audioDurationSec == null)
+          && (!("audioFileName" in data) || data.audioFileName == null)
+          && (!("audioSizeBytes" in data) || data.audioSizeBytes == null)
+        )
+        || (
+          data.audioDurationSec is number
+          && (
+            (!("uploadDurationLimitMinutes" in companyData(data.companyId)) && data.audioDurationSec <= 63 * 60)
+            || (companyData(data.companyId).uploadDurationLimitMinutes == 60 && data.audioDurationSec <= 63 * 60)
+            || (companyData(data.companyId).uploadDurationLimitMinutes == 120 && data.audioDurationSec <= 123 * 60)
+            || (companyData(data.companyId).uploadDurationLimitMinutes == 180 && data.audioDurationSec <= 183 * 60)
+            || (companyData(data.companyId).uploadDurationLimitMinutes == 240 && data.audioDurationSec <= 243 * 60)
+          )
         );
     }
 
@@ -147,18 +173,20 @@ service cloud.firestore {
       allow create: if isSignedIn()
         && request.resource.data.companyName is string
         && isValidCompanyPlan(request.resource.data.plan)
-        && isValidCompanyStatus(request.resource.data.status);
+        && isValidCompanyStatus(request.resource.data.status)
+        && (!("uploadDurationLimitMinutes" in request.resource.data) || isValidUploadDurationLimitMinutes(request.resource.data.uploadDurationLimitMinutes));
       allow update: if (
           isOwnerRole()
           && (!("plan" in request.resource.data) || isValidCompanyPlan(request.resource.data.plan))
           && (!("status" in request.resource.data) || isValidCompanyStatus(request.resource.data.status))
+          && (!("uploadDurationLimitMinutes" in request.resource.data) || isValidUploadDurationLimitMinutes(request.resource.data.uploadDurationLimitMinutes))
         )
         || (
           isAdminRole()
           && sameCompany(companyId)
-          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(["notificationEmails", "updatedAt"])
-          && request.resource.data.notificationEmails is list
-          && request.resource.data.notificationEmails.size() <= 3
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(["notificationEmails", "uploadDurationLimitMinutes", "updatedAt"])
+          && (!("notificationEmails" in request.resource.data) || (request.resource.data.notificationEmails is list && request.resource.data.notificationEmails.size() <= 3))
+          && (!("uploadDurationLimitMinutes" in request.resource.data) || isValidUploadDurationLimitMinutes(request.resource.data.uploadDurationLimitMinutes))
         );
       allow delete: if false;
     }
@@ -222,7 +250,8 @@ service cloud.firestore {
       allow create: if isSignedIn()
         && request.resource.data.userId == request.auth.uid
         && sameCompany(request.resource.data.companyId)
-        && canUseMeetingDocument(request.resource.data);
+        && canUseMeetingDocument(request.resource.data)
+        && canUseUploadDurationLimit(request.resource.data);
       allow update: if canAdminCompanyData(resource.data.companyId) || (isSelf(resource.data.userId) && sameCompany(resource.data.companyId) && canUseMeetingDocument(resource.data));
       allow delete: if canAdminCompanyData(resource.data.companyId)
         || (isSelf(resource.data.userId) && sameCompany(resource.data.companyId) && canUseMeetingDocument(resource.data));
@@ -416,6 +445,13 @@ service cloud.firestore {
         );
     }
 
+    match /roleplaySessions/{sessionId} {
+      allow read: if canReadCompanyData(resource.data.companyId)
+        && canUseRoleplayDomain()
+        && (isOwnerRole() || isAdminRole() || resource.data.userId == request.auth.uid);
+      allow create, update, delete: if false;
+    }
+
     match /roleplayResultComments/{commentId} {
       allow read: if canReadCompanyData(resource.data.companyId)
         && canUseRoleplayDomain()
@@ -457,14 +493,6 @@ service cloud.firestore {
     match /emailEvents/{eventId} {
       allow read: if isOwnerRole() || canReadCompanyData(resource.data.companyId);
       allow create, update: if isOwnerRole();
-      allow delete: if false;
-    }
-
-    match /aiChargeEvents/{eventId} {
-      allow read: if isOwnerRole() || canReadCompanyData(resource.data.companyId);
-      allow create: if isOwnerRole();
-      allow update: if isOwnerRole()
-        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(["invoiceStatus", "invoiceId", "billedAt", "updatedAt"]);
       allow delete: if false;
     }
 

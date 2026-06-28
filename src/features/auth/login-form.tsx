@@ -2,7 +2,7 @@
 
 import { FirebaseError } from "firebase/app";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useState } from "react";
 
 import { useAuth } from "@/features/auth/auth-provider";
@@ -21,6 +21,7 @@ export function LoginForm({
   variant?: "default" | "admin";
 }) {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { firebaseError, isAuthenticated, isFirebaseReady, missingEnvKeys, profile, signIn, signOut } = useAuth();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -28,6 +29,8 @@ export function LoginForm({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const isAdmin = variant === "admin";
+  const refreshReason = searchParams.get("reason");
+  const shouldShowRefreshNotice = refreshReason === "auth-timeout" || refreshReason === "session-expired";
   const formClassName = isAdmin ? "mt-6 w-full space-y-4 text-left sm:mt-7" : "mt-7 w-full space-y-4.5 text-left sm:mt-8";
 
   useEffect(() => {
@@ -91,6 +94,20 @@ export function LoginForm({
         <div className="rounded-[14px] border border-[var(--accent-2)] bg-[rgba(200,148,31,0.08)] px-4 py-3 text-sm leading-6 text-[var(--ink)]">
           Firebase の公開環境変数が未設定です。
           {missingEnvKeys.length > 0 ? ` ${missingEnvKeys.join(", ")}` : ""}
+        </div>
+      ) : null}
+
+      {shouldShowRefreshNotice ? (
+        <div className="rounded-[14px] border border-[#f0c655] bg-[#fffaf0] px-4 py-3 text-sm leading-6 text-[#6f5500]">
+          長時間開いたままのタブでログイン状態が古くなっている可能性があります。
+          ログインがうまく進まない場合は、このページをリロードしてから再度お試しください。
+          <button
+            type="button"
+            onClick={() => window.location.replace(isAdmin ? "/admin/login" : "/login")}
+            className="mt-2 block font-bold text-[#171717] underline underline-offset-4"
+          >
+            リロードする
+          </button>
         </div>
       ) : null}
 

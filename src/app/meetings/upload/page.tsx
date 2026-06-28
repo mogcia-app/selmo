@@ -6,7 +6,12 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { useAuth } from "@/features/auth/auth-provider";
+import {
+  DEFAULT_MONTHLY_ROLEPLAY_QUOTA,
+  DEFAULT_MONTHLY_TRANSCRIPTION_QUOTA,
+} from "@/lib/ai-usage-limit";
 import { firebaseAuth } from "@/lib/firebase/client";
+import { fetchCompanyNotificationSettings } from "@/lib/firebase/company-settings";
 import {
   subscribeToCalendarEvents,
   type CalendarEvent,
@@ -19,6 +24,10 @@ import {
   type MeetingRecord,
 } from "@/lib/firebase/meetings";
 import { canUseSalesDomain, type SalesDomain } from "@/lib/sales-domains";
+import {
+  getEffectiveUploadDurationLimitSec,
+  uploadDurationGraceMinutes,
+} from "@/lib/upload-duration-limit";
 import type { MeetingPurpose } from "@/types/domain";
 
 const maxRecommendedDurationSec = 120 * 60;
@@ -71,6 +80,7 @@ export default function MeetingUploadPage() {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [companyUploadDurationLimitMinutes, setCompanyUploadDurationLimitMinutes] = useState<number | null>(null);
   const salesDomain: SalesDomain = searchParams.get("category") === "teleapo" ? "teleapo" : "meeting";
   const canAccessDomain = isLoading || canUseSalesDomain(profile, salesDomain);
 
@@ -112,6 +122,23 @@ export default function MeetingUploadPage() {
     return () => unsubscribers.forEach((unsubscribe) => unsubscribe());
   }, [profile?.companyId, profile?.role, profile?.uid]);
 
+  useEffect(() => {
+    if (!profile?.companyId) return;
+
+    let isActive = true;
+    fetchCompanyNotificationSettings(profile.companyId)
+      .then((settings) => {
+        if (isActive) {
+          setCompanyUploadDurationLimitMinutes(settings.uploadDurationLimitMinutes);
+        }
+      })
+      .catch(() => undefined);
+
+    return () => {
+      isActive = false;
+    };
+  }, [profile?.companyId]);
+
   const productOptions = useMemo(() => products.map((product) => product.name), [products]);
   const availableCalendarEvents = useMemo(
     () => calendarEvents.filter((event) => event.salesDomain === salesDomain),
@@ -121,14 +148,24 @@ export default function MeetingUploadPage() {
     () => availableCalendarEvents.find((event) => event.id === selectedCalendarEventId) ?? null,
     [availableCalendarEvents, selectedCalendarEventId],
   );
-  const audioRetentionLimit = useMemo(
-    () => readSharedAiQuota(profile?.monthlyTranscriptionQuota ?? 15, profile?.monthlyRoleplayQuota ?? 15),
-    [profile?.monthlyRoleplayQuota, profile?.monthlyTranscriptionQuota],
+  const audioRetentionLimit = readSharedAiQuota(
+    profile ? profile.monthlyTranscriptionQuota : DEFAULT_MONTHLY_TRANSCRIPTION_QUOTA,
+    profile ? profile.monthlyRoleplayQuota : DEFAULT_MONTHLY_ROLEPLAY_QUOTA,
+  );
+  const uploadDurationLimitMinutes = companyUploadDurationLimitMinutes ?? profile?.uploadDurationLimitMinutes ?? 60;
+  const effectiveUploadDurationLimitSec = useMemo(
+    () => getEffectiveUploadDurationLimitSec(uploadDurationLimitMinutes),
+    [uploadDurationLimitMinutes],
   );
   const savedAudioCount = useMemo(
     () => meetings.filter((meeting) => meeting.audioFilePath && !meeting.audioDeletedAt).length,
     [meetings],
   );
+  const monthlyUploadCount = useMemo(
+    () => meetings.filter((meeting) => isCurrentMonth(meeting.createdAt ?? meeting.recordedAt)).length,
+    [meetings],
+  );
+  const monthlyUploadQuota = profile ? profile.monthlyTranscriptionQuota : 10;
 
   const applyCalendarEventToForm = useCallback(
     (calendarEvent: CalendarEvent) => {
@@ -206,6 +243,28 @@ export default function MeetingUploadPage() {
 
     if (inputMode === "transcript" && transcriptDurationSec === null) {
       setErrorMessage("終了時間は実施日時より後の時間を入力してください。");
+      return;
+    }
+
+    if (inputMode === "audio") {
+      if (detectedDurationSec === null) {
+        setErrorMessage("音声時間を取得できないファイルはアップロードできません。mp3 / m4a に変換してから再度お試しください。");
+        return;
+      }
+
+      if (detectedDurationSec > effectiveUploadDurationLimitSec) {
+        setErrorMessage(buildUploadDurationLimitMessage(uploadDurationLimitMinutes));
+        return;
+      }
+    }
+
+    if (inputMode === "transcript" && transcriptDurationSec !== null && transcriptDurationSec > effectiveUploadDurationLimitSec) {
+      setErrorMessage(buildUploadDurationLimitMessage(uploadDurationLimitMinutes));
+      return;
+    }
+
+    if (monthlyUploadQuota !== null && monthlyUploadCount >= monthlyUploadQuota) {
+      setErrorMessage(`今月の商談・テレアポ分析上限（${monthlyUploadQuota}回）に達しました。管理者に上限変更を依頼してください。`);
       return;
     }
 
@@ -362,9 +421,12 @@ export default function MeetingUploadPage() {
                     try {
                       const durationSec = await readAudioDuration(file);
                       setDetectedDurationSec(durationSec);
+                      if (durationSec > effectiveUploadDurationLimitSec) {
+                        setErrorMessage(buildUploadDurationLimitMessage(uploadDurationLimitMinutes));
+                      }
                     } catch {
                       setErrorMessage(
-                        "ファイルは選択できましたが、音声時間を取得できませんでした。アップロード自体は続行できます。",
+                        "音声時間を取得できないファイルはアップロードできません。mp3 / m4a に変換してから再度お試しください。",
                       );
                     }
                   }}
@@ -380,6 +442,26 @@ export default function MeetingUploadPage() {
                 </div>
                 <div className="mt-2 text-[13px] leading-6 text-[#7a808c]">
                   上限に達している場合、最も古い音声ファイルだけを自動削除して新しい音声を保存します。商談履歴と分析結果は残ります。
+                </div>
+              </div>
+
+              <div className="mt-5 rounded-[18px] border border-[#eceef4] bg-white px-5 py-4">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="text-[13px] font-semibold text-[#505866]">1ファイル上限</div>
+                  <div className="text-[13px] font-bold text-[#8a6500]">{uploadDurationLimitMinutes}分</div>
+                </div>
+                <div className="mt-2 text-[13px] leading-6 text-[#7a808c]">
+                  会社設定により、1ファイルあたり{uploadDurationLimitMinutes}分までアップロードできます。処理誤差として{uploadDurationGraceMinutes}分の猶予があります。
+                </div>
+              </div>
+
+              <div className="mt-5 rounded-[18px] border border-[#eceef4] bg-white px-5 py-4">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="text-[13px] font-semibold text-[#505866]">今月の分析回数</div>
+                  <div className="text-[13px] font-bold text-[#8a6500]">{monthlyUploadCount} / {monthlyUploadQuota ?? "-"}回</div>
+                </div>
+                <div className="mt-2 text-[13px] leading-6 text-[#7a808c]">
+                  商談またはテレアポを保存した時点で、今月の分析回数としてカウントします。
                 </div>
               </div>
             </>
@@ -437,6 +519,12 @@ export default function MeetingUploadPage() {
             <AlertBox>
               120分を超える音声です。文字起こし検証の観点では価値がありますが、
               まずは短めの音声でも1本通して精度確認するのがおすすめです。
+            </AlertBox>
+          ) : null}
+
+          {inputMode === "audio" && detectedDurationSec !== null && detectedDurationSec > effectiveUploadDurationLimitSec ? (
+            <AlertBox>
+              {buildUploadDurationLimitMessage(uploadDurationLimitMinutes)}
             </AlertBox>
           ) : null}
 
@@ -909,6 +997,16 @@ function calculateTranscriptDurationSec(startedAt: Date, endedAtTime: string) {
 
   const durationSec = Math.round((endedAt.getTime() - startedAt.getTime()) / 1000);
   return durationSec > 0 ? durationSec : null;
+}
+
+function buildUploadDurationLimitMessage(limitMinutes: number) {
+  return `この会社でアップロードできる音声は1ファイル${limitMinutes}分までです。短いファイルに分けてアップロードしてください。`;
+}
+
+function isCurrentMonth(date: Date | null) {
+  if (!date) return false;
+  const now = new Date();
+  return date.getFullYear() === now.getFullYear() && date.getMonth() === now.getMonth();
 }
 
 function readSharedAiQuota(transcriptionQuota: number | null, roleplayQuota: number | null) {

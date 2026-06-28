@@ -80,7 +80,11 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "ロープレセッション情報が必要です。" }, { status: 400 });
     }
 
-    const usageAvailability = await assertMonthlyAiUsageAvailable({ userId: apiUser.uid });
+    const usageAvailability = await assertMonthlyAiUsageAvailable({
+      userId: apiUser.uid,
+      feature: "roleplay",
+      currentRoleplaySessionId: sessionId,
+    });
     if (!usageAvailability.allowed) {
       return NextResponse.json(
         {

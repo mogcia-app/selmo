@@ -8,7 +8,7 @@ import {
   saveSystemErrorLog,
 } from "@/lib/server/operational-logs";
 import { getFirebaseAdminDb } from "@/lib/firebase/admin";
-import { hashRoleplayPayload } from "@/lib/server/roleplay-cost-control";
+import { hashRoleplayPayload, normalizeRoleplaySessionId } from "@/lib/server/roleplay-cost-control";
 import type { AnalysisContext } from "@/lib/server/analysis-context";
 import { buildAnalysisContextPrompt, loadAnalysisContext } from "@/lib/server/analysis-context";
 import {
@@ -107,6 +107,7 @@ export async function POST(request: NextRequest) {
   try {
     const roleplayType = body.scenario.roleplayType === "teleapo" ? "teleapo" : "meeting";
     assertSalesDomainAccess(apiUser, roleplayType);
+    const sessionId = normalizeRoleplaySessionId(body.sessionId);
     const cacheKey = buildEvaluationCacheKey({
       companyId: apiUser.companyId,
       userId: apiUser.uid,
@@ -118,7 +119,11 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(cachedEvaluation);
     }
 
-    const usageAvailability = await assertMonthlyAiUsageAvailable({ userId: apiUser.uid });
+    const usageAvailability = await assertMonthlyAiUsageAvailable({
+      userId: apiUser.uid,
+      feature: "roleplay",
+      currentRoleplaySessionId: sessionId,
+    });
     if (!usageAvailability.allowed) {
       return NextResponse.json(
         {

@@ -1,8 +1,13 @@
 import { FieldValue } from "firebase-admin/firestore";
 
-import { SALES_MONTHLY_AI_USAGE_LIMIT, isSalesMonthlyAiUsageFeature } from "@/lib/ai-usage-limit";
+import {
+  DEFAULT_MONTHLY_ROLEPLAY_QUOTA,
+  DEFAULT_MONTHLY_TRANSCRIPTION_QUOTA,
+  SALES_MONTHLY_AI_USAGE_LIMIT,
+} from "@/lib/ai-usage-limit";
 import { resolveCompanyId } from "@/lib/firebase/company";
 import { getFirebaseAdminDb } from "@/lib/firebase/admin";
+import { buildRoleplaySessionDocId } from "@/lib/server/roleplay-cost-control";
 
 export type AiUsageFeature =
   | "transcription"
@@ -40,61 +45,151 @@ export async function saveAiUsageLog(input: {
 }
 
 export async function readMonthlyAiUsageCount(input: { userId?: string | null }) {
+  const usage = await readMonthlyAiUsageBreakdown(input);
+  return usage.meetingUploadCount + usage.roleplayCount;
+}
+
+export async function readMonthlyAiUsageBreakdown(input: { userId?: string | null }) {
   if (!input.userId) {
-    return 0;
+    return { meetingUploadCount: 0, roleplayCount: 0 };
   }
 
   const db = getFirebaseAdminDb();
   if (!db) {
-    return 0;
+    return { meetingUploadCount: 0, roleplayCount: 0 };
   }
 
   const monthStart = new Date();
   monthStart.setDate(1);
   monthStart.setHours(0, 0, 0, 0);
 
-  const usageSnapshot = await db
-    .collection("aiUsageLogs")
+  const meetingsSnapshot = await db
+    .collection("meetings")
     .where("userId", "==", input.userId)
-    .where("status", "==", "success")
     .get();
   const roleplaySnapshot = await db
-    .collection("roleplayResults")
+    .collection("roleplaySessions")
     .where("userId", "==", input.userId)
     .get();
 
-  const meetingAnalysisCount = usageSnapshot.docs.filter((doc) => {
+  const meetingUploadCount = meetingsSnapshot.docs.filter((doc) => {
     const data = doc.data();
-    const createdAt = data.createdAt;
-    const date = typeof createdAt?.toDate === "function" ? createdAt.toDate() as Date : null;
-    const feature = typeof data.feature === "string" ? data.feature : null;
-    return Boolean(date && date >= monthStart && isSalesMonthlyAiUsageFeature(feature));
+    const date = readFirestoreDate(data.createdAt) ?? readFirestoreDate(data.recordedAt);
+    return Boolean(date && date >= monthStart);
   }).length;
   const roleplayCount = roleplaySnapshot.docs.filter((doc) => {
     const data = doc.data();
-    const createdAt = data.createdAt;
-    const date = typeof createdAt?.toDate === "function" ? createdAt.toDate() as Date : null;
+    const date = readFirestoreDate(data.createdAt);
     return Boolean(date && date >= monthStart);
   }).length;
 
-  return meetingAnalysisCount + roleplayCount;
+  return { meetingUploadCount, roleplayCount };
 }
 
-export async function assertMonthlyAiUsageAvailable(input: { userId?: string | null }) {
-  const used = await readMonthlyAiUsageCount(input);
-  if (used >= SALES_MONTHLY_AI_USAGE_LIMIT) {
+export async function assertMonthlyAiUsageAvailable(input: {
+  userId?: string | null;
+  feature?: "meeting" | "roleplay" | "total";
+  allowCurrentUsage?: boolean;
+  currentRoleplaySessionId?: string | null;
+}) {
+  const db = getFirebaseAdminDb();
+  const usage = await readMonthlyAiUsageBreakdown(input);
+  const quota = db && input.userId
+    ? await readMonthlyAiUsageQuota({ db, userId: input.userId })
+    : { meetingLimit: DEFAULT_MONTHLY_TRANSCRIPTION_QUOTA, roleplayLimit: DEFAULT_MONTHLY_ROLEPLAY_QUOTA, limit: SALES_MONTHLY_AI_USAGE_LIMIT };
+  const used = usage.meetingUploadCount + usage.roleplayCount;
+  const feature = input.feature ?? "total";
+  const currentRoleplaySessionIsCounted = feature === "roleplay" && db && input.userId && input.currentRoleplaySessionId
+    ? await isCurrentMonthRoleplaySession({
+        db,
+        userId: input.userId,
+        sessionId: input.currentRoleplaySessionId,
+      })
+    : false;
+  const roleplayUsedForLimit = currentRoleplaySessionIsCounted
+    ? Math.max(0, usage.roleplayCount - 1)
+    : usage.roleplayCount;
+  const featureUsed = feature === "meeting" ? usage.meetingUploadCount : feature === "roleplay" ? roleplayUsedForLimit : used;
+  const featureLimit = feature === "meeting" ? quota.meetingLimit : feature === "roleplay" ? quota.roleplayLimit : quota.limit;
+
+  const isOverLimit = featureLimit !== null
+    && (input.allowCurrentUsage ? featureUsed > featureLimit : featureUsed >= featureLimit);
+
+  if (isOverLimit) {
     return {
       allowed: false as const,
       used,
-      limit: SALES_MONTHLY_AI_USAGE_LIMIT,
+      limit: featureLimit,
     };
   }
 
   return {
     allowed: true as const,
     used,
-    limit: SALES_MONTHLY_AI_USAGE_LIMIT,
+    limit: featureLimit,
   };
+}
+
+async function readMonthlyAiUsageQuota(input: { db: NonNullable<ReturnType<typeof getFirebaseAdminDb>>; userId: string }) {
+  const userSnapshot = await input.db.collection("users").doc(input.userId).get();
+  const user = userSnapshot.data() ?? {};
+  const companyId = typeof user.companyId === "string" ? user.companyId : "";
+  if (!companyId) {
+    return {
+      meetingLimit: DEFAULT_MONTHLY_TRANSCRIPTION_QUOTA,
+      roleplayLimit: DEFAULT_MONTHLY_ROLEPLAY_QUOTA,
+      limit: SALES_MONTHLY_AI_USAGE_LIMIT,
+    };
+  }
+
+  const companySnapshot = await input.db.collection("companies").doc(companyId).get();
+  const company = companySnapshot.data() ?? {};
+  const transcriptionQuota = readMonthlyQuota(company.monthlyTranscriptionQuota, DEFAULT_MONTHLY_TRANSCRIPTION_QUOTA);
+  const roleplayQuota = readMonthlyQuota(company.monthlyRoleplayQuota, DEFAULT_MONTHLY_ROLEPLAY_QUOTA);
+
+  return {
+    meetingLimit: transcriptionQuota,
+    roleplayLimit: roleplayQuota,
+    limit: transcriptionQuota === null || roleplayQuota === null ? null : transcriptionQuota + roleplayQuota,
+  };
+}
+
+async function isCurrentMonthRoleplaySession(input: {
+  db: NonNullable<ReturnType<typeof getFirebaseAdminDb>>;
+  userId: string;
+  sessionId: string;
+}) {
+  const sessionSnapshot = await input.db
+    .collection("roleplaySessions")
+    .doc(buildRoleplaySessionDocId(input.userId, input.sessionId))
+    .get();
+  const createdAt = readFirestoreDate(sessionSnapshot.data()?.createdAt);
+
+  if (!createdAt) {
+    return false;
+  }
+
+  const monthStart = new Date();
+  monthStart.setDate(1);
+  monthStart.setHours(0, 0, 0, 0);
+
+  return createdAt >= monthStart;
+}
+
+function readMonthlyQuota(value: unknown, fallback: number) {
+  if (typeof value === "number" && Number.isFinite(value) && value >= 0) {
+    return Math.floor(value);
+  }
+  if (value === null) {
+    return null;
+  }
+  return fallback;
+}
+
+function readFirestoreDate(value: unknown) {
+  return typeof (value as { toDate?: unknown } | null)?.toDate === "function"
+    ? (value as { toDate: () => Date }).toDate()
+    : null;
 }
 
 export async function saveSystemErrorLog(input: {

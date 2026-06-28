@@ -8,9 +8,15 @@ import {
 } from "firebase/firestore";
 
 import { assertFirebaseClient } from "@/lib/firebase/client";
+import {
+  defaultUploadDurationLimitMinutes,
+  readUploadDurationLimitMinutes,
+  type UploadDurationLimitMinutes,
+} from "@/lib/upload-duration-limit";
 
 export type CompanyNotificationSettings = {
   notificationEmails: string[];
+  uploadDurationLimitMinutes: UploadDurationLimitMinutes;
 };
 
 export async function fetchCompanyNotificationSettings(companyId: string): Promise<CompanyNotificationSettings> {
@@ -18,13 +24,14 @@ export async function fetchCompanyNotificationSettings(companyId: string): Promi
   const snapshot = await getDoc(doc(firestore, "companies", companyId));
 
   if (!snapshot.exists()) {
-    return { notificationEmails: [] };
+    return { notificationEmails: [], uploadDurationLimitMinutes: defaultUploadDurationLimitMinutes };
   }
 
-  const data = snapshot.data() as { notificationEmails?: unknown };
+  const data = snapshot.data() as { notificationEmails?: unknown; uploadDurationLimitMinutes?: unknown };
 
   return {
     notificationEmails: readEmailArray(data.notificationEmails).slice(0, 3),
+    uploadDurationLimitMinutes: readUploadDurationLimitMinutes(data.uploadDurationLimitMinutes),
   };
 }
 
@@ -41,6 +48,21 @@ export async function updateCompanyNotificationEmails(input: {
   });
 
   return { notificationEmails };
+}
+
+export async function updateCompanyUploadDurationLimit(input: {
+  companyId: string;
+  uploadDurationLimitMinutes: UploadDurationLimitMinutes;
+}) {
+  const { firestore } = assertFirebaseClient();
+  const uploadDurationLimitMinutes = readUploadDurationLimitMinutes(input.uploadDurationLimitMinutes);
+
+  await updateDoc(doc(firestore, "companies", input.companyId), {
+    uploadDurationLimitMinutes,
+    updatedAt: serverTimestamp(),
+  });
+
+  return { uploadDurationLimitMinutes };
 }
 
 function readEmailArray(value: unknown) {

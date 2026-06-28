@@ -137,7 +137,11 @@ export async function POST(
 
     const shouldCountUsage = !hasExistingAiSummary(meeting.data.aiSummary);
     if (shouldCountUsage) {
-      const usageAvailability = await assertMonthlyAiUsageAvailable({ userId: apiUser.uid });
+      const usageAvailability = await assertMonthlyAiUsageAvailable({
+        userId: apiUser.uid,
+        feature: "meeting",
+        allowCurrentUsage: true,
+      });
       if (!usageAvailability.allowed) {
         return NextResponse.json(
           {

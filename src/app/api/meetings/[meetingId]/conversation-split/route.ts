@@ -55,7 +55,11 @@ export async function POST(
       return NextResponse.json({ error: "分割対象の文字起こし本文がありません。" }, { status: 400 });
     }
 
-    const usageAvailability = await assertMonthlyAiUsageAvailable({ userId: apiUser.uid });
+    const usageAvailability = await assertMonthlyAiUsageAvailable({
+      userId: apiUser.uid,
+      feature: "meeting",
+      allowCurrentUsage: true,
+    });
     if (!usageAvailability.allowed) {
       return NextResponse.json(
         {

@@ -53,7 +53,11 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const usageAvailability = await assertMonthlyAiUsageAvailable({ userId: apiUser.uid });
+    const usageAvailability = await assertMonthlyAiUsageAvailable({
+      userId: apiUser.uid,
+      feature: "roleplay",
+      currentRoleplaySessionId: sessionId,
+    });
     if (!usageAvailability.allowed) {
       return NextResponse.json(
         {

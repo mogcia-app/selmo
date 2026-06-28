@@ -17,7 +17,7 @@ type RouteGuardProps = {
 export function RouteGuard({ allowedRoles, children }: RouteGuardProps) {
   const router = useRouter();
   const pathname = usePathname();
-  const { isAuthenticated, isFirebaseReady, isLoading, profile, missingEnvKeys, sessionExpiresAt, signOut } = useAuth();
+  const { isAuthenticated, isFirebaseReady, isLoading, profile, missingEnvKeys } = useAuth();
   const [isAuthSettling, setIsAuthSettling] = useState(true);
   const shouldShowAuthLoading = isLoading || (!isAuthenticated && isAuthSettling);
 
@@ -53,29 +53,6 @@ export function RouteGuard({ allowedRoles, children }: RouteGuardProps) {
 
     return () => window.clearTimeout(timeoutId);
   }, [isAuthenticated, isLoading, pathname]);
-
-  useEffect(() => {
-    if (!isAuthenticated || !sessionExpiresAt) {
-      return;
-    }
-
-    const redirectToLogin = () => {
-      const loginPath = pathname.startsWith("/admin") ? "/admin/login" : "/login";
-      router.replace(`${loginPath}?reason=session-expired`);
-    };
-
-    const remainingMs = sessionExpiresAt - Date.now();
-    if (remainingMs <= 0) {
-      void signOut().finally(redirectToLogin);
-      return;
-    }
-
-    const timeoutId = window.setTimeout(() => {
-      void signOut().finally(redirectToLogin);
-    }, remainingMs);
-
-    return () => window.clearTimeout(timeoutId);
-  }, [isAuthenticated, pathname, router, sessionExpiresAt, signOut]);
 
   useEffect(() => {
     if (isLoading || isAuthSettling) {

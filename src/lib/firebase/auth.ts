@@ -25,7 +25,16 @@ import {
 import { getDownloadURL, ref, uploadBytes } from "firebase/storage";
 
 import { assertFirebaseClient } from "@/lib/firebase/client";
+import {
+  DEFAULT_MONTHLY_ROLEPLAY_QUOTA,
+  DEFAULT_MONTHLY_TRANSCRIPTION_QUOTA,
+} from "@/lib/ai-usage-limit";
 import { readEnabledSalesDomains, type EnabledSalesDomains } from "@/lib/sales-domains";
+import {
+  defaultUploadDurationLimitMinutes,
+  readUploadDurationLimitMinutes,
+  type UploadDurationLimitMinutes,
+} from "@/lib/upload-duration-limit";
 import type { UserRole } from "@/types/domain";
 
 export type CompanyPlan = "standard" | "pro" | "enterprise";
@@ -33,7 +42,8 @@ export type AdminCoachingPriority = "high" | "medium" | "low";
 export type AdminCoachingStatus = "none" | "watch" | "needs_coaching";
 export type AdminReviewStatus = "unchecked" | "checked" | "in_progress" | "follow_up" | "done";
 
-const STANDARD_AI_QUOTA = 15;
+const STANDARD_TRANSCRIPTION_QUOTA = DEFAULT_MONTHLY_TRANSCRIPTION_QUOTA;
+const STANDARD_ROLEPLAY_QUOTA = DEFAULT_MONTHLY_ROLEPLAY_QUOTA;
 const PRO_AI_QUOTA = 30;
 
 export type AppUserProfile = {
@@ -47,6 +57,7 @@ export type AppUserProfile = {
   companyPlan: CompanyPlan;
   monthlyTranscriptionQuota: number | null;
   monthlyRoleplayQuota: number | null;
+  uploadDurationLimitMinutes: UploadDurationLimitMinutes;
   role: UserRole;
   status: "active" | "inactive";
   workExperienceYears: number | null;
@@ -120,8 +131,9 @@ export async function registerUser({
   await setDoc(doc(firestore, "companies", companyId), {
     companyName: normalizedCompanyName,
     plan: "standard",
-    monthlyTranscriptionQuota: STANDARD_AI_QUOTA,
-    monthlyRoleplayQuota: STANDARD_AI_QUOTA,
+    monthlyTranscriptionQuota: STANDARD_TRANSCRIPTION_QUOTA,
+    monthlyRoleplayQuota: STANDARD_ROLEPLAY_QUOTA,
+    uploadDurationLimitMinutes: defaultUploadDurationLimitMinutes,
     status: "active",
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
@@ -223,8 +235,9 @@ export async function fetchUserProfile(uid: string): Promise<AppUserProfile | nu
     companyId: data.companyId ?? null,
     companyName: company?.companyName ?? data.companyName ?? null,
     companyPlan: company?.plan ?? "standard",
-    monthlyTranscriptionQuota: company?.monthlyTranscriptionQuota ?? STANDARD_AI_QUOTA,
-    monthlyRoleplayQuota: company?.monthlyRoleplayQuota ?? STANDARD_AI_QUOTA,
+    monthlyTranscriptionQuota: company ? company.monthlyTranscriptionQuota : STANDARD_TRANSCRIPTION_QUOTA,
+    monthlyRoleplayQuota: company ? company.monthlyRoleplayQuota : STANDARD_ROLEPLAY_QUOTA,
+    uploadDurationLimitMinutes: company?.uploadDurationLimitMinutes ?? defaultUploadDurationLimitMinutes,
     role: data.role,
     status: data.status ?? "active",
     workExperienceYears: readWorkExperienceValue(data.workExperienceYears),
@@ -279,6 +292,7 @@ export function subscribeToUserProfiles(
               companyPlan?: CompanyPlan;
               monthlyTranscriptionQuota?: unknown;
               monthlyRoleplayQuota?: unknown;
+              uploadDurationLimitMinutes?: unknown;
               role?: UserRole;
               status?: "active" | "inactive";
               workExperienceYears?: unknown;
@@ -315,8 +329,9 @@ export function subscribeToUserProfiles(
               companyId: data.companyId ?? null,
               companyName: data.companyName ?? null,
               companyPlan: readCompanyPlan(data.companyPlan),
-              monthlyTranscriptionQuota: readMonthlyQuota(data.monthlyTranscriptionQuota, readCompanyPlan(data.companyPlan)),
-              monthlyRoleplayQuota: readMonthlyQuota(data.monthlyRoleplayQuota, readCompanyPlan(data.companyPlan)),
+              monthlyTranscriptionQuota: readMonthlyQuota(data.monthlyTranscriptionQuota, readCompanyPlan(data.companyPlan), STANDARD_TRANSCRIPTION_QUOTA),
+              monthlyRoleplayQuota: readMonthlyQuota(data.monthlyRoleplayQuota, readCompanyPlan(data.companyPlan), STANDARD_ROLEPLAY_QUOTA),
+              uploadDurationLimitMinutes: readUploadDurationLimitMinutes(data.uploadDurationLimitMinutes),
               role: data.role,
               status: data.status ?? "active",
               workExperienceYears: readWorkExperienceValue(data.workExperienceYears),
@@ -448,14 +463,16 @@ async function fetchCompanyProfile(companyId: string) {
     plan?: string;
     monthlyTranscriptionQuota?: unknown;
     monthlyRoleplayQuota?: unknown;
+    uploadDurationLimitMinutes?: unknown;
   };
   const plan = readCompanyPlan(data.plan);
 
   return {
     companyName: data.companyName ?? data.name ?? null,
     plan,
-    monthlyTranscriptionQuota: readMonthlyQuota(data.monthlyTranscriptionQuota, plan),
-    monthlyRoleplayQuota: readMonthlyQuota(data.monthlyRoleplayQuota, plan),
+    monthlyTranscriptionQuota: readMonthlyQuota(data.monthlyTranscriptionQuota, plan, STANDARD_TRANSCRIPTION_QUOTA),
+    monthlyRoleplayQuota: readMonthlyQuota(data.monthlyRoleplayQuota, plan, STANDARD_ROLEPLAY_QUOTA),
+    uploadDurationLimitMinutes: readUploadDurationLimitMinutes(data.uploadDurationLimitMinutes),
   };
 }
 
@@ -467,7 +484,7 @@ function readCompanyPlan(value: unknown): CompanyPlan {
   return "standard";
 }
 
-function readMonthlyQuota(value: unknown, plan: CompanyPlan) {
+function readMonthlyQuota(value: unknown, plan: CompanyPlan, standardFallback: number) {
   if (typeof value === "number" && Number.isFinite(value) && value >= 0) {
     return Math.floor(value);
   }
@@ -480,7 +497,7 @@ function readMonthlyQuota(value: unknown, plan: CompanyPlan) {
     return null;
   }
 
-  return STANDARD_AI_QUOTA;
+  return standardFallback;
 }
 
 function readWorkExperienceValue(value: unknown) {

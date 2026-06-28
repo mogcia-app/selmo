@@ -83,7 +83,11 @@ export async function POST(
       );
     }
 
-    const usageAvailability = await assertMonthlyAiUsageAvailable({ userId: apiUser.uid });
+    const usageAvailability = await assertMonthlyAiUsageAvailable({
+      userId: apiUser.uid,
+      feature: "meeting",
+      allowCurrentUsage: true,
+    });
     if (!usageAvailability.allowed) {
       return NextResponse.json(
         {
