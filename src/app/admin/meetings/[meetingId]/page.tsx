@@ -163,9 +163,9 @@ export default function AdminMeetingDetailPage() {
                 </Panel>
 
                 <Panel title="ロープレ課題">
-                  <p className="text-[13px] leading-6 text-[#596273]">この商談内容をもとに、営業マンへロープレ課題を割り当てます。</p>
-                  <Link href="/admin/roleplay" className="mt-4 inline-flex h-11 w-full items-center justify-center rounded-[14px] border border-[#f0c655] bg-[#ffd84d] text-[13px] font-black text-[#171717]">
-                    ロープレ課題を作成
+                  <p className="text-[13px] leading-6 text-[#596273]">この商談内容とレビュー結果をもとに、AIがロープレ課題の下書きを作成します。作成画面で自由に編集できます。</p>
+                  <Link href={`/admin/roleplay?sourceMeetingId=${encodeURIComponent(meeting.id)}`} className="mt-4 inline-flex h-11 w-full items-center justify-center rounded-[14px] border border-[#f0c655] bg-[#ffd84d] text-[13px] font-black text-[#171717]">
+                    レビューからロープレ課題を作成
                   </Link>
                 </Panel>
               </div>

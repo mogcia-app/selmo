@@ -113,6 +113,35 @@ service cloud.firestore {
         && request.resource.data.tabs is list;
     }
 
+    function isAdminUserCoachingUpdate() {
+      return isAdminRole()
+        && sameCompany(resource.data.companyId)
+        && resource.data.role != "owner"
+        && request.resource.data.companyId == resource.data.companyId
+        && request.resource.data.role == resource.data.role
+        && request.resource.data.email == resource.data.email
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          "nextCoachingMemo",
+          "nextCoachingMemoUpdatedAt",
+          "nextCoachingMemoUpdatedBy",
+          "adminCoachingStatus",
+          "adminCoachingPriority",
+          "adminCoachingReason",
+          "adminNextActionTitle",
+          "adminNextActionNote",
+          "adminNextActionDueDate",
+          "adminNextActionUpdatedAt",
+          "adminNextActionUpdatedBy",
+          "adminReviewStatus",
+          "adminLastReviewedAt",
+          "adminNextReviewDate",
+          "adminReviewMemo",
+          "adminReviewUpdatedAt",
+          "adminReviewUpdatedBy",
+          "updatedAt"
+        ]);
+    }
+
     match /companies/{companyId} {
       allow read: if isOwnerRole() || sameCompany(companyId);
       allow create: if isSignedIn()
@@ -161,12 +190,7 @@ service cloud.firestore {
           && isValidUserStatus(request.resource.data.status)
         );
       allow update: if isOwnerRole()
-        || (
-          isAdminRole()
-          && sameCompany(resource.data.companyId)
-          && request.resource.data.companyId == resource.data.companyId
-          && request.resource.data.role != "owner"
-        )
+        || isAdminUserCoachingUpdate()
         || (
           isSelf(userId)
           && request.resource.data.companyId == resource.data.companyId

@@ -61,7 +61,6 @@ export function useAdminInsights() {
   const [roleplayScenarios, setRoleplayScenarios] = useState<RoleplayScenario[]>([]);
   const [roleplayResults, setRoleplayResults] = useState<RoleplayResult[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const adminUserId = users.find((user) => user.role === "admin")?.uid;
 
   useEffect(() => {
     if (!profile?.companyId) return;
@@ -81,13 +80,13 @@ export function useAdminInsights() {
   }, [profile?.companyId]);
 
   useEffect(() => {
-    if (!adminUserId || !profile?.companyId) return;
+    if (!profile?.uid || !profile.companyId) return;
     return subscribeToRoleplayResults(
-      { userId: adminUserId, companyId: profile.companyId, isAdmin: true },
+      { userId: profile.uid, companyId: profile.companyId, isAdmin: true },
       setRoleplayResults,
       (nextError: FirebaseError) => setError(nextError.message),
     );
-  }, [adminUserId, profile?.companyId]);
+  }, [profile?.companyId, profile?.uid]);
 
   const salesUsers = useMemo(() => users.filter((user) => user.role === "sales"), [users]);
   const memberRows = useMemo(

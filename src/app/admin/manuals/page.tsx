@@ -270,6 +270,7 @@ function ManualDialog({
       setScoringRules(joinLines(structured.scoringRules) || scoringRules);
       setObjectionHandling(joinLines(structured.objectionHandling) || objectionHandling);
       setClosingRules(joinLines(structured.closingRules) || closingRules);
+      setCustomFields((current) => mergeStructuredCustomFields(current, structured.customFields));
     } catch (nextError) {
       setError(nextError instanceof Error ? nextError.message : "AI整理に失敗しました。");
     } finally {
@@ -581,6 +582,44 @@ function normalizeCustomFields(fields: SalesManualCustomField[]) {
   return normalized;
 }
 
+function mergeStructuredCustomFields(
+  current: SalesManualCustomField[],
+  structuredFields: Array<{ label?: string; value?: string }> | undefined,
+) {
+  const incoming = (structuredFields ?? [])
+    .map((field) => ({
+      label: field.label?.trim() ?? "",
+      value: field.value?.trim() ?? "",
+    }))
+    .filter((field) => field.label && field.value);
+
+  if (incoming.length === 0) return current;
+
+  const merged = [...current];
+  for (const field of incoming) {
+    const existingIndex = merged.findIndex((item) => normalizeFieldLabel(item.label) === normalizeFieldLabel(field.label));
+    if (existingIndex >= 0) {
+      merged[existingIndex] = {
+        ...merged[existingIndex],
+        label: merged[existingIndex].label.trim() || field.label,
+        value: field.value,
+      };
+    } else {
+      merged.push({
+        id: `ai-custom-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        label: field.label,
+        value: field.value,
+      });
+    }
+  }
+
+  return merged.slice(0, 12);
+}
+
+function normalizeFieldLabel(value: string) {
+  return value.trim().toLowerCase().replace(/\s+/g, "");
+}
+
 function splitLines(value: string) {
   return value.split(/\r?\n/).map((item) => item.trim()).filter(Boolean);
 }
@@ -604,6 +643,7 @@ async function structureAdminPaste(kind: "manual", text: string) {
       scoringRules?: string[];
       objectionHandling?: string[];
       closingRules?: string[];
+      customFields?: Array<{ label?: string; value?: string }>;
     };
     error?: string;
   };

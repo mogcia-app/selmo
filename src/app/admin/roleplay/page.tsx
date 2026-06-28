@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { FormEvent, type ReactNode, useEffect, useMemo, useState } from "react";
 
 import {
@@ -16,6 +17,7 @@ import {
 import { useAuth } from "@/features/auth/auth-provider";
 import { getApiAuthHeaders } from "@/lib/client/api-auth";
 import type { KnowledgeProduct } from "@/lib/firebase/knowledge";
+import type { MeetingRecord } from "@/lib/firebase/meetings";
 import {
   createRoleplayAssignment,
   createRoleplayScenario,
@@ -34,8 +36,9 @@ import {
 } from "@/lib/firebase/roleplay";
 
 export default function AdminRoleplayPage() {
+  const searchParams = useSearchParams();
   const { profile } = useAuth();
-  const { roleplayScenarios, roleplayResults, memberRows, products, users, error } = useAdminInsights();
+  const { meetings, roleplayScenarios, roleplayResults, memberRows, products, users, error } = useAdminInsights();
   const [assignments, setAssignments] = useState<RoleplayAssignment[]>([]);
   const [talkGuides, setTalkGuides] = useState<RoleplayTalkGuide[]>([]);
   const [selectedUserIds, setSelectedUserIds] = useState<string[]>([]);
@@ -54,6 +57,12 @@ export default function AdminRoleplayPage() {
   const [guideNotes, setGuideNotes] = useState("");
   const [editingGuideId, setEditingGuideId] = useState<string | null>(null);
   const [isSavingGuide, setIsSavingGuide] = useState(false);
+  const [handledSourceMeetingId, setHandledSourceMeetingId] = useState<string | null>(null);
+  const sourceMeetingId = searchParams.get("sourceMeetingId") ?? "";
+  const sourceMeeting = useMemo(
+    () => meetings.find((meeting) => meeting.id === sourceMeetingId) ?? null,
+    [meetings, sourceMeetingId],
+  );
   const completedUserIds = new Set(roleplayResults.map((result) => result.userId));
   const inactiveMembers = memberRows.filter((member) => !completedUserIds.has(member.id));
   const averageScore = roleplayResults.length > 0 ? Math.round(roleplayResults.reduce((sum, result) => sum + result.score, 0) / roleplayResults.length) : null;
@@ -86,6 +95,13 @@ export default function AdminRoleplayPage() {
     ];
     return () => unsubscribers.forEach((unsubscribe) => unsubscribe());
   }, [profile?.companyId]);
+
+  useEffect(() => {
+    if (!sourceMeeting || handledSourceMeetingId === sourceMeeting.id) return;
+    setScenarioMessage("レビュー内容からロープレ課題の下書きを作成します。AI生成後に自由に編集できます。");
+    setIsScenarioDialogOpen(true);
+    setHandledSourceMeetingId(sourceMeeting.id);
+  }, [handledSourceMeetingId, sourceMeeting]);
 
   async function handleSaveTalkGuide(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -541,6 +557,7 @@ export default function AdminRoleplayPage() {
             setScenarioMessage("シナリオ一覧に登録しました。sales側へ表示するには、一覧から対象者を選んでください。");
           }}
           onError={setScenarioMessage}
+          sourceMeeting={sourceMeeting ?? undefined}
         />
       ) : null}
       {editingScenario && profile?.uid && profile.companyId ? (
@@ -566,6 +583,7 @@ function ScenarioCreateDialog({
   userId,
   companyId,
   scenario,
+  sourceMeeting,
   onClose,
   onCreated,
   onError,
@@ -574,25 +592,32 @@ function ScenarioCreateDialog({
   userId: string;
   companyId: string;
   scenario?: RoleplayScenario;
+  sourceMeeting?: MeetingRecord;
   onClose: () => void;
   onCreated: () => void;
   onError: (message: string | null) => void;
 }) {
+  const sourceDraft = useMemo(
+    () => (scenario ? null : sourceMeeting ? buildScenarioDraftFromMeeting(sourceMeeting, products) : null),
+    [products, scenario, sourceMeeting],
+  );
   const [title, setTitle] = useState(scenario?.title ?? "");
-  const [roleplayType, setRoleplayType] = useState<RoleplayType>(scenario?.roleplayType ?? "meeting");
+  const [roleplayType, setRoleplayType] = useState<RoleplayType>(scenario?.roleplayType ?? sourceDraft?.roleplayType ?? "meeting");
   const [description, setDescription] = useState(scenario?.description ?? "");
-  const [productId, setProductId] = useState(scenario?.productId ?? "");
-  const [scenarioCategory, setScenarioCategory] = useState<"新規" | "既存" | "">(scenario?.scenarioCategory ?? "");
-  const [targetSegment, setTargetSegment] = useState(scenario?.targetSegment ?? "");
+  const [productId, setProductId] = useState(scenario?.productId ?? sourceDraft?.productId ?? "");
+  const [scenarioCategory, setScenarioCategory] = useState<"新規" | "既存" | "">(scenario?.scenarioCategory ?? sourceDraft?.scenarioCategory ?? "");
+  const [targetSegment, setTargetSegment] = useState(scenario?.targetSegment ?? sourceDraft?.targetSegment ?? "");
   const [customerRole, setCustomerRole] = useState(scenario?.customerRole ?? "");
   const [customerProfile, setCustomerProfile] = useState(scenario?.customerProfile ?? "");
   const [goal, setGoal] = useState(scenario?.goal ?? "");
   const [objections, setObjections] = useState((scenario?.objections ?? []).join("\n"));
   const [criteria, setCriteria] = useState((scenario?.evaluationCriteria ?? []).join("\n"));
-  const [customFields, setCustomFields] = useState<RoleplayScenarioCustomField[]>(scenario?.customFields ?? []);
-  const [difficulty, setDifficulty] = useState<RoleplayDifficulty>(scenario?.difficulty ?? "normal");
+  const [customFields, setCustomFields] = useState<RoleplayScenarioCustomField[]>(scenario?.customFields ?? sourceDraft?.customFields ?? []);
+  const [difficulty, setDifficulty] = useState<RoleplayDifficulty>(scenario?.difficulty ?? sourceDraft?.difficulty ?? "normal");
   const [isSaving, setIsSaving] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
+  const [isGeneratingFromMeeting, setIsGeneratingFromMeeting] = useState(false);
+  const [hasGeneratedFromMeeting, setHasGeneratedFromMeeting] = useState(false);
   const selectedProduct = products.find((product) => product.id === productId);
 
   async function handleGenerate() {
@@ -610,6 +635,7 @@ function ScenarioCreateDialog({
         category: scenarioCategory,
         targetSegment,
         roleplayType,
+        meetingInsights: sourceDraft?.meetingInsights ?? [],
       });
       setTitle(generated.title);
       setDescription(generated.description);
@@ -626,6 +652,57 @@ function ScenarioCreateDialog({
       setIsGenerating(false);
     }
   }
+
+  useEffect(() => {
+    if (!sourceDraft || hasGeneratedFromMeeting) return;
+    setRoleplayType(sourceDraft.roleplayType);
+    setProductId(sourceDraft.productId);
+    setScenarioCategory(sourceDraft.scenarioCategory);
+    setTargetSegment(sourceDraft.targetSegment);
+    setDifficulty(sourceDraft.difficulty);
+    setCustomFields(sourceDraft.customFields);
+
+    if (!sourceDraft.product && products.length === 0) {
+      return;
+    }
+
+    if (!sourceDraft.product) {
+      onError("レビューの商材と登録済み商材が一致しません。商材を選択してからAI生成してください。");
+      setHasGeneratedFromMeeting(true);
+      return;
+    }
+
+    setHasGeneratedFromMeeting(true);
+    setIsGenerating(true);
+    setIsGeneratingFromMeeting(true);
+    onError(null);
+    void generateRoleplayScenario({
+      companyId,
+      product: sourceDraft.product,
+      category: sourceDraft.scenarioCategory,
+      targetSegment: sourceDraft.targetSegment,
+      roleplayType: sourceDraft.roleplayType,
+      meetingInsights: sourceDraft.meetingInsights,
+    })
+      .then((generated) => {
+        setTitle(generated.title);
+        setDescription(generated.description);
+        setTargetSegment(generated.targetSegment);
+        setCustomerRole(generated.customerRole);
+        setCustomerProfile(generated.customerProfile);
+        setGoal(generated.goal);
+        setObjections(generated.objections.join("\n"));
+        setCriteria(generated.evaluationCriteria.join("\n"));
+        setDifficulty(generated.difficulty);
+      })
+      .catch((nextError) => {
+        onError(nextError instanceof Error ? nextError.message : "AI生成に失敗しました。");
+      })
+      .finally(() => {
+        setIsGenerating(false);
+        setIsGeneratingFromMeeting(false);
+      });
+  }, [companyId, hasGeneratedFromMeeting, onError, products.length, sourceDraft]);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -682,12 +759,34 @@ function ScenarioCreateDialog({
         <div className="flex items-start justify-between gap-4">
           <div>
             <h2 className="text-[24px] font-black tracking-[-0.03em] text-[#171717]">{scenario ? "シナリオ編集" : "管理者シナリオ作成"}</h2>
-            <p className="mt-1 text-[13px] leading-6 text-[#7a808c]">商材・カテゴリーからAI生成し、ターゲット層もAIに選ばせられます。</p>
+            <p className="mt-1 text-[13px] leading-6 text-[#7a808c]">{sourceDraft ? "レビュー内容をもとにAI生成し、保存前に編集できます。" : "商材・カテゴリーからAI生成し、ターゲット層もAIに選ばせられます。"}</p>
           </div>
           <button type="button" onClick={onClose} className="text-[24px] leading-none text-[#9aa1ac]" aria-label="閉じる">
             ×
           </button>
         </div>
+
+        {sourceDraft ? (
+          <div className={`mt-5 rounded-[18px] border px-4 py-4 ${isGeneratingFromMeeting ? "border-[#f0d992] bg-[#fffaf0]" : "border-[#d9edc8] bg-[#f7fff2]"}`}>
+            <div className="flex items-start gap-3">
+              {isGeneratingFromMeeting ? (
+                <span className="mt-0.5 h-5 w-5 shrink-0 animate-spin rounded-full border-2 border-[#f0c655] border-t-transparent" aria-hidden="true" />
+              ) : (
+                <span className="mt-0.5 inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-[#17a34a] text-[12px] font-black text-white">✓</span>
+              )}
+              <div>
+                <div className="text-[13px] font-black text-[#343b48]">
+                  {isGeneratingFromMeeting ? "レビュー内容からロープレ課題を生成中" : "レビュー内容を反映した下書きです"}
+                </div>
+                <p className="mt-1 text-[12px] leading-5 text-[#6f6250]">
+                  {isGeneratingFromMeeting
+                    ? "商談の改善点・不足基準・管理者コメントを読み込み、シナリオ項目に変換しています。"
+                    : "生成された内容はこの画面で自由に編集してから保存できます。"}
+                </p>
+              </div>
+            </div>
+          </div>
+        ) : null}
 
         <div className="mt-5 grid gap-4 md:grid-cols-2">
           <Field label="種別" required>
@@ -792,8 +891,8 @@ function ScenarioCreateDialog({
           <button type="button" onClick={onClose} className="inline-flex h-11 items-center justify-center rounded-[14px] border border-[#e4e8ef] bg-white px-5 text-[14px] font-bold text-[#596273]">
             キャンセル
           </button>
-          <button type="submit" disabled={isSaving} className="inline-flex h-11 items-center justify-center rounded-[14px] border border-[#f0c655] bg-[#ffd84d] px-6 text-[14px] font-black text-[#171717] disabled:opacity-60">
-            {isSaving ? "保存中" : scenario ? "更新する" : "シナリオ一覧に登録"}
+          <button type="submit" disabled={isSaving || isGenerating} className="inline-flex h-11 items-center justify-center rounded-[14px] border border-[#f0c655] bg-[#ffd84d] px-6 text-[14px] font-black text-[#171717] disabled:opacity-60">
+            {isSaving ? "保存中" : isGenerating ? "生成中" : scenario ? "更新する" : "シナリオ一覧に登録"}
           </button>
         </div>
       </form>
@@ -865,12 +964,71 @@ function splitGuideLines(value: string) {
     .filter(Boolean);
 }
 
+function buildScenarioDraftFromMeeting(meeting: MeetingRecord, products: KnowledgeProduct[]) {
+  const product = findProductForMeeting(meeting, products);
+  const scenarioCategory: "新規" | "既存" = meeting.customerType === "existing" ? "既存" : "新規";
+  const roleplayType: RoleplayType = meeting.salesDomain === "teleapo" ? "teleapo" : "meeting";
+  const compliance = meeting.aiSummary?.manualCompliance;
+  const missingCriteria = compliance?.missingCriteria ?? [];
+  const improvementPhrases = compliance?.improvementPhrases ?? [];
+  const productNotes = compliance?.productNotes ?? [];
+  const checklistMisses = compliance?.checklistItems
+    ?.filter((item) => item.status === "missing")
+    .map((item) => `${item.category}: ${item.label} - ${item.reason}`)
+    .filter(Boolean) ?? [];
+  const meetingInsights = [
+    meeting.aiSummary?.overview ? `レビュー要約: ${meeting.aiSummary.overview}` : "",
+    ...(meeting.aiSummary?.bullets.map((bullet) => `分析メモ: ${bullet}`) ?? []),
+    ...missingCriteria.map((item) => `不足基準: ${item}`),
+    ...improvementPhrases.map((item) => `改善フレーズ: ${item}`),
+    ...productNotes.map((item) => `商材観点: ${item}`),
+    ...checklistMisses.map((item) => `未達チェック: ${item}`),
+    meeting.adminComment?.trim() ? `管理者コメント: ${meeting.adminComment.trim()}` : "",
+    meeting.status === "lost" ? "商談結果: 失注。失注要因を再現して克服する課題にする。" : "",
+  ].filter(Boolean).slice(0, 16);
+  const focus = missingCriteria[0] ?? improvementPhrases[0] ?? meeting.aiSummary?.bullets[1] ?? "次回アクションの合意";
+
+  return {
+    product,
+    productId: product?.id ?? "",
+    roleplayType,
+    scenarioCategory,
+    targetSegment: meeting.customerName ? `${meeting.customerName}と同じ状況の顧客` : "",
+    difficulty: "hard" as RoleplayDifficulty,
+    meetingInsights,
+    customFields: [
+      {
+        id: `source-meeting-${meeting.id}`,
+        label: "元レビュー",
+        value: [
+          `顧客名: ${meeting.customerName || "未設定"}`,
+          `商材: ${meeting.productType || "未設定"}`,
+          `種別: ${roleplayType === "teleapo" ? "テレアポ" : "商談"} / ${scenarioCategory}`,
+          `重点改善: ${focus}`,
+        ].join("\n"),
+      },
+    ],
+  };
+}
+
+function findProductForMeeting(meeting: MeetingRecord, products: KnowledgeProduct[]) {
+  const target = normalizeProductName(meeting.productType);
+  if (!target) return undefined;
+  return products.find((product) => normalizeProductName(product.name) === target)
+    ?? products.find((product) => normalizeProductName(product.name).includes(target) || target.includes(normalizeProductName(product.name)));
+}
+
+function normalizeProductName(value: string) {
+  return value.trim().toLowerCase().replace(/\s+/g, "");
+}
+
 async function generateRoleplayScenario(input: {
   companyId: string;
   product: KnowledgeProduct;
   category: "新規" | "既存";
   targetSegment: string;
   roleplayType: RoleplayType;
+  meetingInsights?: string[];
 }) {
   const response = await fetch("/api/roleplay/generate-scenario", {
     method: "POST",
@@ -881,6 +1039,7 @@ async function generateRoleplayScenario(input: {
       category: input.category,
       targetSegment: input.targetSegment,
       roleplayType: input.roleplayType,
+      meetingInsights: input.meetingInsights ?? [],
     }),
   });
   const payload = (await response.json()) as {

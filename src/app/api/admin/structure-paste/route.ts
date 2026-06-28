@@ -18,6 +18,10 @@ type StructuredPaste = {
   scoringRules?: string[];
   objectionHandling?: string[];
   closingRules?: string[];
+  customFields?: Array<{
+    label?: string;
+    value?: string;
+  }>;
   name?: string;
   description?: string;
   targetCustomer?: string;
@@ -93,6 +97,18 @@ async function structureText(kind: StructureKind, text: string): Promise<Structu
               scoringRules: { type: "array", items: { type: "string" } },
               objectionHandling: { type: "array", items: { type: "string" } },
               closingRules: { type: "array", items: { type: "string" } },
+              customFields: {
+                type: "array",
+                items: {
+                  type: "object",
+                  additionalProperties: false,
+                  properties: {
+                    label: { type: "string" },
+                    value: { type: "string" },
+                  },
+                  required: ["label", "value"],
+                },
+              },
               name: { type: "string" },
               description: { type: "string" },
               targetCustomer: { type: "string" },
@@ -114,6 +130,7 @@ async function structureText(kind: StructureKind, text: string): Promise<Structu
               "scoringRules",
               "objectionHandling",
               "closingRules",
+              "customFields",
               "name",
               "description",
               "targetCustomer",
@@ -138,6 +155,8 @@ async function structureText(kind: StructureKind, text: string): Promise<Structu
             "貼り付けられた長文を、指定されたフォーム項目へ自然に分類してください。",
             "本文にない内容は推測しすぎず、空文字または空配列にしてください。",
             "各配列は短く実務で使える粒度に分割してください。",
+            "営業マニュアルで、評価基準・必須ヒアリング・スコアルール・反論対応・クロージング基準に入らない独自見出しや自社固有の項目は customFields に入れてください。",
+            "customFields は label に見出し、value に本文を入れてください。標準項目と重複する内容は customFields に入れないでください。",
             "日本語で返してください。",
           ].join("\n"),
         },
@@ -146,7 +165,7 @@ async function structureText(kind: StructureKind, text: string): Promise<Structu
           content: [
             `分類対象: ${kind === "manual" ? "営業マニュアル" : "商材情報"}`,
             kind === "manual"
-              ? "営業マニュアルの場合は title/content/criteria/requiredQuestions/scoringRules/objectionHandling/closingRules を重点的に埋めてください。商材用フィールドは空で構いません。"
+              ? "営業マニュアルの場合は title/content/criteria/requiredQuestions/scoringRules/objectionHandling/closingRules を重点的に埋めてください。標準項目にない独自項目は customFields に入れてください。商材用フィールドは空で構いません。"
               : "商材情報の場合は name/description/targetCustomer/painPoints/valueProposition/pricing/competitors/commonObjections/faq/successTalk/ngTalk/sourceSummary を重点的に埋めてください。FAQは質問と回答が分かる短い1行に整理してください。マニュアル用フィールドは空で構いません。",
             "貼り付け本文:",
             text.slice(0, 16000),
@@ -178,6 +197,7 @@ function normalizeStructuredPaste(value: StructuredPaste): StructuredPaste {
     scoringRules: readStringArray(value.scoringRules),
     objectionHandling: readStringArray(value.objectionHandling),
     closingRules: readStringArray(value.closingRules),
+    customFields: readCustomFields(value.customFields),
     name: readString(value.name),
     description: readString(value.description),
     targetCustomer: readString(value.targetCustomer),
@@ -191,6 +211,21 @@ function normalizeStructuredPaste(value: StructuredPaste): StructuredPaste {
     ngTalk: readStringArray(value.ngTalk),
     sourceSummary: readString(value.sourceSummary),
   };
+}
+
+function readCustomFields(value: unknown) {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((item) => {
+      if (!item || typeof item !== "object") return null;
+      const data = item as Record<string, unknown>;
+      const label = readString(data.label);
+      const fieldValue = readString(data.value);
+      if (!label || !fieldValue) return null;
+      return { label, value: fieldValue };
+    })
+    .filter((item): item is { label: string; value: string } => Boolean(item))
+    .slice(0, 12);
 }
 
 function readString(value: unknown) {

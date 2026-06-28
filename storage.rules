@@ -6,26 +6,29 @@ service firebase.storage {
       return request.auth != null;
     }
 
-    function isAdmin() {
-      return isSignedIn() &&
-        firestore.get(
-          /databases/(default)/documents/users/$(request.auth.uid)
-        ).data.role == "admin";
+    function currentRole() {
+      return firestore.get(
+        /databases/(default)/documents/users/$(request.auth.uid)
+      ).data.role;
+    }
+
+    function isAdminOrOwner() {
+      return isSignedIn() && (currentRole() == "admin" || currentRole() == "owner");
     }
 
     match /meetings/{userId}/{allPaths=**} {
-      allow read: if isAdmin() || (isSignedIn() && request.auth.uid == userId);
+      allow read: if isAdminOrOwner() || (isSignedIn() && request.auth.uid == userId);
       allow write: if isSignedIn() && request.auth.uid == userId;
-      allow delete: if isAdmin() || (isSignedIn() && request.auth.uid == userId);
+      allow delete: if isAdminOrOwner() || (isSignedIn() && request.auth.uid == userId);
     }
 
     match /knowledge/{userId}/{allPaths=**} {
-      allow read: if isAdmin() || (isSignedIn() && request.auth.uid == userId);
+      allow read: if isAdminOrOwner() || (isSignedIn() && request.auth.uid == userId);
       allow write: if isSignedIn()
         && request.auth.uid == userId
         && request.resource.size < 20 * 1024 * 1024
         && request.resource.contentType == "application/pdf";
-      allow delete: if isAdmin() || (isSignedIn() && request.auth.uid == userId);
+      allow delete: if isAdminOrOwner() || (isSignedIn() && request.auth.uid == userId);
     }
 
     match /knowledge-product-logos/{userId}/{allPaths=**} {
@@ -34,7 +37,7 @@ service firebase.storage {
         && request.auth.uid == userId
         && request.resource.size < 5 * 1024 * 1024
         && request.resource.contentType == "image/png";
-      allow delete: if isAdmin() || (isSignedIn() && request.auth.uid == userId);
+      allow delete: if isAdminOrOwner() || (isSignedIn() && request.auth.uid == userId);
     }
 
     match /profile-avatars/{userId}/{allPaths=**} {
@@ -43,7 +46,7 @@ service firebase.storage {
         && request.auth.uid == userId
         && request.resource.size < 5 * 1024 * 1024
         && request.resource.contentType.matches("image/.*");
-      allow delete: if isAdmin() || (isSignedIn() && request.auth.uid == userId);
+      allow delete: if isAdminOrOwner() || (isSignedIn() && request.auth.uid == userId);
     }
   }
 }
