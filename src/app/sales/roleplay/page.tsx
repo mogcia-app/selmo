@@ -376,7 +376,7 @@ export default function SalesRoleplayPage() {
                     <p className="text-[12px] font-bold text-[#8a6500]">{scenario.productName || "商材未設定"}</p>
                     <h1 className="mt-1 text-[24px] font-black tracking-[-0.03em] text-[#171717]">{scenario.title}</h1>
                     <p className="mt-2 text-[13px] leading-6 text-[#707783]">
-                      下の操作バーからいつでも録音できます。録音停止後に文字起こしし、AI顧客が音声で返答します。
+                      10分以内で苦手テーマを集中練習します。録音停止後に文字起こしし、AI顧客が音声で返答します。
                     </p>
                   </div>
                   <div className="flex shrink-0 items-center gap-2">
@@ -387,7 +387,7 @@ export default function SalesRoleplayPage() {
                       <VoiceSettingsIcon />
                     </IconButton>
                     <Link href={`/sales/roleplay/scenarios?category=${roleplayType}`} className="inline-flex h-11 items-center justify-center rounded-[14px] border border-[#e2e6ee] bg-white px-4 text-[13px] font-bold text-[#3d4350]">
-                      シナリオ変更
+                      苦手テーマ変更
                     </Link>
                   </div>
                 </div>
@@ -402,7 +402,7 @@ export default function SalesRoleplayPage() {
                   <div className="rounded-[20px] border border-dashed border-[#dfe4ec] bg-[#fcfcfd] px-5 py-8 text-center">
                     <h3 className="text-[18px] font-black text-[#171717]">営業側から開始</h3>
                     <p className="mx-auto mt-2 max-w-[520px] text-[13px] leading-6 text-[#7a808c]">
-                      下の録音ボタンを押して、いつものテレアポ・商談のように最初の挨拶から話してください。AIは顧客役として返答します。
+                      下の録音ボタンを押して、練習ゴールの苦手テーマを意識しながら話してください。AIは顧客役として返答します。
                     </p>
                   </div>
                 )}
@@ -464,10 +464,10 @@ export default function SalesRoleplayPage() {
             <Image src="/mojiokoshi.png" alt="AIロープレ" width={180} height={180} priority className="mx-auto h-[140px] w-[140px] object-contain" />
             <h1 className="mt-5 text-[28px] font-black tracking-[-0.04em] text-[#171717]">シナリオを選択してください</h1>
             <p className="mx-auto mt-3 max-w-[560px] text-[15px] leading-7 text-[#596273]">
-              商材別の練習テーマを選択すると、AI顧客とのロープレを開始できます。
+              商材別・弱点別の練習テーマを選択すると、10分以内のAIロープレを開始できます。
             </p>
             <Link href={`/sales/roleplay/scenarios?category=${roleplayType}`} className="mt-7 inline-flex h-12 items-center justify-center rounded-[14px] bg-[#ffd12f] px-7 text-[14px] font-black text-[#171717] shadow-[0_10px_22px_rgba(245,189,7,0.22)]">
-              シナリオを選択
+              苦手テーマを選択
             </Link>
           </section>
         )}
@@ -557,8 +557,8 @@ function RoleplaySettingsModal({
             <div className="space-y-3">
               <InfoBlock label="役職" value={scenario.customerRole} />
               <InfoBlock label="プロフィール" value={scenario.customerProfile} />
-              <InfoBlock label="ゴール" value={scenario.goal} />
-              <InfoBlock label="想定反論" value={scenario.objections.join(" / ") || "未設定"} />
+              <InfoBlock label="10分練習ゴール" value={scenario.goal} />
+              <InfoBlock label="苦手テーマを再現する想定反論" value={scenario.objections.join(" / ") || "未設定"} />
               {scenario.customFields.map((field) => (
                 <InfoBlock key={field.id} label={field.label} value={field.value} />
               ))}
@@ -800,10 +800,10 @@ function evaluateRoleplay(scenario: RoleplayScenario, messages: RoleplayMessage[
   return {
     score,
     summary: score >= 80
-      ? "ロープレを完了しました。課題確認から次回アクションまで進められています。"
+      ? "ロープレを完了しました。今回の苦手テーマに対して、課題確認から次回アクションまで進められています。"
       : score >= 65
-        ? "ロープレを完了しました。会話は進められていますが、検討条件や次回アクションの確認に改善余地があります。"
-        : "ロープレを完了しました。提案説明だけでなく、課題・予算・決裁・時期を確認する練習が必要です。",
+        ? "ロープレを完了しました。次回10分練習では、検討条件や次回アクションの確認を重点的に反復しましょう。"
+        : "ロープレを完了しました。次回10分練習では、提案説明より先に課題・予算・決裁・時期を確認する練習が必要です。",
     strengths: [
       questionCount > 0 ? "顧客に確認質問を投げられています。" : "提案内容を最後まで伝えられています。",
       hasValueConnection ? "商材価値を顧客の課題に結びつけようとしています。" : "会話を継続し、顧客の反応に合わせて回答できています。",

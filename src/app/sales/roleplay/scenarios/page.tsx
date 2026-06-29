@@ -100,9 +100,9 @@ export default function SalesRoleplayScenariosPage() {
             <div className="flex flex-wrap items-end justify-between gap-4">
               <div>
                 <p className="text-[12px] font-bold text-[#8a6500]">SCENARIOS</p>
-                <h2 className="mt-1 text-[28px] font-black tracking-[-0.04em] text-[#171717]">シナリオを選択</h2>
+                <h2 className="mt-1 text-[28px] font-black tracking-[-0.04em] text-[#171717]">苦手テーマを選択</h2>
                 <p className="mt-2 text-[14px] leading-6 text-[#596273]">
-                  商材・顧客条件・反論パターンを選んで、AI顧客との練習を開始できます。
+                  商談・テレアポ分析で見えた弱点を、10分以内のAI顧客ロープレで集中練習できます。
                 </p>
               </div>
               <button
@@ -111,7 +111,7 @@ export default function SalesRoleplayScenariosPage() {
                 className="inline-flex h-11 items-center gap-2 rounded-[14px] border border-[#f0c655] bg-[#ffd84d] px-5 text-[13px] font-black text-[#171717]"
               >
                 <PlusIcon />
-                シナリオ作成
+                弱点課題を作成
               </button>
             </div>
 
@@ -120,7 +120,7 @@ export default function SalesRoleplayScenariosPage() {
                 <div className="flex items-center justify-between gap-3">
                   <div>
                     <p className="text-[12px] font-black text-[#8a6500]">ASSIGNED</p>
-                    <h3 className="mt-1 text-[18px] font-black text-[#171717]">管理者からの課題</h3>
+                    <h3 className="mt-1 text-[18px] font-black text-[#171717]">管理者からの弱点課題</h3>
                   </div>
                   <span className="rounded-full bg-white px-3 py-1 text-[12px] font-black text-[#8a6500]">
                     {activeAssignments.length}件
@@ -168,25 +168,25 @@ export default function SalesRoleplayScenariosPage() {
                 <span className="mx-auto inline-flex h-12 w-12 items-center justify-center rounded-[14px] bg-white text-[#8f96a3] shadow-[0_6px_14px_rgba(17,24,39,0.04)]">
                   <ScenarioIcon />
                 </span>
-                <h3 className="mt-4 text-[20px] font-black text-[#171717]">シナリオはまだありません</h3>
+                <h3 className="mt-4 text-[20px] font-black text-[#171717]">弱点課題はまだありません</h3>
                 <p className="mx-auto mt-2 max-w-[460px] text-[14px] leading-7 text-[#7a808c]">
-                  管理者が商材別の練習テーマを追加すると、ここからロープレを開始できます。
+                  管理者が苦手テーマ別の練習課題を追加すると、ここから10分ロープレを開始できます。
                 </p>
               </div>
             )}
           </article>
 
           <aside className="h-fit rounded-[24px] border border-[#e2e6ee] bg-white px-5 py-5 shadow-[0_8px_24px_rgba(17,24,39,0.04)] xl:sticky xl:top-5">
-            <h2 className="text-[18px] font-black text-[#171717]">選択中のAI顧客</h2>
+            <h2 className="text-[18px] font-black text-[#171717]">選択中の弱点課題</h2>
             {activeScenario ? (
               <div className="mt-5 space-y-4">
                 <div>
                   <h3 className="text-[22px] font-black text-[#171717]">{activeScenario.title}</h3>
                   <p className="mt-2 text-[13px] leading-6 text-[#596273]">{activeScenario.customerProfile}</p>
                 </div>
-                <InfoBlock label="ゴール" value={activeScenario.goal} />
+                <InfoBlock label="10分練習ゴール" value={activeScenario.goal} />
                 <InfoBlock label="想定反論" value={activeScenario.objections.join(" / ") || "未設定"} />
-                <InfoBlock label="採点基準" value={activeScenario.evaluationCriteria.join(" / ") || "未設定"} />
+                <InfoBlock label="弱点克服の採点基準" value={activeScenario.evaluationCriteria.join(" / ") || "未設定"} />
                 {activeScenario.customFields.map((field) => (
                   <InfoBlock key={field.id} label={field.label} value={field.value} />
                 ))}
@@ -195,20 +195,20 @@ export default function SalesRoleplayScenariosPage() {
                   onClick={() => setEditingScenario(activeScenario)}
                   className="inline-flex h-11 w-full items-center justify-center rounded-[14px] border border-[#e4e8ef] bg-white text-[14px] font-black text-[#343b48]"
                 >
-                  シナリオを編集
+                  弱点課題を編集
                 </button>
                 <Link
                   href={`/sales/roleplay?category=${roleplayType}&scenarioId=${encodeURIComponent(activeScenario.id)}`}
                   className="inline-flex h-12 w-full items-center justify-center rounded-[14px] bg-[#ffd12f] text-[14px] font-black text-[#171717]"
                 >
-                  このシナリオで開始
+                  この弱点を練習
                 </Link>
               </div>
             ) : (
               <div className="mt-5 rounded-[18px] border border-dashed border-[#dfe4ec] bg-[#fcfcfd] px-5 py-10 text-center">
                 <h3 className="text-[18px] font-bold text-[#171717]">未選択</h3>
                 <p className="mt-2 text-[13px] leading-6 text-[#7a808c]">
-                  シナリオを選ぶと、AI顧客の条件が表示されます。
+                  苦手テーマを選ぶと、AI顧客の条件と練習ゴールが表示されます。
                 </p>
               </div>
             )}
@@ -388,8 +388,8 @@ function ScenarioCreateDialog({
       <form onSubmit={handleSubmit} className="max-h-[92vh] w-full max-w-[760px] overflow-y-auto rounded-[24px] border border-[#eceef4] bg-white p-6 shadow-[0_24px_70px_rgba(17,24,39,0.18)]">
         <div className="flex items-start justify-between gap-4">
           <div>
-            <h2 className="text-[24px] font-black tracking-[-0.03em] text-[#171717]">{scenario ? "シナリオ編集" : "シナリオ作成"}</h2>
-            <p className="mt-1 text-[13px] leading-6 text-[#7a808c]">商材・カテゴリーからAI生成し、ターゲット層もAIに選ばせられます。</p>
+            <h2 className="text-[24px] font-black tracking-[-0.03em] text-[#171717]">{scenario ? "弱点課題編集" : "弱点課題作成"}</h2>
+            <p className="mt-1 text-[13px] leading-6 text-[#7a808c]">商材・カテゴリーと過去分析から、10分で反復できる苦手克服シナリオをAI生成できます。</p>
           </div>
           <button type="button" onClick={onClose} className="text-[24px] leading-none text-[#9aa1ac]" aria-label="閉じる">
             ×
@@ -417,11 +417,11 @@ function ScenarioCreateDialog({
           </Field>
           <div className="flex items-end">
             <button type="button" onClick={() => void handleGenerate()} disabled={isGenerating} className="h-12 w-full rounded-[14px] border border-[#171717] bg-[#171717] px-4 text-[13px] font-black text-white disabled:opacity-60">
-              {isGenerating ? "生成中" : "AIでシナリオ生成"}
+              {isGenerating ? "生成中" : "AIで弱点課題生成"}
             </button>
           </div>
           <Field label="タイトル" className="md:col-span-2">
-            <input value={title} onChange={(event) => setTitle(event.target.value)} className="h-12 w-full rounded-[14px] border border-[#e4e8ef] bg-white px-4 text-[14px] text-[#171717] outline-none transition focus:border-[#e0bd4b]" placeholder="例：料金が高いと言われた時" />
+            <input value={title} onChange={(event) => setTitle(event.target.value)} className="h-12 w-full rounded-[14px] border border-[#e4e8ef] bg-white px-4 text-[14px] text-[#171717] outline-none transition focus:border-[#e0bd4b]" placeholder="例：料金反論を効果訴求に切り返す10分練習" />
           </Field>
           <Field label="顧客役職">
             <input value={customerRole} onChange={(event) => setCustomerRole(event.target.value)} className="h-12 w-full rounded-[14px] border border-[#e4e8ef] bg-white px-4 text-[14px] text-[#171717] outline-none transition focus:border-[#e0bd4b]" placeholder="例：営業部長" />
@@ -434,25 +434,25 @@ function ScenarioCreateDialog({
             </select>
           </Field>
           <Field label="概要" className="md:col-span-2">
-            <textarea value={description} onChange={(event) => setDescription(event.target.value)} className="min-h-[88px] w-full resize-y rounded-[14px] border border-[#e4e8ef] bg-white px-4 py-3 text-[14px] leading-7 text-[#171717] outline-none transition focus:border-[#e0bd4b]" placeholder="シナリオの説明" />
+            <textarea value={description} onChange={(event) => setDescription(event.target.value)} className="min-h-[88px] w-full resize-y rounded-[14px] border border-[#e4e8ef] bg-white px-4 py-3 text-[14px] leading-7 text-[#171717] outline-none transition focus:border-[#e0bd4b]" placeholder="どの苦手テーマを、どの場面で練習するか" />
           </Field>
           <Field label="顧客プロフィール" className="md:col-span-2">
             <textarea value={customerProfile} onChange={(event) => setCustomerProfile(event.target.value)} className="min-h-[88px] w-full resize-y rounded-[14px] border border-[#e4e8ef] bg-white px-4 py-3 text-[14px] leading-7 text-[#171717] outline-none transition focus:border-[#e0bd4b]" placeholder="業種、課題、検討状況など" />
           </Field>
           <Field label="練習ゴール" required className="md:col-span-2">
-            <textarea value={goal} onChange={(event) => setGoal(event.target.value)} className="min-h-[88px] w-full resize-y rounded-[14px] border border-[#e4e8ef] bg-white px-4 py-3 text-[14px] leading-7 text-[#171717] outline-none transition focus:border-[#e0bd4b]" placeholder="例：価格ではなく効果と導入後の成果で納得してもらう" />
+            <textarea value={goal} onChange={(event) => setGoal(event.target.value)} className="min-h-[88px] w-full resize-y rounded-[14px] border border-[#e4e8ef] bg-white px-4 py-3 text-[14px] leading-7 text-[#171717] outline-none transition focus:border-[#e0bd4b]" placeholder="例：価格反論に対して、効果・事例・導入後の成果で30秒以内に切り返す" />
           </Field>
           <Field label="想定反論" className="md:col-span-1">
             <textarea value={objections} onChange={(event) => setObjections(event.target.value)} className="min-h-[120px] w-full resize-y rounded-[14px] border border-[#e4e8ef] bg-white px-4 py-3 text-[14px] leading-7 text-[#171717] outline-none transition focus:border-[#e0bd4b]" placeholder={"1行に1つ\n例：料金が高い"} />
           </Field>
           <Field label="採点基準" className="md:col-span-1">
-            <textarea value={criteria} onChange={(event) => setCriteria(event.target.value)} className="min-h-[120px] w-full resize-y rounded-[14px] border border-[#e4e8ef] bg-white px-4 py-3 text-[14px] leading-7 text-[#171717] outline-none transition focus:border-[#e0bd4b]" placeholder={"1行に1つ\n例：課題を確認できている"} />
+            <textarea value={criteria} onChange={(event) => setCriteria(event.target.value)} className="min-h-[120px] w-full resize-y rounded-[14px] border border-[#e4e8ef] bg-white px-4 py-3 text-[14px] leading-7 text-[#171717] outline-none transition focus:border-[#e0bd4b]" placeholder={"1行に1つ\n例：苦手テーマを再現した反論に対して、確認質問を返せている"} />
           </Field>
           <div className="md:col-span-2 rounded-[18px] border border-[#eef1f5] bg-[#fcfcfd] px-4 py-4">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
                 <div className="text-[13px] font-bold text-[#343b48]">自由項目</div>
-                <p className="mt-1 text-[12px] text-[#7a808c]">シナリオに必要な項目名と中身を自由に追加できます。</p>
+                <p className="mt-1 text-[12px] text-[#7a808c]">重点弱点、避けたい癖、合格ラインなどを自由に追加できます。</p>
               </div>
               <button type="button" onClick={() => setCustomFields((current) => [...current, createCustomField()])} className="inline-flex h-10 items-center justify-center rounded-[12px] border border-[#e4e8ef] bg-white px-4 text-[13px] font-black text-[#343b48]">
                 項目を追加

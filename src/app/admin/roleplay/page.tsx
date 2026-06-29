@@ -216,7 +216,7 @@ export default function AdminRoleplayPage() {
         <PageHeader
           eyebrow="ROLEPLAY MANAGEMENT"
           title="ロープレ管理"
-          description="商材別シナリオと実施状況を確認し、未実施者や低スコアのメンバーに指導をつなげます。"
+          description="商談・テレアポ分析で見えた苦手テーマを、10分以内で繰り返し練習できる課題に変換します。"
           action={
             <button
               type="button"
@@ -226,7 +226,7 @@ export default function AdminRoleplayPage() {
               }}
               className="rounded-[14px] border border-[#f0c655] bg-[#ffd84d] px-5 py-3 text-[13px] font-black text-[#171717] transition hover:bg-[#ffcf24]"
             >
-              シナリオ作成
+              弱点課題を作成
             </button>
           }
         />
@@ -238,7 +238,7 @@ export default function AdminRoleplayPage() {
         ) : null}
 
         <section className="mt-8 grid gap-5 md:grid-cols-5">
-          <KpiCard label="シナリオ" value={`${managedScenarios.length}件`} note="admin管理" />
+          <KpiCard label="弱点特化課題" value={`${managedScenarios.length}件`} note="admin管理" />
           <KpiCard label="進め方" value={`${talkGuides.length}件`} note="商材×タイプ" />
           <KpiCard label="実施回数" value={`${roleplayResults.length}回`} note="結果保存済み" />
           <KpiCard label="平均スコア" value={averageScore === null ? "-" : `${averageScore}点`} note={averageScore === null ? "結果なし" : "全体平均"} />
@@ -358,7 +358,7 @@ export default function AdminRoleplayPage() {
         </section>
 
         <section className="mt-8 grid gap-6 xl:grid-cols-[minmax(0,1.3fr)_minmax(360px,0.7fr)]">
-          <Panel title="シナリオ一覧">
+          <Panel title="弱点特化シナリオ一覧">
             {managedScenarios.length > 0 ? (
               <div className="space-y-3">
                 {managedScenarios.map((scenario) => {
@@ -419,7 +419,7 @@ export default function AdminRoleplayPage() {
                 })}
               </div>
             ) : (
-              <EmptyState title="シナリオはまだありません" body="シナリオ作成後、実施状況を確認できます。" />
+              <EmptyState title="シナリオはまだありません" body="苦手テーマ別のシナリオを作成すると、実施状況を確認できます。" />
             )}
           </Panel>
 
@@ -439,7 +439,7 @@ export default function AdminRoleplayPage() {
               )}
             </Panel>
 
-            <Panel title="シナリオをsalesに表示">
+            <Panel title="弱点課題をsalesに表示">
               <form onSubmit={handleAssign} className="space-y-3">
                 <div className="rounded-[14px] border border-[#e4e8ef] bg-white px-3 py-3">
                   <div className="flex items-center justify-between gap-3">
@@ -474,7 +474,7 @@ export default function AdminRoleplayPage() {
                   onChange={(event) => setSelectedScenarioId(event.target.value)}
                   className="h-11 w-full rounded-[14px] border border-[#e4e8ef] bg-white px-3 text-[13px] font-bold text-[#343b48] outline-none focus:border-[#e0bd4b]"
                 >
-                  <option value="">シナリオを選択</option>
+                  <option value="">弱点課題を選択</option>
                   {managedScenarios.map((scenario) => (
                     <option key={scenario.id} value={scenario.id}>{scenario.title}</option>
                   ))}
@@ -483,7 +483,7 @@ export default function AdminRoleplayPage() {
                   value={assignmentReason}
                   onChange={(event) => setAssignmentReason(event.target.value)}
                   className="min-h-[96px] w-full resize-y rounded-[14px] border border-[#e4e8ef] bg-white px-3 py-3 text-[13px] leading-6 text-[#343b48] outline-none focus:border-[#e0bd4b]"
-                  placeholder="表示理由。例：価格説明の改善が必要なため"
+                  placeholder="表示理由。例：価格反論で効果訴求が弱いため、10分で切り返しを練習"
                 />
                 <button
                   type="submit"
@@ -500,7 +500,7 @@ export default function AdminRoleplayPage() {
               </form>
             </Panel>
 
-            <Panel title="ロープレ結果">
+            <Panel title="ロープレ分析結果">
               {roleplayResults.length > 0 ? (
                 <div className="max-h-[360px] overflow-y-auto rounded-[14px] border border-[#eef1f5] bg-[#fcfcfd]">
                   {roleplayResults.map((result) => {
@@ -525,7 +525,7 @@ export default function AdminRoleplayPage() {
               )}
             </Panel>
 
-            <Panel title="割り当て中の課題">
+            <Panel title="割り当て中の弱点課題">
               {activeAssignments.length > 0 ? (
                 <div className="space-y-2">
                   {activeAssignments.slice(0, 6).map((assignment) => {
@@ -554,7 +554,7 @@ export default function AdminRoleplayPage() {
           onClose={() => setIsScenarioDialogOpen(false)}
           onCreated={() => {
             setIsScenarioDialogOpen(false);
-            setScenarioMessage("シナリオ一覧に登録しました。sales側へ表示するには、一覧から対象者を選んでください。");
+            setScenarioMessage("弱点特化シナリオを登録しました。sales側へ表示するには、一覧から対象者を選んでください。");
           }}
           onError={setScenarioMessage}
           sourceMeeting={sourceMeeting ?? undefined}
@@ -569,7 +569,7 @@ export default function AdminRoleplayPage() {
           onClose={() => setEditingScenario(null)}
           onCreated={() => {
             setEditingScenario(null);
-            setScenarioMessage("シナリオを更新しました。");
+            setScenarioMessage("弱点特化シナリオを更新しました。");
           }}
           onError={setScenarioMessage}
         />
@@ -758,8 +758,12 @@ function ScenarioCreateDialog({
       <form onSubmit={handleSubmit} className="max-h-[92vh] w-full max-w-[760px] overflow-y-auto rounded-[24px] border border-[#eceef4] bg-white p-6 shadow-[0_24px_70px_rgba(17,24,39,0.18)]">
         <div className="flex items-start justify-between gap-4">
           <div>
-            <h2 className="text-[24px] font-black tracking-[-0.03em] text-[#171717]">{scenario ? "シナリオ編集" : "管理者シナリオ作成"}</h2>
-            <p className="mt-1 text-[13px] leading-6 text-[#7a808c]">{sourceDraft ? "レビュー内容をもとにAI生成し、保存前に編集できます。" : "商材・カテゴリーからAI生成し、ターゲット層もAIに選ばせられます。"}</p>
+            <h2 className="text-[24px] font-black tracking-[-0.03em] text-[#171717]">{scenario ? "弱点特化シナリオ編集" : "弱点特化シナリオ作成"}</h2>
+            <p className="mt-1 text-[13px] leading-6 text-[#7a808c]">
+              {sourceDraft
+                ? "レビュー内容から苦手テーマを抽出し、10分以内で反復できる課題に変換します。"
+                : "商材・カテゴリーから、苦手な反論や確認漏れを集中練習する課題をAI生成できます。"}
+            </p>
           </div>
           <button type="button" onClick={onClose} className="text-[24px] leading-none text-[#9aa1ac]" aria-label="閉じる">
             ×
@@ -776,11 +780,11 @@ function ScenarioCreateDialog({
               )}
               <div>
                 <div className="text-[13px] font-black text-[#343b48]">
-                  {isGeneratingFromMeeting ? "レビュー内容からロープレ課題を生成中" : "レビュー内容を反映した下書きです"}
+                  {isGeneratingFromMeeting ? "レビュー内容から弱点課題を生成中" : "苦手テーマを反映した下書きです"}
                 </div>
                 <p className="mt-1 text-[12px] leading-5 text-[#6f6250]">
                   {isGeneratingFromMeeting
-                    ? "商談の改善点・不足基準・管理者コメントを読み込み、シナリオ項目に変換しています。"
+                    ? "商談の改善点・不足基準・管理者コメントを読み込み、短時間で練習するシナリオ項目に変換しています。"
                     : "生成された内容はこの画面で自由に編集してから保存できます。"}
                 </p>
               </div>
@@ -815,11 +819,11 @@ function ScenarioCreateDialog({
           </Field>
           <div className="flex items-end">
             <button type="button" onClick={() => void handleGenerate()} disabled={isGenerating} className="h-12 w-full rounded-[14px] border border-[#171717] bg-[#171717] px-4 text-[13px] font-black text-white disabled:opacity-60">
-              {isGenerating ? "生成中" : "AIでシナリオ生成"}
+              {isGenerating ? "生成中" : "AIで弱点課題生成"}
             </button>
           </div>
           <Field label="タイトル" className="md:col-span-2">
-            <input value={title} onChange={(event) => setTitle(event.target.value)} className="h-12 w-full rounded-[14px] border border-[#e4e8ef] bg-white px-4 text-[14px] text-[#171717] outline-none transition focus:border-[#e0bd4b]" placeholder="例：価格反論を受けた時の切り返し" />
+            <input value={title} onChange={(event) => setTitle(event.target.value)} className="h-12 w-full rounded-[14px] border border-[#e4e8ef] bg-white px-4 text-[14px] text-[#171717] outline-none transition focus:border-[#e0bd4b]" placeholder="例：価格反論で効果訴求に切り返す10分練習" />
           </Field>
           <Field label="顧客役職">
             <input value={customerRole} onChange={(event) => setCustomerRole(event.target.value)} className="h-12 w-full rounded-[14px] border border-[#e4e8ef] bg-white px-4 text-[14px] text-[#171717] outline-none transition focus:border-[#e0bd4b]" placeholder="例：営業部長" />
@@ -832,25 +836,25 @@ function ScenarioCreateDialog({
             </select>
           </Field>
           <Field label="概要" className="md:col-span-2">
-            <textarea value={description} onChange={(event) => setDescription(event.target.value)} className="min-h-[88px] w-full resize-y rounded-[14px] border border-[#e4e8ef] bg-white px-4 py-3 text-[14px] leading-7 text-[#171717] outline-none transition focus:border-[#e0bd4b]" placeholder="シナリオの説明" />
+            <textarea value={description} onChange={(event) => setDescription(event.target.value)} className="min-h-[88px] w-full resize-y rounded-[14px] border border-[#e4e8ef] bg-white px-4 py-3 text-[14px] leading-7 text-[#171717] outline-none transition focus:border-[#e0bd4b]" placeholder="どの苦手テーマを、どの場面で練習するか" />
           </Field>
           <Field label="顧客プロフィール" className="md:col-span-2">
             <textarea value={customerProfile} onChange={(event) => setCustomerProfile(event.target.value)} className="min-h-[88px] w-full resize-y rounded-[14px] border border-[#e4e8ef] bg-white px-4 py-3 text-[14px] leading-7 text-[#171717] outline-none transition focus:border-[#e0bd4b]" placeholder="業種、課題、検討状況など" />
           </Field>
           <Field label="練習ゴール" required className="md:col-span-2">
-            <textarea value={goal} onChange={(event) => setGoal(event.target.value)} className="min-h-[88px] w-full resize-y rounded-[14px] border border-[#e4e8ef] bg-white px-4 py-3 text-[14px] leading-7 text-[#171717] outline-none transition focus:border-[#e0bd4b]" placeholder="例：価格ではなく効果と導入後の成果で納得してもらう" />
+            <textarea value={goal} onChange={(event) => setGoal(event.target.value)} className="min-h-[88px] w-full resize-y rounded-[14px] border border-[#e4e8ef] bg-white px-4 py-3 text-[14px] leading-7 text-[#171717] outline-none transition focus:border-[#e0bd4b]" placeholder="例：価格反論に対して、効果・事例・導入後の成果で30秒以内に切り返す" />
           </Field>
           <Field label="想定反論" className="md:col-span-1">
             <textarea value={objections} onChange={(event) => setObjections(event.target.value)} className="min-h-[120px] w-full resize-y rounded-[14px] border border-[#e4e8ef] bg-white px-4 py-3 text-[14px] leading-7 text-[#171717] outline-none transition focus:border-[#e0bd4b]" placeholder={"1行に1つ\n例：料金が高い"} />
           </Field>
           <Field label="採点基準" className="md:col-span-1">
-            <textarea value={criteria} onChange={(event) => setCriteria(event.target.value)} className="min-h-[120px] w-full resize-y rounded-[14px] border border-[#e4e8ef] bg-white px-4 py-3 text-[14px] leading-7 text-[#171717] outline-none transition focus:border-[#e0bd4b]" placeholder={"1行に1つ\n例：課題を確認できている"} />
+            <textarea value={criteria} onChange={(event) => setCriteria(event.target.value)} className="min-h-[120px] w-full resize-y rounded-[14px] border border-[#e4e8ef] bg-white px-4 py-3 text-[14px] leading-7 text-[#171717] outline-none transition focus:border-[#e0bd4b]" placeholder={"1行に1つ\n例：苦手テーマを再現した反論に対して、確認質問を返せている"} />
           </Field>
           <div className="md:col-span-2 rounded-[18px] border border-[#eef1f5] bg-[#fcfcfd] px-4 py-4">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
                 <div className="text-[13px] font-bold text-[#343b48]">自由項目</div>
-                <p className="mt-1 text-[12px] text-[#7a808c]">シナリオに必要な項目名と中身を自由に追加できます。</p>
+                <p className="mt-1 text-[12px] text-[#7a808c]">重点弱点、避けたい癖、合格ラインなどを自由に追加できます。</p>
               </div>
               <button type="button" onClick={() => setCustomFields((current) => [...current, createCustomField()])} className="inline-flex h-10 items-center justify-center rounded-[12px] border border-[#e4e8ef] bg-white px-4 text-[13px] font-black text-[#343b48]">
                 項目を追加
@@ -892,7 +896,7 @@ function ScenarioCreateDialog({
             キャンセル
           </button>
           <button type="submit" disabled={isSaving || isGenerating} className="inline-flex h-11 items-center justify-center rounded-[14px] border border-[#f0c655] bg-[#ffd84d] px-6 text-[14px] font-black text-[#171717] disabled:opacity-60">
-            {isSaving ? "保存中" : isGenerating ? "生成中" : scenario ? "更新する" : "シナリオ一覧に登録"}
+            {isSaving ? "保存中" : isGenerating ? "生成中" : scenario ? "更新する" : "弱点課題として登録"}
           </button>
         </div>
       </form>
