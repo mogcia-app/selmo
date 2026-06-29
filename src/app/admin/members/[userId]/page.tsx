@@ -1913,8 +1913,11 @@ function AdminCustomerKarteList({ customers, logs }: { customers: CustomerRecord
                 <div className="min-w-0">
                   <div className="truncate text-[14px] font-black text-[#171717]">{customer.companyName || "会社名未設定"}</div>
                   <div className="mt-1 text-[12px] font-bold text-[#8a909b]">
-                    {customer.contactName || "担当者未設定"} ・ {customer.phone || customer.email || "連絡先未設定"}
+                    {customer.contactName || "先方担当者未設定"} ・ {customer.phone || customer.email || "連絡先未設定"}
                   </div>
+                  {customer.collaboratorUserNames.length > 0 ? (
+                    <div className="mt-1 text-[12px] font-bold text-[#8a6500]">共同: {customer.collaboratorUserNames.join(" / ")}</div>
+                  ) : null}
                 </div>
                 <div className="flex flex-wrap gap-2">
                   <CustomerBadge label={readCustomerStatusLabel(customer.status)} tone={customer.status === "contracted" ? "good" : customer.status === "lost" ? "risk" : "normal"} />
@@ -1932,6 +1935,11 @@ function AdminCustomerKarteList({ customers, logs }: { customers: CustomerRecord
 
               <div className="mt-3 rounded-[10px] bg-[#fcfcfd] px-3 py-2 text-[12px] font-bold leading-5 text-[#596273]">
                 {latestLog ? `直近ログ: ${readCustomerLogTypeLabel(latestLog.type)} / ${latestLog.title}` : customer.memo || "顧客メモはまだありません"}
+              </div>
+              <div className="mt-3 flex justify-end">
+                <Link href={`/admin/customers/${customer.id}`} className="rounded-[9px] border border-[#ead8a8] bg-[#fffaf0] px-3 py-2 text-[12px] font-black text-[#8a6500]">
+                  詳細
+                </Link>
               </div>
             </div>
           );

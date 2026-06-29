@@ -1384,9 +1384,14 @@ function CustomerManagementLog({
             <div className="mt-2 line-clamp-2 text-[12px] font-bold leading-5 text-[#596273]">{row.log}</div>
           </div>
           <div className="flex items-center md:justify-end">
-            <span className={`rounded-full px-3 py-1 text-[12px] font-black ${row.actionTone === "risk" ? "bg-[#fff0ed] text-[#d63c2f]" : row.actionTone === "good" ? "bg-[#edf7f0] text-[#16834f]" : "bg-[#fff3cf] text-[#8a6500]"}`}>
-              {row.actionLabel}
-            </span>
+            <div className="flex flex-wrap items-center gap-2 md:justify-end">
+              <span className={`rounded-full px-3 py-1 text-[12px] font-black ${row.actionTone === "risk" ? "bg-[#fff0ed] text-[#d63c2f]" : row.actionTone === "good" ? "bg-[#edf7f0] text-[#16834f]" : "bg-[#fff3cf] text-[#8a6500]"}`}>
+                {row.actionLabel}
+              </span>
+              <Link href={`/admin/customers/${row.id}`} className="rounded-[9px] border border-[#ead8a8] bg-white px-3 py-2 text-[12px] font-black text-[#8a6500]">
+                詳細
+              </Link>
+            </div>
           </div>
         </div>
       ))}

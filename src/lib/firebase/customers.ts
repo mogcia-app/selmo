@@ -48,6 +48,9 @@ export type CustomerRecord = {
   employeeCount: number | null;
   assignedUserId: string;
   assignedUserName: string;
+  collaboratorUserIds: string[];
+  collaboratorUserNames: string[];
+  memberUserIds: string[];
   productIds: string[];
   productNames: string[];
   status: CustomerStatus;
@@ -57,6 +60,10 @@ export type CustomerRecord = {
   nextActionTitle: string;
   nextActionDate: Date | null;
   lastContactDate: Date | null;
+  firstTouchMemo: string;
+  customerContext: string;
+  salesDirection: string;
+  handoffMemo: string;
   memo: string;
   isContracted: boolean;
   contractStatus: CustomerContractStatus;
@@ -100,6 +107,8 @@ export type SaveCustomerInput = {
   employeeCount: number | null;
   assignedUserId: string;
   assignedUserName: string;
+  collaboratorUserIds: string[];
+  collaboratorUserNames: string[];
   productIds: string[];
   productNames: string[];
   status: CustomerStatus;
@@ -109,6 +118,10 @@ export type SaveCustomerInput = {
   nextActionTitle: string;
   nextActionDate: Date | null;
   lastContactDate: Date | null;
+  firstTouchMemo: string;
+  customerContext: string;
+  salesDirection: string;
+  handoffMemo: string;
   memo: string;
   isContracted: boolean;
   contractStatus: CustomerContractStatus;
@@ -141,22 +154,34 @@ export function subscribeToCustomers(
     return () => undefined;
   }
 
-  const constraints = input.isAdmin || !input.userId
-    ? [where("companyId", "==", input.companyId)]
-    : [where("companyId", "==", input.companyId), where("assignedUserId", "==", input.userId)];
-  const customersQuery = query(collection(firestore, "customers"), ...constraints);
+  const customersRef = collection(firestore, "customers");
+  const customersQueries = input.isAdmin || !input.userId
+    ? [query(customersRef, where("companyId", "==", input.companyId))]
+    : [
+        query(customersRef, where("assignedUserId", "==", input.userId)),
+        query(customersRef, where("memberUserIds", "array-contains", input.userId)),
+      ];
 
-  return onSnapshot(
-    customersQuery,
-    (snapshot) => {
-      callback(
-        snapshot.docs
-          .map((docSnapshot) => mapCustomerRecord(docSnapshot.id, docSnapshot.data()))
-          .sort((left, right) => (right.updatedAt?.getTime() ?? 0) - (left.updatedAt?.getTime() ?? 0)),
-      );
-    },
-    onError,
+  const snapshotsByIndex = new Map<number, CustomerRecord[]>();
+  const unsubscribers = customersQueries.map((customersQuery, index) =>
+    onSnapshot(
+      customersQuery,
+      (snapshot) => {
+        snapshotsByIndex.set(
+          index,
+          snapshot.docs
+            .map((docSnapshot) => mapCustomerRecord(docSnapshot.id, docSnapshot.data()))
+            .filter((customer) => customer.companyId === input.companyId),
+        );
+        const recordsById = new Map<string, CustomerRecord>();
+        snapshotsByIndex.forEach((records) => records.forEach((record) => recordsById.set(record.id, record)));
+        callback(Array.from(recordsById.values()).sort((left, right) => (right.updatedAt?.getTime() ?? 0) - (left.updatedAt?.getTime() ?? 0)));
+      },
+      onError,
+    ),
   );
+
+  return () => unsubscribers.forEach((unsubscribe) => unsubscribe());
 }
 
 export function subscribeToCustomer(
@@ -290,6 +315,8 @@ export async function createCustomerMeetingLink(input: { companyId: string; cust
 }
 
 function serializeCustomerInput(input: SaveCustomerInput) {
+  const memberUserIds = Array.from(new Set([input.assignedUserId, ...input.collaboratorUserIds].filter(Boolean)));
+
   return {
     companyId: input.companyId,
     companyName: input.companyName,
@@ -300,6 +327,9 @@ function serializeCustomerInput(input: SaveCustomerInput) {
     employeeCount: input.employeeCount,
     assignedUserId: input.assignedUserId,
     assignedUserName: input.assignedUserName,
+    collaboratorUserIds: input.collaboratorUserIds,
+    collaboratorUserNames: input.collaboratorUserNames,
+    memberUserIds,
     productIds: input.productIds,
     productNames: input.productNames,
     status: input.status,
@@ -309,6 +339,10 @@ function serializeCustomerInput(input: SaveCustomerInput) {
     nextActionTitle: input.nextActionTitle,
     nextActionDate: toTimestampOrNull(input.nextActionDate),
     lastContactDate: toTimestampOrNull(input.lastContactDate),
+    firstTouchMemo: input.firstTouchMemo,
+    customerContext: input.customerContext,
+    salesDirection: input.salesDirection,
+    handoffMemo: input.handoffMemo,
     memo: input.memo,
     isContracted: input.contractStatus === "contracted" || input.isContracted,
     contractStatus: input.contractStatus,
@@ -321,6 +355,10 @@ function serializeCustomerInput(input: SaveCustomerInput) {
 }
 
 function mapCustomerRecord(id: string, data: Record<string, unknown>): CustomerRecord {
+  const assignedUserId = readString(data.assignedUserId);
+  const collaboratorUserIds = readStringArray(data.collaboratorUserIds);
+  const memberUserIds = readStringArray(data.memberUserIds);
+
   return {
     id,
     companyId: readString(data.companyId),
@@ -330,8 +368,11 @@ function mapCustomerRecord(id: string, data: Record<string, unknown>): CustomerR
     email: readString(data.email),
     industry: readString(data.industry),
     employeeCount: readNullableNumber(data.employeeCount),
-    assignedUserId: readString(data.assignedUserId),
+    assignedUserId,
     assignedUserName: readString(data.assignedUserName),
+    collaboratorUserIds,
+    collaboratorUserNames: readStringArray(data.collaboratorUserNames),
+    memberUserIds: memberUserIds.length > 0 ? memberUserIds : Array.from(new Set([assignedUserId, ...collaboratorUserIds].filter(Boolean))),
     productIds: readStringArray(data.productIds),
     productNames: readStringArray(data.productNames),
     status: readCustomerStatus(data.status),
@@ -341,6 +382,10 @@ function mapCustomerRecord(id: string, data: Record<string, unknown>): CustomerR
     nextActionTitle: readString(data.nextActionTitle),
     nextActionDate: toDateValue(data.nextActionDate),
     lastContactDate: toDateValue(data.lastContactDate),
+    firstTouchMemo: readString(data.firstTouchMemo),
+    customerContext: readString(data.customerContext),
+    salesDirection: readString(data.salesDirection),
+    handoffMemo: readString(data.handoffMemo),
     memo: readString(data.memo),
     isContracted: data.isContracted === true,
     contractStatus: readContractStatus(data.contractStatus, data.isContracted === true),

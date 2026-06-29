@@ -74,6 +74,23 @@ service cloud.firestore {
       return isOwnerRole() || (isAdminRole() && sameCompany(companyId));
     }
 
+    function isCustomerMember(data) {
+      return isSignedIn()
+        && (
+          data.assignedUserId == request.auth.uid
+          || (
+            "memberUserIds" in data
+            && data.memberUserIds is list
+            && request.auth.uid in data.memberUserIds
+          )
+          || (
+            "collaboratorUserIds" in data
+            && data.collaboratorUserIds is list
+            && request.auth.uid in data.collaboratorUserIds
+          )
+        );
+    }
+
     function canUseMeetingDomain() {
       return isOwnerRole()
         || isAdminRole()
@@ -291,8 +308,8 @@ service cloud.firestore {
     match /customers/{customerId} {
       allow read: if isOwnerRole()
         || (
-          canReadCompanyData(resource.data.companyId)
-          && (isAdminRole() || resource.data.assignedUserId == request.auth.uid)
+          canAdminCompanyData(resource.data.companyId)
+          || (isSalesRole() && isCustomerMember(resource.data))
         );
       allow create: if isSignedIn()
         && sameCompany(request.resource.data.companyId)
@@ -306,7 +323,7 @@ service cloud.firestore {
       allow update: if canAdminCompanyData(resource.data.companyId)
         || (
           isSalesRole()
-          && resource.data.assignedUserId == request.auth.uid
+          && isCustomerMember(resource.data)
           && sameCompany(resource.data.companyId)
           && request.resource.data.companyId == resource.data.companyId
           && request.resource.data.assignedUserId == resource.data.assignedUserId
@@ -318,7 +335,12 @@ service cloud.firestore {
       allow read: if isOwnerRole()
         || (
           canReadCompanyData(resource.data.companyId)
-          && (isAdminRole() || resource.data.userId == request.auth.uid || resource.data.createdBy == request.auth.uid)
+          && (
+            isAdminRole()
+            || resource.data.userId == request.auth.uid
+            || resource.data.createdBy == request.auth.uid
+            || isCustomerMember(get(/databases/$(database)/documents/customers/$(resource.data.customerId)).data)
+          )
         );
       allow create: if isSignedIn()
         && sameCompany(request.resource.data.companyId)
@@ -576,6 +598,7 @@ service cloud.firestore {
           request.resource.data.userId == request.auth.uid
           || isAdminRole()
           || isOwnerRole()
+          || request.resource.data.type == "customer_collaboration"
         );
       allow update: if isSignedIn()
         && sameCompany(resource.data.companyId)

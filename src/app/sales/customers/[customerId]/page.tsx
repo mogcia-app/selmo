@@ -6,6 +6,7 @@ import { useParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 
 import { useAuth } from "@/features/auth/auth-provider";
+import { subscribeToUserProfiles, type AppUserProfile } from "@/lib/firebase/auth";
 import {
   createCustomerLog,
   createCustomerMeetingLink,
@@ -25,6 +26,7 @@ import {
 } from "@/lib/firebase/customers";
 import { subscribeToKnowledgeProducts, type KnowledgeProduct } from "@/lib/firebase/knowledge";
 import { subscribeToMeetings, type MeetingRecord } from "@/lib/firebase/meetings";
+import { createAppNotification } from "@/lib/firebase/notifications";
 import { canUseSalesDomain } from "@/lib/sales-domains";
 
 const statusOptions: Array<{ value: CustomerStatus; label: string }> = [
@@ -69,7 +71,7 @@ const logTypeOptions: Array<{ value: CustomerLogType; label: string }> = [
   { value: "memo", label: "メモ" },
 ];
 
-const nextActionLogTitle = "次回アクション";
+const completedActionLogTitle = "完了";
 
 type CustomerFormState = {
   companyName: string;
@@ -78,6 +80,7 @@ type CustomerFormState = {
   email: string;
   industry: string;
   employeeCount: string;
+  collaboratorUserIds: string[];
   productIds: string[];
   status: CustomerStatus;
   temperature: CustomerTemperature;
@@ -86,6 +89,10 @@ type CustomerFormState = {
   nextActionTitle: string;
   nextActionDate: string;
   lastContactDate: string;
+  firstTouchMemo: string;
+  customerContext: string;
+  salesDirection: string;
+  handoffMemo: string;
   memo: string;
   contractStatus: CustomerContractStatus;
   contractStartDate: string;
@@ -100,6 +107,7 @@ export default function SalesCustomerDetailPage() {
   const { profile } = useAuth();
   const [customer, setCustomer] = useState<CustomerRecord | null>(null);
   const [products, setProducts] = useState<KnowledgeProduct[]>([]);
+  const [salesUsers, setSalesUsers] = useState<AppUserProfile[]>([]);
   const [logs, setLogs] = useState<CustomerLogRecord[]>([]);
   const [meetings, setMeetings] = useState<MeetingRecord[]>([]);
   const [linkedMeetingIds, setLinkedMeetingIds] = useState<string[]>([]);
@@ -112,8 +120,10 @@ export default function SalesCustomerDetailPage() {
   const [logTitle, setLogTitle] = useState("");
   const [logBody, setLogBody] = useState("");
   const [logActionDate, setLogActionDate] = useState("");
-  const [nextActionTitle, setNextActionTitle] = useState("");
-  const [nextActionDate, setNextActionDate] = useState("");
+  const [completedActionDate, setCompletedActionDate] = useState(getTodayInputValue);
+  const [completedActionMemo, setCompletedActionMemo] = useState("");
+  const [followingActionTitle, setFollowingActionTitle] = useState("");
+  const [followingActionDate, setFollowingActionDate] = useState("");
   const allowedSalesDomains = useMemo(
     () => [
       ...(canUseSalesDomain(profile, "meeting") ? (["meeting"] as const) : []),
@@ -130,8 +140,6 @@ export default function SalesCustomerDetailPage() {
         setCustomer(nextCustomer);
         if (nextCustomer) {
           setFormState(buildFormState(nextCustomer));
-          setNextActionTitle(nextCustomer.nextActionTitle);
-          setNextActionDate(toDateInputValue(nextCustomer.nextActionDate));
         }
       },
       (nextError: FirebaseError) => setErrorMessage(nextError.message),
@@ -142,7 +150,7 @@ export default function SalesCustomerDetailPage() {
     if (!profile?.companyId || !params.customerId || !profile.uid) return;
     const unsubscribers = [
       subscribeToCustomerLogs(
-        { companyId: profile.companyId, customerId: params.customerId, userId: profile.uid, isAdmin: false },
+        { companyId: profile.companyId, customerId: params.customerId, isAdmin: true },
         setLogs,
         (nextError: FirebaseError) => setErrorMessage(nextError.message),
       ),
@@ -169,13 +177,22 @@ export default function SalesCustomerDetailPage() {
   useEffect(() => {
     if (!profile?.companyId) {
       setProducts([]);
+      setSalesUsers([]);
       return;
     }
-    return subscribeToKnowledgeProducts(
-      profile.companyId,
-      setProducts,
-      (nextError: FirebaseError) => setErrorMessage(nextError.message),
-    );
+    const unsubscribers = [
+      subscribeToKnowledgeProducts(
+        profile.companyId,
+        setProducts,
+        (nextError: FirebaseError) => setErrorMessage(nextError.message),
+      ),
+      subscribeToUserProfiles(
+        (profiles) => setSalesUsers(profiles.filter((user) => user.role === "sales" && user.status === "active")),
+        (nextError: FirebaseError) => setErrorMessage(nextError.message),
+        profile.companyId,
+      ),
+    ];
+    return () => unsubscribers.forEach((unsubscribe) => unsubscribe());
   }, [profile?.companyId]);
 
   const relatedMeetings = useMemo(() => {
@@ -186,7 +203,8 @@ export default function SalesCustomerDetailPage() {
       .sort((left, right) => (right.recordedAt?.getTime() ?? 0) - (left.recordedAt?.getTime() ?? 0));
   }, [customer, linkedMeetingIds, meetings]);
 
-  const nextActionLogs = useMemo(() => logs.filter(isNextActionLog), [logs]);
+  const completedActionLogs = useMemo(() => logs.filter(isCompletedActionLog), [logs]);
+  const timelineLogs = useMemo(() => logs.filter((log) => !isCompletedActionLog(log)), [logs]);
 
   const linkCandidates = useMemo(() => {
     if (!customer) return [];
@@ -202,24 +220,21 @@ export default function SalesCustomerDetailPage() {
     setIsSaving(true);
     setErrorMessage(null);
     setSuccessMessage(null);
-    const nextActionChanged =
-      formState.nextActionTitle.trim() !== customer.nextActionTitle
-      || !isSameDate(readOptionalDate(formState.nextActionDate), customer.nextActionDate);
-    const shouldLogNextAction = nextActionChanged && Boolean(profile?.uid);
 
     try {
-      const nextCustomerInput = buildCustomerInput(formState, products, customer);
+      const nextCustomerInput = buildCustomerInput(formState, products, salesUsers, customer);
       await updateCustomer(customer.id, nextCustomerInput);
-      if (shouldLogNextAction && profile?.uid) {
-        await createNextActionLog({
+      if (profile?.uid) {
+        await notifyCustomerMembers({
           customer,
-          createdBy: profile.uid,
-          title: nextCustomerInput.nextActionTitle,
-          date: nextCustomerInput.nextActionDate,
+          extraUserIds: nextCustomerInput.collaboratorUserIds,
+          actorUserId: profile.uid,
+          actorName: profile.name ?? profile.email ?? "担当者",
+          title: "顧客カルテが更新されました",
         });
       }
       setIsEditing(false);
-      setSuccessMessage(shouldLogNextAction ? "顧客カルテを更新し、次回アクション履歴に追加しました。" : "顧客カルテを更新しました。");
+      setSuccessMessage("顧客カルテを更新しました。");
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "顧客カルテの更新に失敗しました。");
     } finally {
@@ -258,29 +273,55 @@ export default function SalesCustomerDetailPage() {
     }
   }
 
-  async function handleUpdateNextAction(event: React.FormEvent<HTMLFormElement>) {
+  async function handleCompleteNextAction(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!customer || !profile?.uid) return;
+
     setErrorMessage(null);
     setSuccessMessage(null);
-    const nextActionTitleValue = nextActionTitle.trim();
-    const nextActionDateValue = readOptionalDate(nextActionDate);
+    const hasCurrentNextAction = Boolean(customer.nextActionTitle.trim() || customer.nextActionDate);
+    const completedDateValue = readOptionalDate(completedActionDate) ?? new Date();
+    const followingActionTitleValue = followingActionTitle.trim();
+    const followingActionDateValue = readOptionalDate(followingActionDate);
+
+    if (!hasCurrentNextAction && !followingActionTitleValue && !followingActionDateValue) {
+      setErrorMessage("次のアクション内容か予定日を入力してください。");
+      return;
+    }
 
     try {
+      if (hasCurrentNextAction) {
+        await createCompletedActionLog({
+          customer,
+          createdBy: profile.uid,
+          completedDate: completedDateValue,
+          memo: completedActionMemo.trim(),
+          nextTitle: followingActionTitleValue,
+          nextDate: followingActionDateValue,
+        });
+      }
       await updateCustomerNextAction(customer.id, {
-        nextActionTitle: nextActionTitleValue,
-        nextActionDate: nextActionDateValue,
-        lastContactDate: new Date(),
+        nextActionTitle: followingActionTitleValue,
+        nextActionDate: followingActionDateValue,
+        ...(hasCurrentNextAction ? { lastContactDate: completedDateValue } : {}),
       });
-      await createNextActionLog({
+      await notifyCustomerMembers({
         customer,
-        createdBy: profile.uid,
-        title: nextActionTitleValue,
-        date: nextActionDateValue,
+        actorUserId: profile.uid,
+        actorName: profile.name ?? profile.email ?? "担当者",
+        title: hasCurrentNextAction ? "顧客アクションが完了されました" : "次回アクションが設定されました",
       });
-      setSuccessMessage("次回アクションを更新し、履歴に追加しました。");
+      setCompletedActionDate(getTodayInputValue());
+      setCompletedActionMemo("");
+      setFollowingActionTitle("");
+      setFollowingActionDate("");
+      setSuccessMessage(
+        hasCurrentNextAction
+          ? followingActionTitleValue ? "アクションを完了し、次のアクションを設定しました。" : "アクションを完了しました。"
+          : "次のアクションを設定しました。",
+      );
     } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : "次回アクションの更新に失敗しました。");
+      setErrorMessage(error instanceof Error ? error.message : "アクション完了の保存に失敗しました。");
     }
   }
 
@@ -308,6 +349,7 @@ export default function SalesCustomerDetailPage() {
 
   const contractMonths = calcContractMonths(customer.contractStartDate);
   const aiAverage = calcMeetingAverageScore(relatedMeetings);
+  const hasCurrentNextAction = Boolean(customer.nextActionTitle.trim() || customer.nextActionDate);
 
   return (
     <main className="bg-[#f6f7f9] px-4 pb-8 pt-5 md:px-6 lg:px-8">
@@ -317,7 +359,7 @@ export default function SalesCustomerDetailPage() {
             <p className="text-[12px] font-black uppercase tracking-[0.16em] text-[#8a6500]">Customer Karte</p>
             <h1 className="mt-1 text-[28px] font-black tracking-[-0.04em] text-[#171717]">{customer.companyName}</h1>
             <p className="mt-2 text-[13px] leading-6 text-[#596273]">
-              {customer.contactName || "担当者未設定"} ・ {customer.assignedUserName || "担当未設定"}
+              先方担当者: {customer.contactName || "未設定"} ・ 担当営業: {customer.assignedUserName || "未設定"}
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
@@ -341,22 +383,27 @@ export default function SalesCustomerDetailPage() {
         {isEditing && formState ? (
           <section className="mt-5 rounded-[16px] border border-[#e4e8ef] bg-white p-5 shadow-[0_8px_22px_rgba(17,24,39,0.05)]">
             <h2 className="text-[18px] font-black text-[#171717]">顧客カルテ編集</h2>
-            <CustomerForm formState={formState} onChange={setFormState} onSubmit={handleUpdateCustomer} submitLabel={isSaving ? "保存中" : "保存"} disabled={isSaving} products={products} />
+            <CustomerForm formState={formState} onChange={setFormState} onSubmit={handleUpdateCustomer} submitLabel={isSaving ? "保存中" : "保存"} disabled={isSaving} products={products} salesUsers={salesUsers} currentUserId={profile?.uid ?? ""} />
           </section>
         ) : null}
 
         <section className="mt-5 grid gap-5 xl:grid-cols-[minmax(0,1.1fr)_minmax(380px,0.9fr)]">
           <div className="space-y-5">
+            <Panel title="引き継ぎサマリー">
+              <CustomerStory customer={customer} />
+            </Panel>
+
             <Panel title="基本情報">
               <InfoGrid rows={[
                 ["会社名", customer.companyName],
-                ["担当者名", customer.contactName || "未設定"],
+                ["先方担当者名", customer.contactName || "未設定"],
                 ["電話番号", customer.phone || "未設定"],
                 ["メールアドレス", customer.email || "未設定"],
                 ["業種", customer.industry || "未設定"],
                 ["従業員数", customer.employeeCount === null ? "未設定" : `${customer.employeeCount}人`],
                 ["商材", customer.productNames.length > 0 ? customer.productNames.join(" / ") : "未設定"],
-                ["担当営業マン", customer.assignedUserName || "未設定"],
+                ["担当営業", customer.assignedUserName || "未設定"],
+                ["共同担当・同行者", customer.collaboratorUserNames.length > 0 ? customer.collaboratorUserNames.join(" / ") : "未設定"],
                 ["メモ", customer.memo || "未設定"],
               ]} />
             </Panel>
@@ -403,25 +450,35 @@ export default function SalesCustomerDetailPage() {
           </div>
 
           <div className="space-y-5">
-            <Panel title="次回アクション更新">
-              <form onSubmit={handleUpdateNextAction} className="space-y-3">
-                <TextField label="次回アクション内容" value={nextActionTitle} onChange={setNextActionTitle} />
-                <TextField label="次回アクション予定日" value={nextActionDate} onChange={setNextActionDate} type="date" />
+            <Panel title="現在の次回アクション">
+              <CurrentNextAction actionTitle={customer.nextActionTitle} actionDate={customer.nextActionDate} />
+              <form onSubmit={handleCompleteNextAction} className="mt-4 space-y-3">
+                {hasCurrentNextAction ? (
+                  <>
+                    <TextField label="完了日" value={completedActionDate} onChange={setCompletedActionDate} type="date" />
+                    <label>
+                      <span className="text-[12px] font-black text-[#596273]">完了メモ</span>
+                      <textarea value={completedActionMemo} onChange={(event) => setCompletedActionMemo(event.target.value)} className="mt-1 min-h-[86px] w-full resize-y rounded-[10px] border border-[#dfe4ec] px-3 py-3 text-[13px] font-bold text-[#343b48] outline-none focus:border-[#d7aa1f]" />
+                    </label>
+                  </>
+                ) : null}
+                <TextField label="次のアクション" value={followingActionTitle} onChange={setFollowingActionTitle} />
+                <TextField label="次の予定日" value={followingActionDate} onChange={setFollowingActionDate} type="date" />
                 <button type="submit" className="w-full rounded-[12px] border border-[#f0c655] bg-[#ffd84d] px-4 py-3 text-[13px] font-black text-[#171717]">
-                  次回アクションを更新
+                  {hasCurrentNextAction ? "完了して次を保存" : "次のアクションを保存"}
                 </button>
               </form>
             </Panel>
 
-            <Panel title="次回アクション履歴">
-              <NextActionHistory logs={nextActionLogs} />
+            <Panel title="完了したアクション履歴">
+              <CompletedActionHistory logs={completedActionLogs} />
             </Panel>
 
             <Panel title="タイムライン">
-              <Timeline logs={logs} />
+              <Timeline logs={timelineLogs} />
             </Panel>
 
-            <Panel title="タイムラインログ追加">
+            <Panel title="活動ログ追加">
               <form onSubmit={handleAddLog} className="space-y-3">
                 <SelectField label="ログ種別" value={logType} options={logTypeOptions} onChange={(value) => setLogType(value as CustomerLogType)} />
                 <TextField label="タイトル" value={logTitle} onChange={setLogTitle} />
@@ -449,6 +506,8 @@ function CustomerForm({
   submitLabel,
   disabled,
   products,
+  salesUsers,
+  currentUserId,
 }: {
   formState: CustomerFormState;
   onChange: (state: CustomerFormState) => void;
@@ -456,18 +515,21 @@ function CustomerForm({
   submitLabel: string;
   disabled?: boolean;
   products: KnowledgeProduct[];
+  salesUsers: AppUserProfile[];
+  currentUserId: string;
 }) {
   const setField = <Key extends keyof CustomerFormState>(key: Key, value: CustomerFormState[Key]) => onChange({ ...formState, [key]: value });
   return (
     <form onSubmit={onSubmit} className="mt-4 grid gap-4">
       <div className="grid gap-4 md:grid-cols-3">
         <TextField label="会社名" value={formState.companyName} onChange={(value) => setField("companyName", value)} required />
-        <TextField label="担当者名" value={formState.contactName} onChange={(value) => setField("contactName", value)} />
+        <TextField label="先方担当者名" value={formState.contactName} onChange={(value) => setField("contactName", value)} />
         <TextField label="電話番号" value={formState.phone} onChange={(value) => setField("phone", value)} />
         <TextField label="メールアドレス" value={formState.email} onChange={(value) => setField("email", value)} />
         <TextField label="業種" value={formState.industry} onChange={(value) => setField("industry", value)} />
         <TextField label="従業員数" value={formState.employeeCount} onChange={(value) => setField("employeeCount", value)} type="number" />
       </div>
+      <CollaboratorSelect users={salesUsers} currentUserId={currentUserId} selectedIds={formState.collaboratorUserIds} onChange={(collaboratorUserIds) => setField("collaboratorUserIds", collaboratorUserIds)} />
       <ProductSelect products={products} selectedIds={formState.productIds} onChange={(productIds) => setField("productIds", productIds)} />
       <div className="grid gap-4 md:grid-cols-4">
         <SelectField label="ステータス" value={formState.status} options={statusOptions} onChange={(value) => setField("status", value as CustomerStatus)} />
@@ -479,6 +541,12 @@ function CustomerForm({
         <TextField label="次回アクション" value={formState.nextActionTitle} onChange={(value) => setField("nextActionTitle", value)} />
         <TextField label="次回日" value={formState.nextActionDate} onChange={(value) => setField("nextActionDate", value)} type="date" />
         <TextField label="最終接触日" value={formState.lastContactDate} onChange={(value) => setField("lastContactDate", value)} type="date" />
+      </div>
+      <div className="grid gap-4 md:grid-cols-2">
+        <TextAreaField label="初回接点・背景" value={formState.firstTouchMemo} onChange={(value) => setField("firstTouchMemo", value)} />
+        <TextAreaField label="顧客像・課題" value={formState.customerContext} onChange={(value) => setField("customerContext", value)} />
+        <TextAreaField label="今後の方針" value={formState.salesDirection} onChange={(value) => setField("salesDirection", value)} />
+        <TextAreaField label="引き継ぎメモ" value={formState.handoffMemo} onChange={(value) => setField("handoffMemo", value)} />
       </div>
       <div className="grid gap-4 md:grid-cols-5">
         <SelectField label="契約ラベル" value={formState.contractStatus} options={contractStatusOptions} onChange={(value) => setField("contractStatus", value as CustomerContractStatus)} />
@@ -525,6 +593,31 @@ function InfoGrid({ rows }: { rows: Array<[string, string]> }) {
   );
 }
 
+function CustomerStory({ customer }: { customer: CustomerRecord }) {
+  const rows = [
+    ["初回接点・背景", customer.firstTouchMemo],
+    ["顧客像・課題", customer.customerContext],
+    ["今後の方針", customer.salesDirection],
+    ["引き継ぎメモ", customer.handoffMemo],
+  ];
+  const hasStory = rows.some(([, value]) => value.trim());
+
+  if (!hasStory) {
+    return <EmptyState title="顧客の文脈はまだ未入力です" body="編集から、初回接点・顧客像・今後の方針を残すと、引き継ぎや再開時に状況をつかみやすくなります。" />;
+  }
+
+  return (
+    <div className="grid gap-3 md:grid-cols-2">
+      {rows.map(([label, value]) => (
+        <div key={label} className="rounded-[12px] border border-[#eef1f5] bg-[#fcfcfd] px-4 py-3">
+          <div className="text-[12px] font-bold text-[#8a909b]">{label}</div>
+          <p className="mt-2 whitespace-pre-wrap text-[13px] font-bold leading-6 text-[#343b48]">{value || "未設定"}</p>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function Timeline({ logs }: { logs: CustomerLogRecord[] }) {
   if (logs.length === 0) return <EmptyState title="ログはまだありません" body="テレアポ、商談、メール、フォローなどの活動ログを追加できます。" />;
   return (
@@ -545,9 +638,23 @@ function Timeline({ logs }: { logs: CustomerLogRecord[] }) {
   );
 }
 
-function NextActionHistory({ logs }: { logs: CustomerLogRecord[] }) {
+function CurrentNextAction({ actionTitle, actionDate }: { actionTitle: string; actionDate: Date | null }) {
+  if (!actionTitle && !actionDate) {
+    return <EmptyState title="現在の次回アクションはありません" body="次のアクションが決まったら、この下の入力欄から設定できます。" />;
+  }
+
+  return (
+    <div className="rounded-[12px] border border-[#f0c655] bg-[#fffaf0] px-4 py-3">
+      <div className="text-[12px] font-black text-[#8a6500]">現在のタスク</div>
+      <div className="mt-1 text-[15px] font-black leading-6 text-[#171717]">{actionTitle || "内容未設定"}</div>
+      <div className="mt-1 text-[12px] font-bold text-[#8a909b]">予定日: {formatDate(actionDate)}</div>
+    </div>
+  );
+}
+
+function CompletedActionHistory({ logs }: { logs: CustomerLogRecord[] }) {
   if (logs.length === 0) {
-    return <EmptyState title="次回アクション履歴はまだありません" body="次回アクションを更新すると、ここに過去分も残ります。" />;
+    return <EmptyState title="完了したアクションはまだありません" body="現在の次回アクションを完了すると、ここに履歴が残ります。" />;
   }
 
   return (
@@ -556,10 +663,10 @@ function NextActionHistory({ logs }: { logs: CustomerLogRecord[] }) {
         <div key={log.id} className="rounded-[12px] border border-[#eef1f5] bg-[#fcfcfd] px-4 py-3">
           <div className="flex flex-wrap items-start justify-between gap-2">
             <div>
-              <div className="text-[13px] font-black text-[#171717]">{stripNextActionLogPrefix(log.title) || "未設定"}</div>
-              <div className="mt-1 text-[12px] font-bold text-[#8a909b]">予定日: {formatDate(log.actionDate)}</div>
+              <div className="text-[13px] font-black text-[#171717]">{stripCompletedActionLogPrefix(log.title) || "未設定"}</div>
+              <div className="mt-1 text-[12px] font-bold text-[#8a909b]">完了日: {formatDate(log.actionDate ?? log.createdAt)}</div>
             </div>
-            <span className="rounded-full bg-[#fff3cf] px-3 py-1 text-[12px] font-black text-[#8a6500]">履歴</span>
+            <span className="rounded-full bg-[#edf7f0] px-3 py-1 text-[12px] font-black text-[#16834f]">完了</span>
           </div>
           {log.body ? <p className="mt-2 text-[12px] font-bold leading-6 text-[#596273]">{log.body}</p> : null}
         </div>
@@ -613,6 +720,64 @@ function TextField({ label, value, onChange, type = "text", required = false }: 
       <span className="text-[12px] font-black text-[#596273]">{label}</span>
       <input value={value} onChange={(event) => onChange(event.target.value)} type={type} required={required} className="mt-1 h-11 w-full rounded-[10px] border border-[#dfe4ec] px-3 text-[13px] font-bold text-[#343b48] outline-none focus:border-[#d7aa1f]" />
     </label>
+  );
+}
+
+function TextAreaField({ label, value, onChange }: { label: string; value: string; onChange: (value: string) => void }) {
+  return (
+    <label>
+      <span className="text-[12px] font-black text-[#596273]">{label}</span>
+      <textarea value={value} onChange={(event) => onChange(event.target.value)} className="mt-1 min-h-[92px] w-full resize-y rounded-[10px] border border-[#dfe4ec] px-3 py-3 text-[13px] font-bold text-[#343b48] outline-none focus:border-[#d7aa1f]" />
+    </label>
+  );
+}
+
+function CollaboratorSelect({
+  users,
+  currentUserId,
+  selectedIds,
+  onChange,
+}: {
+  users: AppUserProfile[];
+  currentUserId: string;
+  selectedIds: string[];
+  onChange: (selectedIds: string[]) => void;
+}) {
+  const candidates = users.filter((user) => user.uid !== currentUserId);
+  const toggleUser = (userId: string) => {
+    onChange(selectedIds.includes(userId) ? selectedIds.filter((id) => id !== userId) : [...selectedIds, userId]);
+  };
+
+  return (
+    <div className="rounded-[12px] border border-[#dfe4ec] bg-[#fcfcfd] px-3 py-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <span className="text-[12px] font-black text-[#596273]">共同担当・同行者</span>
+        <span className="text-[11px] font-bold text-[#8a909b]">{selectedIds.length > 0 ? `${selectedIds.length}名選択中` : "任意"}</span>
+      </div>
+      {candidates.length > 0 ? (
+        <div className="mt-3 flex flex-wrap gap-2">
+          {candidates.map((user) => {
+            const selected = selectedIds.includes(user.uid);
+            return (
+              <button
+                key={user.uid}
+                type="button"
+                onClick={() => toggleUser(user.uid)}
+                className={`rounded-full border px-3 py-1.5 text-[12px] font-black transition ${
+                  selected
+                    ? "border-[#f0c655] bg-[#ffd84d] text-[#171717]"
+                    : "border-[#e2e6ee] bg-white text-[#596273] hover:border-[#ead8a8]"
+                }`}
+              >
+                {user.name ?? user.email ?? "名前未設定"}
+              </button>
+            );
+          })}
+        </div>
+      ) : (
+        <p className="mt-2 text-[12px] font-bold text-[#8a909b]">選択できる他メンバーはいません。</p>
+      )}
+    </div>
   );
 }
 
@@ -684,6 +849,7 @@ function buildFormState(customer: CustomerRecord): CustomerFormState {
     email: customer.email,
     industry: customer.industry,
     employeeCount: customer.employeeCount?.toString() ?? "",
+    collaboratorUserIds: customer.collaboratorUserIds,
     productIds: customer.productIds,
     status: customer.status,
     temperature: customer.temperature,
@@ -692,6 +858,10 @@ function buildFormState(customer: CustomerRecord): CustomerFormState {
     nextActionTitle: customer.nextActionTitle,
     nextActionDate: toDateInputValue(customer.nextActionDate),
     lastContactDate: toDateInputValue(customer.lastContactDate),
+    firstTouchMemo: customer.firstTouchMemo,
+    customerContext: customer.customerContext,
+    salesDirection: customer.salesDirection,
+    handoffMemo: customer.handoffMemo,
     memo: customer.memo,
     contractStatus: customer.contractStatus,
     contractStartDate: toDateInputValue(customer.contractStartDate),
@@ -702,8 +872,14 @@ function buildFormState(customer: CustomerRecord): CustomerFormState {
   };
 }
 
-function buildCustomerInput(formState: CustomerFormState, products: KnowledgeProduct[], customer: CustomerRecord): SaveCustomerInput {
+function buildCustomerInput(formState: CustomerFormState, products: KnowledgeProduct[], salesUsers: AppUserProfile[], customer: CustomerRecord): SaveCustomerInput {
   const selectedProducts = products.filter((product) => formState.productIds.includes(product.id));
+  const selectedCollaborators = formState.collaboratorUserIds
+    .filter((userId) => userId !== customer.assignedUserId)
+    .map((userId) => {
+      const salesUser = salesUsers.find((profile) => profile.uid === userId);
+      return { id: userId, name: salesUser?.name ?? salesUser?.email ?? customer.collaboratorUserNames[customer.collaboratorUserIds.indexOf(userId)] ?? "未設定" };
+    });
   return {
     companyId: customer.companyId,
     companyName: formState.companyName.trim(),
@@ -714,6 +890,8 @@ function buildCustomerInput(formState: CustomerFormState, products: KnowledgePro
     employeeCount: readOptionalNumber(formState.employeeCount),
     assignedUserId: customer.assignedUserId,
     assignedUserName: customer.assignedUserName,
+    collaboratorUserIds: selectedCollaborators.map((collaborator) => collaborator.id),
+    collaboratorUserNames: selectedCollaborators.map((collaborator) => collaborator.name),
     productIds: selectedProducts.map((product) => product.id),
     productNames: selectedProducts.map((product) => product.name),
     status: formState.contractStatus === "contracted" ? "contracted" : formState.status,
@@ -723,6 +901,10 @@ function buildCustomerInput(formState: CustomerFormState, products: KnowledgePro
     nextActionTitle: formState.nextActionTitle.trim(),
     nextActionDate: readOptionalDate(formState.nextActionDate),
     lastContactDate: readOptionalDate(formState.lastContactDate),
+    firstTouchMemo: formState.firstTouchMemo.trim(),
+    customerContext: formState.customerContext.trim(),
+    salesDirection: formState.salesDirection.trim(),
+    handoffMemo: formState.handoffMemo.trim(),
     memo: formState.memo.trim(),
     isContracted: formState.contractStatus === "contracted",
     contractStatus: formState.contractStatus,
@@ -734,25 +916,34 @@ function buildCustomerInput(formState: CustomerFormState, products: KnowledgePro
   };
 }
 
-async function createNextActionLog({
+async function createCompletedActionLog({
   customer,
   createdBy,
-  title,
-  date,
+  completedDate,
+  memo,
+  nextTitle,
+  nextDate,
 }: {
   customer: CustomerRecord;
   createdBy: string;
-  title: string;
-  date: Date | null;
+  completedDate: Date;
+  memo: string;
+  nextTitle: string;
+  nextDate: Date | null;
 }) {
   await createCustomerLog({
     companyId: customer.companyId,
     customerId: customer.id,
     userId: customer.assignedUserId,
     type: "follow",
-    title: `${nextActionLogTitle}: ${title || "未設定"}`,
-    body: `次回アクション予定日: ${formatDate(date)}`,
-    actionDate: date,
+    title: `${completedActionLogTitle}: ${customer.nextActionTitle || "次回アクション"}`,
+    body: buildCompletedActionLogBody({
+      dueDate: customer.nextActionDate,
+      memo,
+      nextTitle,
+      nextDate,
+    }),
+    actionDate: completedDate,
     createdBy,
   });
 }
@@ -803,25 +994,17 @@ function readLogTypeLabel(type: CustomerLogType) {
   return logTypeOptions.find((option) => option.value === type)?.label ?? "メモ";
 }
 
-function isNextActionLog(log: CustomerLogRecord) {
-  return log.type === "follow" && log.title.startsWith(`${nextActionLogTitle}:`);
+function isCompletedActionLog(log: CustomerLogRecord) {
+  return log.type === "follow" && log.title.startsWith(`${completedActionLogTitle}:`);
 }
 
-function stripNextActionLogPrefix(title: string) {
-  return title.startsWith(`${nextActionLogTitle}:`) ? title.slice(`${nextActionLogTitle}:`.length).trim() : title;
+function stripCompletedActionLogPrefix(title: string) {
+  return title.startsWith(`${completedActionLogTitle}:`) ? title.slice(`${completedActionLogTitle}:`.length).trim() : title;
 }
 
 function formatDate(date: Date | null) {
   if (!date) return "未設定";
   return new Intl.DateTimeFormat("ja-JP", { year: "numeric", month: "2-digit", day: "2-digit" }).format(date);
-}
-
-function isSameDate(left: Date | null, right: Date | null) {
-  if (!left && !right) return true;
-  if (!left || !right) return false;
-  return left.getFullYear() === right.getFullYear()
-    && left.getMonth() === right.getMonth()
-    && left.getDate() === right.getDate();
 }
 
 function formatCurrency(value: number | null) {
@@ -834,6 +1017,29 @@ function toDateInputValue(date: Date | null) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
 }
 
+function getTodayInputValue() {
+  return toDateInputValue(new Date());
+}
+
+function buildCompletedActionLogBody({
+  dueDate,
+  memo,
+  nextTitle,
+  nextDate,
+}: {
+  dueDate: Date | null;
+  memo: string;
+  nextTitle: string;
+  nextDate: Date | null;
+}) {
+  return [
+    `元の予定日: ${formatDate(dueDate)}`,
+    memo ? `完了メモ: ${memo}` : "",
+    nextTitle ? `次のアクション: ${nextTitle}` : "次のアクション: 未設定",
+    nextTitle || nextDate ? `次の予定日: ${formatDate(nextDate)}` : "",
+  ].filter(Boolean).join("\n");
+}
+
 function readOptionalDate(value: string) {
   return value ? new Date(value) : null;
 }
@@ -842,4 +1048,36 @@ function readOptionalNumber(value: string) {
   if (!value) return null;
   const numberValue = Number(value);
   return Number.isFinite(numberValue) ? numberValue : null;
+}
+
+async function notifyCustomerMembers({
+  customer,
+  extraUserIds = [],
+  actorUserId,
+  actorName,
+  title,
+}: {
+  customer: CustomerRecord;
+  extraUserIds?: string[];
+  actorUserId: string;
+  actorName: string;
+  title: string;
+}) {
+  const targetUserIds = Array.from(new Set([customer.assignedUserId, ...customer.collaboratorUserIds, ...extraUserIds]))
+    .filter((userId) => userId && userId !== actorUserId);
+
+  await Promise.all(
+    targetUserIds.map((userId) =>
+      createAppNotification({
+        companyId: customer.companyId,
+        userId,
+        title,
+        body: `${actorName}さんが「${customer.companyName || "顧客カルテ"}」を更新しました。`,
+        href: `/sales/customers/${customer.id}`,
+        type: "customer_collaboration",
+        createdBy: actorUserId,
+        metadata: { customerId: customer.id },
+      }).catch(() => undefined),
+    ),
+  );
 }

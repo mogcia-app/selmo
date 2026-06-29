@@ -7,6 +7,7 @@ import { useMemo, useState } from "react";
 import { useEffect } from "react";
 
 import { useAuth } from "@/features/auth/auth-provider";
+import { subscribeToUserProfiles, type AppUserProfile } from "@/lib/firebase/auth";
 import {
   createCustomer,
   subscribeToCustomers,
@@ -18,6 +19,7 @@ import {
   type SaveCustomerInput,
 } from "@/lib/firebase/customers";
 import { subscribeToKnowledgeProducts, type KnowledgeProduct } from "@/lib/firebase/knowledge";
+import { createAppNotification } from "@/lib/firebase/notifications";
 
 const statusOptions: Array<{ value: CustomerStatus; label: string }> = [
   { value: "not_contacted", label: "未接触" },
@@ -51,6 +53,8 @@ const contractStatusOptions: Array<{ value: CustomerContractStatus; label: strin
   { value: "cancelled", label: "解約" },
 ];
 
+const customersPerPage = 9;
+
 type CustomerFormState = {
   companyName: string;
   contactName: string;
@@ -58,6 +62,7 @@ type CustomerFormState = {
   email: string;
   industry: string;
   employeeCount: string;
+  collaboratorUserIds: string[];
   productIds: string[];
   status: CustomerStatus;
   temperature: CustomerTemperature;
@@ -66,6 +71,10 @@ type CustomerFormState = {
   nextActionTitle: string;
   nextActionDate: string;
   lastContactDate: string;
+  firstTouchMemo: string;
+  customerContext: string;
+  salesDirection: string;
+  handoffMemo: string;
   memo: string;
   contractStatus: CustomerContractStatus;
   contractStartDate: string;
@@ -82,6 +91,7 @@ const initialFormState: CustomerFormState = {
   email: "",
   industry: "",
   employeeCount: "",
+  collaboratorUserIds: [],
   productIds: [],
   status: "not_contacted",
   temperature: "middle",
@@ -90,6 +100,10 @@ const initialFormState: CustomerFormState = {
   nextActionTitle: "",
   nextActionDate: "",
   lastContactDate: "",
+  firstTouchMemo: "",
+  customerContext: "",
+  salesDirection: "",
+  handoffMemo: "",
   memo: "",
   contractStatus: "not_contracted",
   contractStartDate: "",
@@ -104,6 +118,7 @@ export default function SalesCustomersPage() {
   const { profile } = useAuth();
   const [customers, setCustomers] = useState<CustomerRecord[]>([]);
   const [products, setProducts] = useState<KnowledgeProduct[]>([]);
+  const [salesUsers, setSalesUsers] = useState<AppUserProfile[]>([]);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [isCreating, setIsCreating] = useState(false);
@@ -111,7 +126,7 @@ export default function SalesCustomersPage() {
   const [formState, setFormState] = useState<CustomerFormState>(initialFormState);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<"all" | CustomerStatus>("all");
-  const [ownerFilter, setOwnerFilter] = useState("all");
+  const [currentPage, setCurrentPage] = useState(1);
 
   useEffect(() => {
     if (!profile?.companyId || !profile.uid) {
@@ -129,20 +144,23 @@ export default function SalesCustomersPage() {
   useEffect(() => {
     if (!profile?.companyId) {
       setProducts([]);
+      setSalesUsers([]);
       return;
     }
-    return subscribeToKnowledgeProducts(
-      profile.companyId,
-      setProducts,
-      (nextError: FirebaseError) => setErrorMessage(nextError.message),
-    );
+    const unsubscribers = [
+      subscribeToKnowledgeProducts(
+        profile.companyId,
+        setProducts,
+        (nextError: FirebaseError) => setErrorMessage(nextError.message),
+      ),
+      subscribeToUserProfiles(
+        (profiles) => setSalesUsers(profiles.filter((user) => user.role === "sales" && user.status === "active")),
+        (nextError: FirebaseError) => setErrorMessage(nextError.message),
+        profile.companyId,
+      ),
+    ];
+    return () => unsubscribers.forEach((unsubscribe) => unsubscribe());
   }, [profile?.companyId]);
-
-  const owners = useMemo(() => {
-    const rows = new Map<string, string>();
-    customers.forEach((customer) => rows.set(customer.assignedUserId, customer.assignedUserName || "未設定"));
-    return Array.from(rows.entries()).map(([id, name]) => ({ id, name }));
-  }, [customers]);
 
   const filteredCustomers = useMemo(() => {
     const normalizedSearch = search.trim().toLowerCase();
@@ -157,10 +175,19 @@ export default function SalesCustomersPage() {
         customer.nextActionTitle,
       ].some((value) => value.toLowerCase().includes(normalizedSearch));
       const matchesStatus = statusFilter === "all" || customer.status === statusFilter;
-      const matchesOwner = ownerFilter === "all" || customer.assignedUserId === ownerFilter;
-      return matchesSearch && matchesStatus && matchesOwner;
+      return matchesSearch && matchesStatus;
     });
-  }, [customers, ownerFilter, search, statusFilter]);
+  }, [customers, search, statusFilter]);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [search, statusFilter]);
+
+  const pageCount = Math.max(1, Math.ceil(filteredCustomers.length / customersPerPage));
+  const displayPage = Math.min(currentPage, pageCount);
+  const visibleCustomers = useMemo(() => {
+    return filteredCustomers.slice((displayPage - 1) * customersPerPage, displayPage * customersPerPage);
+  }, [displayPage, filteredCustomers]);
 
   const contractedCount = customers.filter((customer) => customer.isContracted || customer.status === "contracted").length;
   const overdueCount = customers.filter(isActionOverdue).length;
@@ -183,11 +210,20 @@ export default function SalesCustomersPage() {
 
     setIsCreating(true);
     try {
-      const customerId = await createCustomer(buildCustomerInput(formState, products, {
+      const customerId = await createCustomer(buildCustomerInput(formState, products, salesUsers, {
         companyId: profile.companyId,
         userId: profile.uid,
         userName: profile.name ?? profile.email ?? "未設定",
       }));
+      await notifyCustomerCollaborators({
+        companyId: profile.companyId,
+        customerId,
+        customerName: formState.companyName.trim(),
+        collaboratorUserIds: formState.collaboratorUserIds,
+        actorUserId: profile.uid,
+        actorName: profile.name ?? profile.email ?? "担当者",
+        title: "顧客カルテの共同担当に追加されました",
+      });
       setFormState(initialFormState);
       setShowCreateForm(false);
       setSuccessMessage("顧客カルテを追加しました。");
@@ -239,17 +275,19 @@ export default function SalesCustomersPage() {
               submitLabel={isCreating ? "追加中" : "顧客カルテを作成"}
               disabled={isCreating}
               products={products}
+              salesUsers={salesUsers}
+              currentUserId={profile?.uid ?? ""}
             />
           </section>
         ) : null}
 
         <section className="mt-5 rounded-[16px] border border-[#e4e8ef] bg-white shadow-[0_8px_22px_rgba(17,24,39,0.05)]">
-          <div className="grid gap-3 border-b border-[#eef1f5] px-4 py-4 lg:grid-cols-[minmax(0,1fr)_180px_180px]">
+          <div className="grid gap-3 border-b border-[#eef1f5] px-4 py-4 lg:grid-cols-[minmax(0,1fr)_180px]">
             <input
               value={search}
               onChange={(event) => setSearch(event.target.value)}
               className="h-11 rounded-[10px] border border-[#dfe4ec] bg-white px-3 text-[13px] font-bold text-[#343b48] outline-none focus:border-[#d7aa1f]"
-              placeholder="会社名・担当者名・次回アクションで検索"
+              placeholder="会社名・先方担当者名・次回アクションで検索"
             />
             <select
               value={statusFilter}
@@ -259,62 +297,23 @@ export default function SalesCustomersPage() {
               <option value="all">全ステータス</option>
               {statusOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
             </select>
-            <select
-              value={ownerFilter}
-              onChange={(event) => setOwnerFilter(event.target.value)}
-              className="h-11 rounded-[10px] border border-[#dfe4ec] bg-white px-3 text-[13px] font-bold text-[#343b48] outline-none focus:border-[#d7aa1f]"
-            >
-              <option value="all">全担当者</option>
-              {owners.map((owner) => <option key={owner.id} value={owner.id}>{owner.name}</option>)}
-            </select>
           </div>
 
           {filteredCustomers.length > 0 ? (
-            <div className="overflow-x-auto">
-              <table className="w-full min-w-[1240px] text-left">
-                <thead className="bg-[#fcfcfd]">
-                  <tr className="border-b border-[#eef1f5] text-[12px] text-[#7a808c]">
-                    <th className="px-4 py-3 font-bold">顧客名/会社名</th>
-                    <th className="px-4 py-3 font-bold">商材</th>
-                    <th className="px-4 py-3 font-bold">担当営業マン</th>
-                    <th className="px-4 py-3 font-bold">ステータス</th>
-                    <th className="px-4 py-3 font-bold">温度感</th>
-                    <th className="px-4 py-3 font-bold">最終接触日</th>
-                    <th className="px-4 py-3 font-bold">次回アクション</th>
-                    <th className="px-4 py-3 font-bold">契約状況</th>
-                    <th className="px-4 py-3 font-bold"></th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filteredCustomers.map((customer) => (
-                    <tr key={customer.id} className={`border-b border-[#f0f2f6] last:border-b-0 ${isActionOverdue(customer) ? "bg-[#fff8f8]" : "bg-white"}`}>
-                      <td className="px-4 py-4">
-                        <div className="text-[14px] font-black text-[#171717]">{customer.companyName}</div>
-                        <div className="mt-1 text-[12px] font-bold text-[#8a909b]">{customer.contactName || "担当者未設定"}</div>
-                      </td>
-                      <td className="px-4 py-4">
-                        <ProductNameList names={customer.productNames} />
-                      </td>
-                      <td className="px-4 py-4 text-[13px] font-bold text-[#596273]">{customer.assignedUserName || "未設定"}</td>
-                      <td className="px-4 py-4"><CustomerStatusBadge status={customer.status} /></td>
-                      <td className="px-4 py-4"><TemperatureBadge temperature={customer.temperature} /></td>
-                      <td className="px-4 py-4 text-[13px] font-bold text-[#596273]">{formatDate(customer.lastContactDate)}</td>
-                      <td className="px-4 py-4">
-                        <div className={`text-[13px] font-black ${isActionOverdue(customer) ? "text-[#d63c2f]" : "text-[#343b48]"}`}>{customer.nextActionTitle || "未設定"}</div>
-                        <div className="mt-1 text-[12px] font-bold text-[#8a909b]">{formatDate(customer.nextActionDate)}</div>
-                      </td>
-                      <td className="px-4 py-4">
-                        <ContractStatusBadge status={customer.contractStatus} />
-                      </td>
-                      <td className="px-4 py-4 text-right">
-                        <Link href={`/sales/customers/${customer.id}`} className="rounded-[10px] border border-[#ead8a8] bg-[#fffaf0] px-3 py-2 text-[12px] font-black text-[#8a6500] transition hover:bg-[#fff3cd]">
-                          詳細
-                        </Link>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+            <div className="px-4 py-4">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div className="text-[12px] font-bold text-[#8a909b]">
+                  {filteredCustomers.length}件中 {(displayPage - 1) * customersPerPage + 1}-{Math.min(displayPage * customersPerPage, filteredCustomers.length)}件を表示
+                </div>
+              </div>
+              <div className="mt-4 grid gap-4 lg:grid-cols-3 md:grid-cols-2">
+                {visibleCustomers.map((customer) => (
+                  <CustomerCard key={customer.id} customer={customer} />
+                ))}
+              </div>
+              {pageCount > 1 ? (
+                <Pagination currentPage={displayPage} pageCount={pageCount} onChange={setCurrentPage} />
+              ) : null}
             </div>
           ) : (
             <EmptyState title="顧客カルテはまだありません" body="新規顧客を追加すると、次回アクションや契約状況を一覧で管理できます。" />
@@ -332,6 +331,8 @@ function CustomerForm({
   submitLabel,
   disabled,
   products,
+  salesUsers,
+  currentUserId,
 }: {
   formState: CustomerFormState;
   onChange: (state: CustomerFormState) => void;
@@ -339,6 +340,8 @@ function CustomerForm({
   submitLabel: string;
   disabled?: boolean;
   products: KnowledgeProduct[];
+  salesUsers: AppUserProfile[];
+  currentUserId: string;
 }) {
   const setField = <Key extends keyof CustomerFormState>(key: Key, value: CustomerFormState[Key]) => {
     onChange({ ...formState, [key]: value });
@@ -348,12 +351,19 @@ function CustomerForm({
     <form onSubmit={onSubmit} className="mt-4 grid gap-4">
       <div className="grid gap-4 md:grid-cols-3">
         <TextField label="会社名" value={formState.companyName} onChange={(value) => setField("companyName", value)} required />
-        <TextField label="担当者名" value={formState.contactName} onChange={(value) => setField("contactName", value)} />
+        <TextField label="先方担当者名" value={formState.contactName} onChange={(value) => setField("contactName", value)} />
         <TextField label="電話番号" value={formState.phone} onChange={(value) => setField("phone", value)} />
         <TextField label="メールアドレス" value={formState.email} onChange={(value) => setField("email", value)} />
         <TextField label="業種" value={formState.industry} onChange={(value) => setField("industry", value)} />
         <TextField label="従業員数" value={formState.employeeCount} onChange={(value) => setField("employeeCount", value)} type="number" />
       </div>
+
+      <CollaboratorSelect
+        users={salesUsers}
+        currentUserId={currentUserId}
+        selectedIds={formState.collaboratorUserIds}
+        onChange={(collaboratorUserIds) => setField("collaboratorUserIds", collaboratorUserIds)}
+      />
 
       <ProductSelect
         products={products}
@@ -372,6 +382,13 @@ function CustomerForm({
         <TextField label="次回アクション内容" value={formState.nextActionTitle} onChange={(value) => setField("nextActionTitle", value)} />
         <TextField label="次回アクション日" value={formState.nextActionDate} onChange={(value) => setField("nextActionDate", value)} type="date" />
         <TextField label="最終接触日" value={formState.lastContactDate} onChange={(value) => setField("lastContactDate", value)} type="date" />
+      </div>
+
+      <div className="grid gap-4 md:grid-cols-2">
+        <TextAreaField label="初回接点・背景" value={formState.firstTouchMemo} onChange={(value) => setField("firstTouchMemo", value)} />
+        <TextAreaField label="顧客像・課題" value={formState.customerContext} onChange={(value) => setField("customerContext", value)} />
+        <TextAreaField label="今後の方針" value={formState.salesDirection} onChange={(value) => setField("salesDirection", value)} />
+        <TextAreaField label="引き継ぎメモ" value={formState.handoffMemo} onChange={(value) => setField("handoffMemo", value)} />
       </div>
 
       <div className="grid gap-4 md:grid-cols-5">
@@ -403,8 +420,14 @@ function CustomerForm({
   );
 }
 
-function buildCustomerInput(formState: CustomerFormState, products: KnowledgeProduct[], user: { companyId: string; userId: string; userName: string }): SaveCustomerInput {
+function buildCustomerInput(formState: CustomerFormState, products: KnowledgeProduct[], salesUsers: AppUserProfile[], user: { companyId: string; userId: string; userName: string }): SaveCustomerInput {
   const selectedProducts = products.filter((product) => formState.productIds.includes(product.id));
+  const selectedCollaborators = formState.collaboratorUserIds
+    .filter((userId) => userId !== user.userId)
+    .map((userId) => {
+      const salesUser = salesUsers.find((profile) => profile.uid === userId);
+      return { id: userId, name: salesUser?.name ?? salesUser?.email ?? "未設定" };
+    });
   return {
     companyId: user.companyId,
     companyName: formState.companyName.trim(),
@@ -415,6 +438,8 @@ function buildCustomerInput(formState: CustomerFormState, products: KnowledgePro
     employeeCount: readOptionalNumber(formState.employeeCount),
     assignedUserId: user.userId,
     assignedUserName: user.userName,
+    collaboratorUserIds: selectedCollaborators.map((collaborator) => collaborator.id),
+    collaboratorUserNames: selectedCollaborators.map((collaborator) => collaborator.name),
     productIds: selectedProducts.map((product) => product.id),
     productNames: selectedProducts.map((product) => product.name),
     status: formState.contractStatus === "contracted" ? "contracted" : formState.status,
@@ -424,6 +449,10 @@ function buildCustomerInput(formState: CustomerFormState, products: KnowledgePro
     nextActionTitle: formState.nextActionTitle.trim(),
     nextActionDate: readOptionalDate(formState.nextActionDate),
     lastContactDate: readOptionalDate(formState.lastContactDate),
+    firstTouchMemo: formState.firstTouchMemo.trim(),
+    customerContext: formState.customerContext.trim(),
+    salesDirection: formState.salesDirection.trim(),
+    handoffMemo: formState.handoffMemo.trim(),
     memo: formState.memo.trim(),
     isContracted: formState.contractStatus === "contracted",
     contractStatus: formState.contractStatus,
@@ -475,6 +504,68 @@ function TextField({ label, value, onChange, type = "text", required = false }: 
   );
 }
 
+function TextAreaField({ label, value, onChange }: { label: string; value: string; onChange: (value: string) => void }) {
+  return (
+    <label>
+      <span className="text-[12px] font-black text-[#596273]">{label}</span>
+      <textarea
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        className="mt-1 min-h-[92px] w-full resize-y rounded-[10px] border border-[#dfe4ec] px-3 py-3 text-[13px] font-bold text-[#343b48] outline-none focus:border-[#d7aa1f]"
+      />
+    </label>
+  );
+}
+
+function CollaboratorSelect({
+  users,
+  currentUserId,
+  selectedIds,
+  onChange,
+}: {
+  users: AppUserProfile[];
+  currentUserId: string;
+  selectedIds: string[];
+  onChange: (selectedIds: string[]) => void;
+}) {
+  const candidates = users.filter((user) => user.uid !== currentUserId);
+  const toggleUser = (userId: string) => {
+    onChange(selectedIds.includes(userId) ? selectedIds.filter((id) => id !== userId) : [...selectedIds, userId]);
+  };
+
+  return (
+    <div className="rounded-[12px] border border-[#dfe4ec] bg-[#fcfcfd] px-3 py-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <span className="text-[12px] font-black text-[#596273]">共同担当・同行者</span>
+        <span className="text-[11px] font-bold text-[#8a909b]">{selectedIds.length > 0 ? `${selectedIds.length}名選択中` : "任意"}</span>
+      </div>
+      {candidates.length > 0 ? (
+        <div className="mt-3 flex flex-wrap gap-2">
+          {candidates.map((user) => {
+            const selected = selectedIds.includes(user.uid);
+            return (
+              <button
+                key={user.uid}
+                type="button"
+                onClick={() => toggleUser(user.uid)}
+                className={`rounded-full border px-3 py-1.5 text-[12px] font-black transition ${
+                  selected
+                    ? "border-[#f0c655] bg-[#ffd84d] text-[#171717]"
+                    : "border-[#e2e6ee] bg-white text-[#596273] hover:border-[#ead8a8]"
+                }`}
+              >
+                {user.name ?? user.email ?? "名前未設定"}
+              </button>
+            );
+          })}
+        </div>
+      ) : (
+        <p className="mt-2 text-[12px] font-bold text-[#8a909b]">選択できる他メンバーはいません。</p>
+      )}
+    </div>
+  );
+}
+
 function SelectField({ label, value, options, onChange }: { label: string; value: string; options: Array<{ value: string; label: string }>; onChange: (value: string) => void }) {
   return (
     <label>
@@ -503,6 +594,85 @@ function CustomerStatusBadge({ status }: { status: CustomerStatus }) {
   return <span className={`rounded-full px-3 py-1 text-[12px] font-black ${className}`}>{label}</span>;
 }
 
+function CustomerCard({ customer }: { customer: CustomerRecord }) {
+  const overdue = isActionOverdue(customer);
+  const story = customer.customerContext || customer.salesDirection || customer.firstTouchMemo || customer.memo;
+
+  return (
+    <article className={`flex min-h-[330px] flex-col rounded-[16px] border bg-white p-4 shadow-[0_6px_16px_rgba(17,24,39,0.04)] ${overdue ? "border-[#f4d4d4] bg-[#fffafa]" : "border-[#e4e8ef]"}`}>
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <h3 className="truncate text-[16px] font-black text-[#171717]">{customer.companyName || "会社名未設定"}</h3>
+          <p className="mt-1 truncate text-[12px] font-bold text-[#8a909b]">{customer.contactName || "先方担当者未設定"}</p>
+          {customer.collaboratorUserNames.length > 0 ? (
+            <p className="mt-1 truncate text-[12px] font-bold text-[#8a6500]">共同: {customer.collaboratorUserNames.join(" / ")}</p>
+          ) : null}
+        </div>
+        <CustomerStatusBadge status={customer.status} />
+      </div>
+
+      <div className="mt-3 flex flex-wrap gap-2">
+        <TemperatureBadge temperature={customer.temperature} />
+        <ContractStatusBadge status={customer.contractStatus} />
+      </div>
+
+      <div className="mt-4 rounded-[12px] border border-[#eef1f5] bg-[#fcfcfd] px-3 py-3">
+        <div className="text-[11px] font-black uppercase tracking-[0.12em] text-[#8a909b]">Next Action</div>
+        <div className={`mt-1 line-clamp-2 text-[13px] font-black leading-6 ${overdue ? "text-[#d63c2f]" : "text-[#343b48]"}`}>
+          {customer.nextActionTitle || "未設定"}
+        </div>
+        <div className="mt-1 text-[12px] font-bold text-[#8a909b]">{formatDate(customer.nextActionDate)}</div>
+      </div>
+
+      <div className="mt-3 grid grid-cols-3 gap-2">
+        <CardMiniInfo label="商材" value={customer.productNames.length > 0 ? customer.productNames.join(" / ") : "未設定"} />
+        <CardMiniInfo label="最終接触" value={formatDate(customer.lastContactDate)} />
+        <CardMiniInfo label="見込み" value={formatCurrency(customer.expectedAmount)} />
+      </div>
+
+      <p className="mt-3 line-clamp-3 min-h-[60px] rounded-[12px] bg-[#fcfcfd] px-3 py-2 text-[12px] font-bold leading-5 text-[#596273]">
+        {story || "顧客メモはまだありません"}
+      </p>
+
+      <div className="mt-auto flex justify-end pt-4">
+        <Link href={`/sales/customers/${customer.id}`} className="rounded-[10px] border border-[#ead8a8] bg-[#fffaf0] px-3 py-2 text-[12px] font-black text-[#8a6500] transition hover:bg-[#fff3cd]">
+          詳細
+        </Link>
+      </div>
+    </article>
+  );
+}
+
+function CardMiniInfo({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="min-w-0 rounded-[10px] bg-[#f6f7f9] px-3 py-2">
+      <div className="text-[11px] font-bold text-[#8a909b]">{label}</div>
+      <div className="mt-1 truncate text-[12px] font-black text-[#343b48]">{value}</div>
+    </div>
+  );
+}
+
+function Pagination({ currentPage, pageCount, onChange }: { currentPage: number; pageCount: number; onChange: (page: number) => void }) {
+  return (
+    <nav className="mt-5 flex flex-wrap items-center justify-center gap-2">
+      {Array.from({ length: pageCount }, (_, index) => index + 1).map((page) => (
+        <button
+          key={page}
+          type="button"
+          onClick={() => onChange(page)}
+          className={`h-9 min-w-9 rounded-[10px] border px-3 text-[13px] font-black transition ${
+            page === currentPage
+              ? "border-[#f0c655] bg-[#ffd84d] text-[#171717]"
+              : "border-[#e2e6ee] bg-white text-[#596273] hover:border-[#ead8a8] hover:bg-[#fffaf0]"
+          }`}
+        >
+          {page}
+        </button>
+      ))}
+    </nav>
+  );
+}
+
 function TemperatureBadge({ temperature }: { temperature: CustomerTemperature }) {
   const label = temperatureOptions.find((option) => option.value === temperature)?.label ?? "中";
   const className =
@@ -512,25 +682,6 @@ function TemperatureBadge({ temperature }: { temperature: CustomerTemperature })
         ? "bg-[#fff3cf] text-[#8a6500]"
         : "bg-[#eef6ff] text-[#2672d9]";
   return <span className={`rounded-full px-3 py-1 text-[12px] font-black ${className}`}>{label}</span>;
-}
-
-function ProductNameList({ names }: { names: string[] }) {
-  if (names.length === 0) {
-    return <span className="text-[12px] font-bold text-[#8a909b]">未設定</span>;
-  }
-
-  return (
-    <div className="flex max-w-[220px] flex-wrap gap-1.5">
-      {names.slice(0, 3).map((name) => (
-        <span key={name} className="rounded-full bg-[#fffaf0] px-2.5 py-1 text-[11px] font-black text-[#8a6500]">
-          {name}
-        </span>
-      ))}
-      {names.length > 3 ? (
-        <span className="rounded-full bg-[#f1f2f5] px-2.5 py-1 text-[11px] font-black text-[#596273]">+{names.length - 3}</span>
-      ) : null}
-    </div>
-  );
 }
 
 function ContractStatusBadge({ status }: { status: CustomerContractStatus }) {
@@ -590,6 +741,11 @@ function formatDate(date: Date | null) {
   return new Intl.DateTimeFormat("ja-JP", { year: "numeric", month: "2-digit", day: "2-digit" }).format(date);
 }
 
+function formatCurrency(value: number | null) {
+  if (value === null) return "未設定";
+  return new Intl.NumberFormat("ja-JP", { style: "currency", currency: "JPY", maximumFractionDigits: 0 }).format(value);
+}
+
 function readOptionalDate(value: string) {
   return value ? new Date(value) : null;
 }
@@ -598,4 +754,38 @@ function readOptionalNumber(value: string) {
   if (!value) return null;
   const numberValue = Number(value);
   return Number.isFinite(numberValue) ? numberValue : null;
+}
+
+async function notifyCustomerCollaborators({
+  companyId,
+  customerId,
+  customerName,
+  collaboratorUserIds,
+  actorUserId,
+  actorName,
+  title,
+}: {
+  companyId: string;
+  customerId: string;
+  customerName: string;
+  collaboratorUserIds: string[];
+  actorUserId: string;
+  actorName: string;
+  title: string;
+}) {
+  const targetUserIds = Array.from(new Set(collaboratorUserIds)).filter((userId) => userId && userId !== actorUserId);
+  await Promise.all(
+    targetUserIds.map((userId) =>
+      createAppNotification({
+        companyId,
+        userId,
+        title,
+        body: `${actorName}さんが「${customerName || "顧客カルテ"}」を更新しました。`,
+        href: `/sales/customers/${customerId}`,
+        type: "customer_collaboration",
+        createdBy: actorUserId,
+        metadata: { customerId },
+      }).catch(() => undefined),
+    ),
+  );
 }
