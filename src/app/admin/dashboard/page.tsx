@@ -30,6 +30,11 @@ import {
   type RoleplayResult,
 } from "@/lib/firebase/roleplay";
 
+const SELMO_OPERATION_ACTOR = {
+  name: "selmo.運営",
+  avatarUrl: "/nini.png",
+};
+
 export default function AdminDashboardPage() {
   const { profile } = useAuth();
   const [users, setUsers] = useState<AppUserProfile[]>([]);
@@ -580,6 +585,18 @@ function MemberAvatar({ name, avatarUrl, size }: { name: string; avatarUrl: stri
   );
 }
 
+function TimelineActorAvatar({ name, avatarUrl }: { name: string; avatarUrl: string | null }) {
+  if (avatarUrl) {
+    return <Image src={avatarUrl} alt="" width={28} height={28} className="h-7 w-7 shrink-0 rounded-full bg-white object-cover" />;
+  }
+
+  return (
+    <span className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[#fff3cf] text-[12px] font-black text-[#8a6500]">
+      {name.slice(0, 1)}
+    </span>
+  );
+}
+
 function PriorityBadge({ priority }: { priority: "high" | "medium" | "low" }) {
   const label = priority === "high" ? "優先対応" : priority === "medium" ? "要確認" : "通常";
   const className =
@@ -771,6 +788,8 @@ function TrendBars({ rows }: { rows: Array<{ label: string; meetingCount: number
 type ActivityTimelineRow = {
   id: string;
   userId: string | null;
+  actorName: string | null;
+  actorAvatarUrl: string | null;
   type: SalesActivityType | "knowledge_updated";
   title: string;
   summary: string;
@@ -792,6 +811,8 @@ function RecentActivityCard({
     ...events.map((event) => ({
       id: event.id,
       userId: event.userId,
+      actorName: null,
+      actorAvatarUrl: null,
       type: event.type,
       title: event.title,
       summary: event.summary,
@@ -803,6 +824,8 @@ function RecentActivityCard({
       .map((item) => ({
         id: `knowledge-${item.id}`,
         userId: item.ownerId,
+        actorName: item.ownerId ? null : SELMO_OPERATION_ACTOR.name,
+        actorAvatarUrl: item.ownerId ? null : SELMO_OPERATION_ACTOR.avatarUrl,
         type: "knowledge_updated" as const,
         title: "ナレッジ更新",
         summary: item.title,
@@ -842,13 +865,13 @@ function RecentActivityCard({
           {latestRows.length > 0 ? (
             latestRows.map((event) => {
               const user = event.userId ? userById.get(event.userId) : null;
+              const actorName = event.actorName ?? user?.name ?? "未設定の営業";
+              const actorAvatarUrl = event.actorAvatarUrl ?? user?.avatarUrl ?? null;
               const content = (
                 <div className="grid min-w-[860px] grid-cols-[170px_112px_minmax(0,1fr)_128px_64px] items-center gap-3 border-b border-[#f0f2f6] px-4 py-2.5 transition last:border-b-0 hover:bg-white">
                   <div className="flex min-w-0 items-center gap-2">
-                    <span className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[#fff3cf] text-[12px] font-black text-[#8a6500]">
-                      {(user?.name ?? "?").slice(0, 1)}
-                    </span>
-                    <div className="min-w-0 truncate text-[12px] font-black text-[#171717]">{user?.name ?? "未設定の営業"}</div>
+                    <TimelineActorAvatar name={actorName} avatarUrl={actorAvatarUrl} />
+                    <div className="min-w-0 truncate text-[12px] font-black text-[#171717]">{actorName}</div>
                   </div>
                   <div className="min-w-0">
                     <ActivityTypeBadge type={event.type} />
