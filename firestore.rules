@@ -54,6 +54,14 @@ service cloud.firestore {
       return value == 60 || value == 120 || value == 180 || value == 240;
     }
 
+    function isValidMonthlyAiQuota(quota) {
+      return quota is number && quota >= 0;
+    }
+
+    function isValidOptionalMonthlyAiQuota(quota) {
+      return quota == null || isValidMonthlyAiQuota(quota);
+    }
+
     function sameCompany(companyId) {
       return isSignedIn() && companyId is string && companyId == currentCompanyId();
     }
@@ -178,11 +186,19 @@ service cloud.firestore {
         && request.resource.data.companyName is string
         && isValidCompanyPlan(request.resource.data.plan)
         && isValidCompanyStatus(request.resource.data.status)
+        && (!("monthlyTranscriptionQuota" in request.resource.data)
+          || isValidMonthlyAiQuota(request.resource.data.monthlyTranscriptionQuota))
+        && (!("monthlyRoleplayQuota" in request.resource.data)
+          || isValidMonthlyAiQuota(request.resource.data.monthlyRoleplayQuota))
         && (!("uploadDurationLimitMinutes" in request.resource.data) || isValidUploadDurationLimitMinutes(request.resource.data.uploadDurationLimitMinutes));
       allow update: if (
           isOwnerRole()
           && (!("plan" in request.resource.data) || isValidCompanyPlan(request.resource.data.plan))
           && (!("status" in request.resource.data) || isValidCompanyStatus(request.resource.data.status))
+          && (!("monthlyTranscriptionQuota" in request.resource.data)
+            || isValidOptionalMonthlyAiQuota(request.resource.data.monthlyTranscriptionQuota))
+          && (!("monthlyRoleplayQuota" in request.resource.data)
+            || isValidOptionalMonthlyAiQuota(request.resource.data.monthlyRoleplayQuota))
           && (!("uploadDurationLimitMinutes" in request.resource.data) || isValidUploadDurationLimitMinutes(request.resource.data.uploadDurationLimitMinutes))
         )
         || (
@@ -223,6 +239,12 @@ service cloud.firestore {
         );
       allow update: if isOwnerRole()
         || isAdminUserCoachingUpdate()
+        || (
+          isAdminRole()
+          && sameCompany(resource.data.companyId)
+          && request.resource.data.companyId == resource.data.companyId
+          && request.resource.data.role != "owner"
+        )
         || (
           isSelf(userId)
           && request.resource.data.companyId == resource.data.companyId
@@ -488,10 +510,56 @@ service cloud.firestore {
       allow delete: if false;
     }
 
+    match /loginEvents/{eventId} {
+      allow read: if isOwnerRole();
+      allow create: if request.resource.data.email is string
+        && request.resource.data.status in ["success", "failed"]
+        && request.resource.data.createdAt is timestamp
+        && (
+          (
+            request.resource.data.status == "failed"
+            && request.resource.data.uid == null
+          )
+          || (
+            isSignedIn()
+            && request.resource.data.status == "success"
+            && request.resource.data.uid == request.auth.uid
+          )
+        );
+      allow update, delete: if false;
+    }
+
+    match /adminAuditLogs/{logId} {
+      allow read: if isOwnerRole()
+        || (
+          isAdminRole()
+          && (
+            resource.data.actorId == request.auth.uid
+            || sameCompany(resource.data.companyId)
+          )
+        );
+      allow create: if (isOwnerRole() || isAdminRole())
+        && request.resource.data.actorId == request.auth.uid
+        && request.resource.data.action is string
+        && request.resource.data.targetType is string
+        && request.resource.data.targetId is string
+        && request.resource.data.createdAt is timestamp
+        && (
+          isOwnerRole()
+          || sameCompany(request.resource.data.companyId)
+        );
+      allow update, delete: if false;
+    }
+
     match /aiUsageLogs/{logId} {
       allow read: if isOwnerRole() || canReadCompanyData(resource.data.companyId);
-      allow create: if false;
+      allow create: if isOwnerRole() || (isSignedIn() && sameCompany(request.resource.data.companyId));
       allow update, delete: if false;
+    }
+
+    match /aiChargeEvents/{eventId} {
+      allow read, create, update: if isOwnerRole();
+      allow delete: if false;
     }
 
     match /emailEvents/{eventId} {
