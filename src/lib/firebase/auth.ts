@@ -4,6 +4,7 @@ import {
   createUserWithEmailAndPassword,
   inMemoryPersistence,
   onAuthStateChanged,
+  sendPasswordResetEmail,
   setPersistence,
   signInWithEmailAndPassword,
   signOut,
@@ -107,6 +108,11 @@ export async function signInWithEmail(email: string, password: string) {
     credential,
     profile,
   };
+}
+
+export async function sendPasswordReset(email: string) {
+  const { firebaseAuth } = assertFirebaseClient();
+  await sendPasswordResetEmail(firebaseAuth, email);
 }
 
 export async function registerUser({

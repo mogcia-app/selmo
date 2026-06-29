@@ -7,11 +7,13 @@ import { useEffect, useState } from "react";
 
 import { useAuth } from "@/features/auth/auth-provider";
 import { getRoleHomePath } from "@/features/auth/role-routing";
+import { sendPasswordReset } from "@/lib/firebase/auth";
 import type { UserRole } from "@/types/domain";
 
 const errorMessageMap: Record<string, string> = {
   "auth/invalid-credential": "メールアドレスまたはパスワードが正しくありません。",
   "auth/invalid-email": "メールアドレスの形式が正しくありません。",
+  "auth/user-not-found": "入力されたメールアドレス宛に再設定メールを送信しました。メールをご確認ください。",
   "auth/too-many-requests": "ログイン試行が多すぎます。少し待ってから再度お試しください。",
 };
 
@@ -27,7 +29,9 @@ export function LoginForm({
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isSendingReset, setIsSendingReset] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [noticeMessage, setNoticeMessage] = useState<string | null>(null);
   const isAdmin = variant === "admin";
   const refreshReason = searchParams.get("reason");
   const shouldShowRefreshNotice = refreshReason === "auth-timeout" || refreshReason === "session-expired";
@@ -50,6 +54,7 @@ export function LoginForm({
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setErrorMessage(null);
+    setNoticeMessage(null);
 
     if (!isFirebaseReady) {
       setErrorMessage(
@@ -85,6 +90,42 @@ export function LoginForm({
       setErrorMessage("ログインに失敗しました。時間を置いて再度お試しください。");
     } finally {
       setIsSubmitting(false);
+    }
+  }
+
+  async function handlePasswordReset() {
+    setErrorMessage(null);
+    setNoticeMessage(null);
+
+    const normalizedEmail = email.trim();
+    if (!normalizedEmail) {
+      setErrorMessage("パスワード再設定メールを送るため、メールアドレスを入力してください。");
+      return;
+    }
+
+    if (!isFirebaseReady) {
+      setErrorMessage(
+        `${firebaseError ?? "Firebase environment variables are missing."} Please set ${missingEnvKeys.join(", ")}.`,
+      );
+      return;
+    }
+
+    setIsSendingReset(true);
+    try {
+      await sendPasswordReset(normalizedEmail);
+      setNoticeMessage("パスワード再設定メールを送信しました。メールをご確認ください。");
+    } catch (error) {
+      if (error instanceof FirebaseError) {
+        if (error.code === "auth/user-not-found") {
+          setNoticeMessage("パスワード再設定メールを送信しました。メールをご確認ください。");
+          return;
+        }
+        setErrorMessage(errorMessageMap[error.code] ?? "パスワード再設定メールの送信に失敗しました。メールアドレスを確認してください。");
+        return;
+      }
+      setErrorMessage("パスワード再設定メールの送信に失敗しました。時間を置いて再度お試しください。");
+    } finally {
+      setIsSendingReset(false);
     }
   }
 
@@ -164,11 +205,19 @@ export function LoginForm({
       <div className={`flex justify-end py-1.5 text-[var(--ink)] ${isAdmin ? "text-[10px] sm:text-[11px]" : "text-[11px] sm:text-[12px]"}`}>
         <button
           type="button"
+          onClick={() => void handlePasswordReset()}
+          disabled={isSendingReset}
           className="text-left text-[#1f73ff] transition hover:text-[#1459cc]"
         >
-          パスワードをお忘れですか？
+          {isSendingReset ? "送信中..." : "パスワードをお忘れですか？"}
         </button>
       </div>
+
+      {noticeMessage ? (
+        <div className="rounded-[14px] border border-[#b9e3c4] bg-[#f2fbf4] px-4 py-3 text-sm leading-6 text-[#276738]">
+          {noticeMessage}
+        </div>
+      ) : null}
 
       {errorMessage ? (
         <div className="rounded-[14px] border border-[var(--accent)] bg-[rgba(184,51,31,0.06)] px-4 py-3 text-sm leading-6 text-[var(--accent)]">
@@ -186,20 +235,6 @@ export function LoginForm({
           : isAdmin
             ? "管理者としてログイン"
             : "ログイン"}
-      </button>
-
-      <div className={`flex items-center gap-4 ${isAdmin ? "pt-1.5" : "pt-2"}`}>
-        <div className="h-px flex-1 bg-[#d9dde3]" />
-        <span className={`text-[#727986] ${isAdmin ? "text-[13px]" : "text-[15px]"}`}>または</span>
-        <div className="h-px flex-1 bg-[#d9dde3]" />
-      </div>
-
-      <button
-        type="button"
-        className={`flex w-full items-center justify-center gap-3 rounded-[14px] border border-[#d6d9df] bg-white px-6 font-medium text-[var(--ink)] transition hover:bg-[#fafafa] ${isAdmin ? "py-2.5 text-[15px] sm:py-3 sm:text-[16px]" : "py-3 text-[16px] sm:py-3.5 sm:text-[17px]"}`}
-      >
-        <GoogleIcon />
-        <span>Google でログイン</span>
       </button>
 
       <div className={`flex justify-end pt-2 text-[var(--gray)] ${isAdmin ? "text-[12px]" : "text-sm"}`}>
@@ -246,29 +281,6 @@ function EyeIcon({ open }: { open: boolean }) {
     <svg viewBox="0 0 24 24" aria-hidden="true" className="h-6 w-6 fill-none stroke-current stroke-[1.8]">
       <path d="M2.57 10.67C2.73 10.45 6.48 5.34 12 5.34s9.27 5.11 9.43 5.33a1.2 1.2 0 0 1 0 1.34c-.16.22-3.91 5.33-9.43 5.33S2.73 12.23 2.57 12.01a1.2 1.2 0 0 1 0-1.34Z" />
       <circle cx="12" cy="11.34" r="3" />
-    </svg>
-  );
-}
-
-function GoogleIcon() {
-  return (
-    <svg viewBox="0 0 24 24" aria-hidden="true" className="h-6 w-6">
-      <path
-        fill="#EA4335"
-        d="M12.24 10.29v3.89h5.42c-.22 1.25-1.67 3.67-5.42 3.67-3.26 0-5.92-2.7-5.92-6.03s2.66-6.03 5.92-6.03c1.86 0 3.11.79 3.82 1.47l2.61-2.53C17 3.29 14.9 2.34 12.24 2.34c-5.28 0-9.56 4.29-9.56 9.58s4.28 9.58 9.56 9.58c5.52 0 9.18-3.88 9.18-9.34 0-.63-.07-1.11-.16-1.59h-9.02Z"
-      />
-      <path
-        fill="#34A853"
-        d="M3.78 7.43 6.98 9.8c.87-2.59 3.3-4.44 6.26-4.44 1.86 0 3.11.79 3.82 1.47l2.61-2.53C17 3.29 14.9 2.34 12.24 2.34c-3.67 0-6.83 2.08-8.46 5.09Z"
-      />
-      <path
-        fill="#FBBC05"
-        d="M12.24 21.5c2.58 0 4.74-.85 6.32-2.3l-2.92-2.39c-.78.54-1.83.91-3.4.91-2.9 0-5.36-1.95-6.24-4.57l-3.3 2.55c1.61 3.07 4.82 5.8 9.54 5.8Z"
-      />
-      <path
-        fill="#4285F4"
-        d="M3.68 15.69 7 13.14a6.07 6.07 0 0 1 0-3.86L3.78 7.43a9.66 9.66 0 0 0-.98 4.49c0 1.36.26 2.67.88 3.77Z"
-      />
     </svg>
   );
 }
