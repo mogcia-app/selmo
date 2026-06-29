@@ -19,6 +19,7 @@ import {
   type KnowledgeProduct,
   type KnowledgeSearchHistory,
 } from "@/lib/firebase/knowledge";
+import { canUseSalesDomain } from "@/lib/sales-domains";
 
 export default function SalesKnowledgePage() {
   const router = useRouter();
@@ -35,9 +36,19 @@ export default function SalesKnowledgePage() {
   const userId = profile?.uid;
   const companyId = profile?.companyId;
   const canCreateShared = profile?.role === "admin";
+  const canAccessKnowledge =
+    knowledgeRole === "admin" ||
+    !profile ||
+    canUseSalesDomain(profile, "meeting") ||
+    canUseSalesDomain(profile, "teleapo");
 
   useEffect(() => {
-    if (!userId || !companyId) return;
+    if (!userId || !companyId || !canAccessKnowledge) {
+      setProducts([]);
+      setItems([]);
+      setSearchHistory([]);
+      return;
+    }
 
     const handleError = (nextError: FirebaseError) => {
       setError(nextError.message);
@@ -51,7 +62,7 @@ export default function SalesKnowledgePage() {
     return () => {
       unsubscribers.forEach((unsubscribe) => unsubscribe());
     };
-  }, [companyId, knowledgeRole, userId]);
+  }, [canAccessKnowledge, companyId, knowledgeRole, userId]);
 
   const personalItems = useMemo(
     () => items.filter((item) => item.ownerId === userId && item.scope === "personal").slice(0, 3),

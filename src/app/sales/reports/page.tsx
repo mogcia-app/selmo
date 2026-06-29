@@ -89,10 +89,19 @@ export default function SalesReportsPage() {
 
     const canUseMeeting = canUseSalesDomain(profile, "meeting");
     const canUseTeleapo = canUseSalesDomain(profile, "teleapo");
+    const canUseRoleplay = canUseMeeting || canUseTeleapo;
 
     const unsubscribers = [
       subscribeToMeetings(
-        { role: profile.role, userId: profile.uid, companyId: profile.companyId },
+        {
+          role: profile.role,
+          userId: profile.uid,
+          companyId: profile.companyId,
+          salesDomains: [
+            ...(canUseMeeting ? (["meeting"] as const) : []),
+            ...(canUseTeleapo ? (["teleapo"] as const) : []),
+          ],
+        },
         (nextMeetings) => {
           setMeetings(
             nextMeetings.filter(
@@ -105,11 +114,13 @@ export default function SalesReportsPage() {
         },
         () => setErrorMessage("レポート用の商談データを取得できませんでした。"),
       ),
-      subscribeToRoleplayResults(
+      canUseRoleplay
+        ? subscribeToRoleplayResults(
         { userId: profile.uid, companyId: profile.companyId, isAdmin: profile.role === "admin" },
         setRoleplayResults,
         () => setErrorMessage("ロープレ結果を取得できませんでした。"),
-      ),
+      )
+        : () => setRoleplayResults([]),
       subscribeToVisibleKnowledgeItems(
         { userId: profile.uid, companyId: profile.companyId },
         setKnowledgeItems,

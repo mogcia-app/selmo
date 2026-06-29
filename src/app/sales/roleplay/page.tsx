@@ -17,6 +17,7 @@ import {
   type RoleplayMessage,
   type RoleplayScenario,
 } from "@/lib/firebase/roleplay";
+import { canUseSalesDomain } from "@/lib/sales-domains";
 
 const monthlyLimitMessage = MONTHLY_AI_LIMIT_MESSAGE;
 const minRoleplayUtteranceSec = 2;
@@ -56,6 +57,7 @@ export default function SalesRoleplayPage() {
   const streamRef = useRef<MediaStream | null>(null);
   const scenarioId = searchParams.get("scenarioId") ?? "";
   const roleplayType = readRoleplayType(searchParams.get("category"));
+  const canAccessRoleplay = !profile || canUseSalesDomain(profile, roleplayType);
   const activeAssignmentScenarioIds = useMemo(
     () => new Set(assignments.filter((assignment) => assignment.status === "assigned").map((assignment) => assignment.scenarioId)),
     [assignments],
@@ -74,7 +76,11 @@ export default function SalesRoleplayPage() {
   );
 
   useEffect(() => {
-    if (!companyId) return;
+    if (!companyId || !canAccessRoleplay) {
+      setScenarios([]);
+      setAssignments([]);
+      return;
+    }
     const handleError = (nextError: FirebaseError) => setError(nextError.message);
     const unsubscribers = [
       subscribeToRoleplayScenarios(companyId, setScenarios, handleError),
@@ -84,7 +90,7 @@ export default function SalesRoleplayPage() {
     return () => {
       unsubscribers.forEach((unsubscribe) => unsubscribe());
     };
-  }, [companyId, userId]);
+  }, [canAccessRoleplay, companyId, roleplayType, userId]);
 
   useEffect(() => {
     if (!scenario) return;

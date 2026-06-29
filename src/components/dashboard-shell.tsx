@@ -695,12 +695,13 @@ function filterSalesSections(
   const canUseMeeting = canUseSalesDomain(profile, "meeting");
   const canUseTeleapo = canUseSalesDomain(profile, "teleapo");
   const canUseRoleplay = canUseMeeting || canUseTeleapo;
+  const canUseKnowledge = canUseMeeting || canUseTeleapo;
 
   return sections
     .map((section) => {
       if (section.label.includes("商談") && !canUseMeeting) return null;
       if (section.label.includes("テレアポ") && !canUseTeleapo) return null;
-      if (section.label.includes("Knowledge") && !canUseMeeting) return null;
+      if (section.label.includes("Knowledge") && !canUseKnowledge) return null;
       return {
         ...section,
         items: section.items.filter((item) => !item.href.startsWith("/sales/roleplay") || canUseRoleplay),

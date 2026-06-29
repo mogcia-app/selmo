@@ -14,6 +14,7 @@ import {
   type KnowledgeCategory,
   type KnowledgeItem,
 } from "@/lib/firebase/knowledge";
+import { canUseSalesDomain } from "@/lib/sales-domains";
 
 const DEFAULT_CATEGORY = {
   id: "how-to",
@@ -30,25 +31,36 @@ export default function SalesKnowledgeCategoryPage() {
   const knowledgeRole = basePath.startsWith("/admin") ? "admin" : "sales";
   const userId = profile?.uid;
   const companyId = profile?.companyId;
+  const canAccessKnowledge =
+    knowledgeRole === "admin" ||
+    !profile ||
+    canUseSalesDomain(profile, "meeting") ||
+    canUseSalesDomain(profile, "teleapo");
   const [categories, setCategories] = useState<KnowledgeCategory[]>([]);
   const [items, setItems] = useState<KnowledgeItem[]>([]);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!companyId) return;
+    if (!companyId || !canAccessKnowledge) {
+      setCategories([]);
+      return;
+    }
     const handleError = (nextError: FirebaseError) => setError(nextError.message);
     return subscribeToKnowledgeCategories(companyId, setCategories, handleError);
-  }, [companyId]);
+  }, [canAccessKnowledge, companyId]);
 
   useEffect(() => {
-    if (!userId || !companyId || !categoryId) return;
+    if (!userId || !companyId || !categoryId || !canAccessKnowledge) {
+      setItems([]);
+      return;
+    }
 
     return subscribeToKnowledgeItemsByCategory(
       { categoryId, userId, companyId, role: knowledgeRole },
       setItems,
       (nextError: FirebaseError) => setError(nextError.message),
     );
-  }, [categoryId, companyId, knowledgeRole, userId]);
+  }, [canAccessKnowledge, categoryId, companyId, knowledgeRole, userId]);
 
   const category = useMemo(
     () =>

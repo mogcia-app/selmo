@@ -19,6 +19,7 @@ import {
   type KnowledgeProduct,
 } from "@/lib/firebase/knowledge";
 import { saveKnowledgeSearchEvent } from "@/lib/firebase/operations";
+import { canUseSalesDomain } from "@/lib/sales-domains";
 
 type KnowledgeSearchEvidence = {
   id: string;
@@ -58,37 +59,48 @@ export default function SalesKnowledgeSearchPage() {
   const loggedSearchEventKeyRef = useRef<string | null>(null);
   const userId = profile?.uid;
   const companyId = profile?.companyId;
+  const canAccessKnowledge =
+    knowledgeRole === "admin" ||
+    !profile ||
+    canUseSalesDomain(profile, "meeting") ||
+    canUseSalesDomain(profile, "teleapo");
 
   useEffect(() => {
     setSearchTerm(query);
   }, [query]);
 
   useEffect(() => {
-    if (!userId || !companyId) return;
+    if (!userId || !companyId || !canAccessKnowledge) {
+      setItems([]);
+      return;
+    }
 
     return subscribeToVisibleKnowledgeItems(
       { userId, companyId, role: knowledgeRole },
       setItems,
       (nextError: FirebaseError) => setError(nextError.message),
     );
-  }, [companyId, knowledgeRole, userId]);
+  }, [canAccessKnowledge, companyId, knowledgeRole, userId]);
 
   useEffect(() => {
-    if (!companyId) return;
+    if (!companyId || !canAccessKnowledge) {
+      setProducts([]);
+      return;
+    }
 
     return subscribeToKnowledgeProducts(
       companyId,
       setProducts,
       (nextError: FirebaseError) => setError(nextError.message),
     );
-  }, [companyId]);
+  }, [canAccessKnowledge, companyId]);
 
   useEffect(() => {
-    if (!userId || !query) return;
+    if (!userId || !query || !canAccessKnowledge) return;
     void saveKnowledgeSearch(userId, query).catch((nextError: unknown) => {
       setError(nextError instanceof Error ? nextError.message : "検索履歴の保存に失敗しました。");
     });
-  }, [query, userId]);
+  }, [canAccessKnowledge, query, userId]);
 
   const results = useMemo(() => filterKnowledgeItems(items, query), [items, query]);
   const productResults = useMemo(() => filterKnowledgeProducts(products, query), [products, query]);
@@ -103,7 +115,7 @@ export default function SalesKnowledgeSearchPage() {
   const qaResults = results.filter((item) => item.kind === "qa");
 
   useEffect(() => {
-    if (!userId || !query) return;
+    if (!userId || !query || !canAccessKnowledge) return;
 
     const eventKey = `${userId}:${query}:${results.length}:${productResults.length}:${evidence.length > 0}`;
     if (loggedSearchEventKeyRef.current === eventKey) return;
@@ -116,7 +128,7 @@ export default function SalesKnowledgeSearchPage() {
       resultCount: results.length + productResults.length,
       usedAi: evidence.length > 0 || productResults.length > 0,
     }).catch(() => undefined);
-  }, [evidence.length, productResults.length, profile?.companyId, query, results.length, userId]);
+  }, [canAccessKnowledge, evidence.length, productResults.length, profile?.companyId, query, results.length, userId]);
 
   useEffect(() => {
     if (!query || evidence.length === 0) {

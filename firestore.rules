@@ -86,6 +86,10 @@ service cloud.firestore {
       return canUseMeetingDomain() || canUseTeleapoDomain();
     }
 
+    function canUseKnowledgeDomain() {
+      return canUseMeetingDomain() || canUseTeleapoDomain();
+    }
+
     function canUseMeetingDocument(data) {
       return (
           ("salesDomain" in data)
@@ -231,7 +235,7 @@ service cloud.firestore {
 
       match /knowledgeSearchHistory/{historyId} {
         allow read: if isOwnerRole() || isSelf(userId);
-        allow write: if isSelf(userId) && canUseMeetingDomain();
+        allow write: if isSelf(userId) && canUseKnowledgeDomain();
       }
     }
 
@@ -351,13 +355,13 @@ service cloud.firestore {
     }
 
     match /knowledgeCategories/{categoryId} {
-      allow read: if canReadCompanyData(resource.data.companyId) && canUseMeetingDomain();
+      allow read: if canReadCompanyData(resource.data.companyId) && canUseKnowledgeDomain();
       allow create: if isSignedIn()
         && request.resource.data.createdBy == request.auth.uid
         && sameCompany(request.resource.data.companyId)
-        && canUseMeetingDomain();
+        && canUseKnowledgeDomain();
       allow update: if canAdminCompanyData(resource.data.companyId)
-        || (resource.data.createdBy == request.auth.uid && sameCompany(resource.data.companyId) && canUseMeetingDomain())
+        || (resource.data.createdBy == request.auth.uid && sameCompany(resource.data.companyId) && canUseKnowledgeDomain())
         || isKnowledgeCategoryCounterUpdate();
       allow delete: if canAdminCompanyData(resource.data.companyId);
     }
@@ -367,9 +371,9 @@ service cloud.firestore {
       allow create: if isSignedIn()
         && request.resource.data.createdBy == request.auth.uid
         && sameCompany(request.resource.data.companyId)
-        && canUseMeetingDomain();
+        && canUseKnowledgeDomain();
       allow update: if canAdminCompanyData(resource.data.companyId)
-        || (resource.data.createdBy == request.auth.uid && sameCompany(resource.data.companyId) && canUseMeetingDomain())
+        || (resource.data.createdBy == request.auth.uid && sameCompany(resource.data.companyId) && canUseKnowledgeDomain())
         || isKnowledgeProductCounterUpdate()
         || isKnowledgeProductTabsUpdate();
       allow delete: if canAdminCompanyData(resource.data.companyId);
@@ -377,7 +381,7 @@ service cloud.firestore {
 
     match /knowledgeItems/{knowledgeId} {
       allow read: if canReadCompanyData(resource.data.companyId)
-        && canUseMeetingDomain()
+        && canUseKnowledgeDomain()
         && (
           resource.data.scope == "shared"
           || resource.data.ownerId == request.auth.uid
@@ -388,17 +392,17 @@ service cloud.firestore {
       allow create: if isSignedIn()
         && request.resource.data.ownerId == request.auth.uid
         && sameCompany(request.resource.data.companyId)
-        && canUseMeetingDomain()
+        && canUseKnowledgeDomain()
         && (request.resource.data.scope == "personal" || request.resource.data.scope == "shared");
       allow update: if canAdminCompanyData(resource.data.companyId)
         || (
           resource.data.ownerId == request.auth.uid
-          && canUseMeetingDomain()
+          && canUseKnowledgeDomain()
           && request.resource.data.ownerId == resource.data.ownerId
           && request.resource.data.companyId == resource.data.companyId
           && (request.resource.data.scope == "personal" || request.resource.data.scope == "shared")
         );
-      allow delete: if canAdminCompanyData(resource.data.companyId) || (resource.data.ownerId == request.auth.uid && canUseMeetingDomain());
+      allow delete: if canAdminCompanyData(resource.data.companyId) || (resource.data.ownerId == request.auth.uid && canUseKnowledgeDomain());
     }
 
     match /roleplayScenarios/{scenarioId} {
@@ -518,7 +522,7 @@ service cloud.firestore {
         isSignedIn()
         && request.resource.data.userId == request.auth.uid
         && sameCompany(request.resource.data.companyId)
-        && canUseMeetingDomain()
+        && canUseKnowledgeDomain()
       );
       allow update, delete: if false;
     }

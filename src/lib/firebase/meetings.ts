@@ -563,6 +563,7 @@ export function subscribeToMeetings(
     role: "admin" | "sales";
     userId: string;
     companyId?: string | null;
+    salesDomains?: SalesDomain[];
   },
   callback: (meetings: MeetingRecord[]) => void,
   onError?: (error: FirestoreError) => void,
@@ -573,10 +574,22 @@ export function subscribeToMeetings(
     callback([]);
     return () => undefined;
   }
+  const salesDomains = Array.from(new Set(input.salesDomains ?? [])).filter(
+    (domain): domain is SalesDomain => domain === "meeting" || domain === "teleapo",
+  );
   const meetingsQueries =
     input.role === "admin"
       ? [query(meetingsRef, where("companyId", "==", input.companyId))]
-      : [query(meetingsRef, where("companyId", "==", input.companyId), where("userId", "==", input.userId))];
+      : salesDomains.length > 0
+        ? salesDomains.map((salesDomain) =>
+            query(
+              meetingsRef,
+              where("companyId", "==", input.companyId),
+              where("userId", "==", input.userId),
+              where("salesDomain", "==", salesDomain),
+            ),
+          )
+        : [query(meetingsRef, where("companyId", "==", input.companyId), where("userId", "==", input.userId))];
 
   const snapshotsByIndex = new Map<number, MeetingRecord[]>();
   const unsubscribers = meetingsQueries.map((meetingsQuery, index) =>

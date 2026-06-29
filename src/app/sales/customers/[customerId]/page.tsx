@@ -25,6 +25,7 @@ import {
 } from "@/lib/firebase/customers";
 import { subscribeToKnowledgeProducts, type KnowledgeProduct } from "@/lib/firebase/knowledge";
 import { subscribeToMeetings, type MeetingRecord } from "@/lib/firebase/meetings";
+import { canUseSalesDomain } from "@/lib/sales-domains";
 
 const statusOptions: Array<{ value: CustomerStatus; label: string }> = [
   { value: "not_contacted", label: "未接触" },
@@ -111,6 +112,13 @@ export default function SalesCustomerDetailPage() {
   const [logActionDate, setLogActionDate] = useState("");
   const [nextActionTitle, setNextActionTitle] = useState("");
   const [nextActionDate, setNextActionDate] = useState("");
+  const allowedSalesDomains = useMemo(
+    () => [
+      ...(canUseSalesDomain(profile, "meeting") ? (["meeting"] as const) : []),
+      ...(canUseSalesDomain(profile, "teleapo") ? (["teleapo"] as const) : []),
+    ],
+    [profile],
+  );
 
   useEffect(() => {
     if (!params.customerId) return;
@@ -142,14 +150,19 @@ export default function SalesCustomerDetailPage() {
         (nextError: FirebaseError) => setErrorMessage(nextError.message),
       ),
       subscribeToMeetings(
-        { role: "sales", userId: profile.uid, companyId: profile.companyId },
+        {
+          role: "sales",
+          userId: profile.uid,
+          companyId: profile.companyId,
+          salesDomains: allowedSalesDomains,
+        },
         setMeetings,
         (nextError: FirebaseError) => setErrorMessage(nextError.message),
       ),
     ];
 
     return () => unsubscribers.forEach((unsubscribe) => unsubscribe());
-  }, [params.customerId, profile?.companyId, profile?.uid]);
+  }, [allowedSalesDomains, params.customerId, profile?.companyId, profile?.uid]);
 
   useEffect(() => {
     if (!profile?.companyId) {

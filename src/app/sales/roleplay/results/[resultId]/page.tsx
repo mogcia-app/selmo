@@ -8,6 +8,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useAuth } from "@/features/auth/auth-provider";
 import { subscribeToRoleplayResults, type RoleplayResult } from "@/lib/firebase/roleplay";
 import { RoleplayResultDetailPanel } from "@/app/sales/roleplay/results/roleplay-result-analysis";
+import { canUseSalesDomain } from "@/lib/sales-domains";
 
 export default function SalesRoleplayResultDetailPage() {
   const params = useParams<{ resultId: string }>();
@@ -18,19 +19,23 @@ export default function SalesRoleplayResultDetailPage() {
   const userId = profile?.uid;
   const companyId = profile?.companyId;
   const isAdmin = profile?.role === "admin";
+  const canAccessRoleplay = !profile || canUseSalesDomain(profile, roleplayType);
   const [results, setResults] = useState<RoleplayResult[]>([]);
   const [error, setError] = useState<string | null>(null);
   const result = useMemo(() => results.find((item) => item.id === resultId) ?? null, [resultId, results]);
 
   useEffect(() => {
-    if (!userId || !companyId) return;
+    if (!userId || !companyId || !canAccessRoleplay) {
+      setResults([]);
+      return;
+    }
 
     return subscribeToRoleplayResults(
       { userId, companyId, isAdmin },
       setResults,
       (nextError: FirebaseError) => setError(nextError.message),
     );
-  }, [companyId, isAdmin, userId]);
+  }, [canAccessRoleplay, companyId, isAdmin, roleplayType, userId]);
 
   return (
     <main className="overflow-x-hidden bg-transparent px-5 pb-0 pt-4 md:px-8 md:pb-0 md:pt-5">

@@ -19,6 +19,7 @@ import {
   type RoleplayScenario,
   type RoleplayScenarioCustomField,
 } from "@/lib/firebase/roleplay";
+import { canUseSalesDomain } from "@/lib/sales-domains";
 
 export default function SalesRoleplayScenariosPage() {
   const searchParams = useSearchParams();
@@ -33,6 +34,14 @@ export default function SalesRoleplayScenariosPage() {
   const [editingScenario, setEditingScenario] = useState<RoleplayScenario | null>(null);
   const [activeScenarioId, setActiveScenarioId] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const allowedSalesDomains = useMemo(
+    () => [
+      ...(canUseSalesDomain(profile, "meeting") ? (["meeting"] as const) : []),
+      ...(canUseSalesDomain(profile, "teleapo") ? (["teleapo"] as const) : []),
+    ],
+    [profile],
+  );
+  const canAccessRoleplay = !profile || canUseSalesDomain(profile, roleplayType);
   const activeAssignmentScenarioIds = useMemo(
     () => new Set(assignments.filter((assignment) => assignment.status === "assigned").map((assignment) => assignment.scenarioId)),
     [assignments],
@@ -57,7 +66,13 @@ export default function SalesRoleplayScenariosPage() {
   }, [searchParams]);
 
   useEffect(() => {
-    if (!profile?.companyId) return;
+    if (!profile?.companyId || !canAccessRoleplay) {
+      setScenarios([]);
+      setAssignments([]);
+      setMeetings([]);
+      setProducts([]);
+      return;
+    }
     const handleError = (nextError: FirebaseError) => setError(nextError.message);
     const unsubscribers = [
       subscribeToRoleplayScenarios(profile.companyId, setScenarios, handleError),
@@ -67,7 +82,12 @@ export default function SalesRoleplayScenariosPage() {
         handleError,
       ),
       subscribeToMeetings(
-        { role: profile.role, userId: profile.uid, companyId: profile.companyId },
+        {
+          role: profile.role,
+          userId: profile.uid,
+          companyId: profile.companyId,
+          salesDomains: allowedSalesDomains,
+        },
         setMeetings,
         handleError,
       ),
@@ -77,7 +97,7 @@ export default function SalesRoleplayScenariosPage() {
     return () => {
       unsubscribers.forEach((unsubscribe) => unsubscribe());
     };
-  }, [profile?.companyId, profile?.role, profile?.uid]);
+  }, [allowedSalesDomains, canAccessRoleplay, profile?.companyId, profile?.role, profile?.uid, roleplayType]);
 
   const activeAssignments = useMemo(
     () => assignments.filter((assignment) => assignment.status === "assigned"),

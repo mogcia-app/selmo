@@ -72,6 +72,7 @@ export default function SalesAnalysisPage() {
         role: profile.role,
         userId: profile.uid,
         companyId: profile.companyId,
+        salesDomains: [mode],
       },
       (nextMeetings) => {
         setMeetings(nextMeetings.filter((meeting) => meeting.salesDomain === mode));

@@ -96,12 +96,22 @@ export default function SalesDashboardPage() {
   const [generatedActionCards, setGeneratedActionCards] = useState<OodaCardData[] | null>(null);
   const requestedActionKeyRef = useRef<string | null>(null);
   const canUseMeeting = !profile || canUseSalesDomain(profile, "meeting");
+  const canUseTeleapo = !profile || canUseSalesDomain(profile, "teleapo");
+  const canUseRoleplay = canUseMeeting || canUseTeleapo;
   const activeDomain: SalesDomain = canUseMeeting ? "meeting" : "teleapo";
   const unitLabel = activeDomain === "teleapo" ? "テレアポ" : "商談";
   const displayName = profile?.name?.trim() || profile?.email?.split("@")[0] || "営業担当";
 
   useEffect(() => {
-    if (!profile?.uid || !profile.role || !profile.companyId) {
+    if (!profile?.uid || !profile.role || !profile.companyId || (!canUseMeeting && !canUseTeleapo)) {
+      setMeetings([]);
+      setKnowledgeItems([]);
+      setRoleplayScenarios([]);
+      setRoleplayResults([]);
+      setIsMeetingsLoaded(true);
+      setIsKnowledgeLoaded(true);
+      setIsRoleplayScenariosLoaded(true);
+      setIsRoleplayResultsLoaded(true);
       return;
     }
 
@@ -114,7 +124,7 @@ export default function SalesDashboardPage() {
 
     const unsubscribers = [
       subscribeToMeetings(
-        { role: profile.role, userId: profile.uid, companyId: profile.companyId },
+        { role: profile.role, userId: profile.uid, companyId: profile.companyId, salesDomains: [activeDomain] },
         (nextMeetings) => {
           setMeetings(nextMeetings.filter((meeting) => meeting.salesDomain === activeDomain));
           setIsMeetingsLoaded(true);
@@ -130,26 +140,36 @@ export default function SalesDashboardPage() {
         },
         () => setErrorMessage("ナレッジデータを取得できませんでした。"),
       ),
-      subscribeToRoleplayScenarios(
+      canUseRoleplay
+        ? subscribeToRoleplayScenarios(
         profile.companyId,
         (nextScenarios) => {
           setRoleplayScenarios(nextScenarios);
           setIsRoleplayScenariosLoaded(true);
         },
         () => setErrorMessage("ロープレシナリオの読み込みに失敗しました。"),
-      ),
-      subscribeToRoleplayResults(
+      )
+        : () => {
+            setRoleplayScenarios([]);
+            setIsRoleplayScenariosLoaded(true);
+          },
+      canUseRoleplay
+        ? subscribeToRoleplayResults(
         { userId: profile.uid, companyId: profile.companyId, isAdmin: profile.role === "admin" },
         (nextResults) => {
           setRoleplayResults(nextResults);
           setIsRoleplayResultsLoaded(true);
         },
         () => setErrorMessage("ロープレ結果の読み込みに失敗しました。"),
-      ),
+      )
+        : () => {
+            setRoleplayResults([]);
+            setIsRoleplayResultsLoaded(true);
+          },
     ];
 
     return () => unsubscribers.forEach((unsubscribe) => unsubscribe());
-  }, [activeDomain, profile?.companyId, profile?.role, profile?.uid, unitLabel]);
+  }, [activeDomain, canUseMeeting, canUseRoleplay, canUseTeleapo, profile?.companyId, profile?.role, profile?.uid, unitLabel]);
 
   const monthlyMeetings = useMemo(
     () => meetings.filter((meeting) => isCurrentMonth(meeting.recordedAt)),

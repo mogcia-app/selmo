@@ -23,6 +23,7 @@ import {
   type KnowledgeLink,
   type KnowledgeProduct,
 } from "@/lib/firebase/knowledge";
+import { canUseSalesDomain } from "@/lib/sales-domains";
 
 type PublicationTarget = "private" | "all_sales" | "selected_sales";
 
@@ -39,6 +40,11 @@ export function KnowledgeEditorScreen({ mode, knowledgeId, audience = "sales" }:
   const userId = profile?.uid;
   const companyId = profile?.companyId;
   const isAdminAuthoring = audience === "admin";
+  const canAccessKnowledge =
+    isAdminAuthoring ||
+    !profile ||
+    canUseSalesDomain(profile, "meeting") ||
+    canUseSalesDomain(profile, "teleapo");
   const backHref = isAdminAuthoring ? "/admin/knowledge" : "/sales/knowledge";
   const pageTitle = isAdminAuthoring
     ? mode === "edit"
@@ -79,7 +85,12 @@ export function KnowledgeEditorScreen({ mode, knowledgeId, audience = "sales" }:
   const [isAddingTab, setIsAddingTab] = useState(false);
 
   useEffect(() => {
-    if (!companyId) return;
+    if (!companyId || !canAccessKnowledge) {
+      setCategories([]);
+      setProducts([]);
+      setSalesUsers([]);
+      return;
+    }
     const handleError = (nextError: FirebaseError) => setError(nextError.message);
     const unsubscribers = [
       subscribeToKnowledgeCategories(companyId, setCategories, handleError),
@@ -90,17 +101,20 @@ export function KnowledgeEditorScreen({ mode, knowledgeId, audience = "sales" }:
     return () => {
       unsubscribers.forEach((unsubscribe) => unsubscribe());
     };
-  }, [companyId]);
+  }, [canAccessKnowledge, companyId]);
 
   useEffect(() => {
-    if (mode !== "edit" || !knowledgeId) return;
+    if (mode !== "edit" || !knowledgeId || !canAccessKnowledge) {
+      if (mode === "edit") setKnowledge(null);
+      return;
+    }
 
     return subscribeToKnowledgeItem(
       knowledgeId,
       setKnowledge,
       (nextError: FirebaseError) => setError(nextError.message),
     );
-  }, [knowledgeId, mode]);
+  }, [canAccessKnowledge, knowledgeId, mode]);
 
   useEffect(() => {
     if (!knowledge) return;

@@ -8,6 +8,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useAuth } from "@/features/auth/auth-provider";
 import { deleteRoleplayResult, subscribeToRoleplayResults, type RoleplayResult } from "@/lib/firebase/roleplay";
 import { buildTalkAnalysis } from "@/app/sales/roleplay/results/roleplay-result-analysis";
+import { canUseSalesDomain } from "@/lib/sales-domains";
 
 export default function SalesRoleplayResultsPage() {
   const searchParams = useSearchParams();
@@ -16,6 +17,7 @@ export default function SalesRoleplayResultsPage() {
   const userId = profile?.uid;
   const companyId = profile?.companyId;
   const isAdmin = profile?.role === "admin";
+  const canAccessRoleplay = !profile || canUseSalesDomain(profile, roleplayType);
   const [results, setResults] = useState<RoleplayResult[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [deletingResultId, setDeletingResultId] = useState<string | null>(null);
@@ -30,14 +32,17 @@ export default function SalesRoleplayResultsPage() {
   );
 
   useEffect(() => {
-    if (!userId || !companyId) return;
+    if (!userId || !companyId || !canAccessRoleplay) {
+      setResults([]);
+      return;
+    }
 
     return subscribeToRoleplayResults(
       { userId, companyId, isAdmin },
       setResults,
       (nextError: FirebaseError) => setError(nextError.message),
     );
-  }, [companyId, isAdmin, userId]);
+  }, [canAccessRoleplay, companyId, isAdmin, roleplayType, userId]);
 
   async function handleDeleteResult(result: RoleplayResult) {
     if (!window.confirm(`${result.scenarioTitle || "このロープレ結果"}を削除します。よろしいですか？`)) {

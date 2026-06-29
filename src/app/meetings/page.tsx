@@ -71,6 +71,7 @@ export default function MeetingsPage() {
         role: profile.role,
         userId: profile.uid,
         companyId: profile.companyId,
+        salesDomains: [category],
       },
       (nextMeetings) => {
         setMeetings(nextMeetings);
@@ -87,7 +88,7 @@ export default function MeetingsPage() {
     );
 
     return unsubscribe;
-  }, [canAccessDomain, isAuthLoading, profile?.companyId, profile?.role, profile?.uid]);
+  }, [canAccessDomain, category, isAuthLoading, profile?.companyId, profile?.role, profile?.uid]);
 
   const productOptions = useMemo(() => {
     const options = new Set<string>();

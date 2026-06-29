@@ -53,7 +53,7 @@ export function MeetingCalendarScreen({ variant }: { variant: CalendarVariant })
     ];
     const unsubscribers = [
       subscribeToMeetings(
-        { role: profile.role, userId: profile.uid, companyId: profile.companyId },
+        { role: profile.role, userId: profile.uid, companyId: profile.companyId, salesDomains: enabledDomains },
         (nextMeetings) => {
           setMeetings(nextMeetings);
           setErrorMessage(null);

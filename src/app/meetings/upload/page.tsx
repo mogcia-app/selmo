@@ -108,19 +108,19 @@ export default function MeetingUploadPage() {
 
     const unsubscribers = [
       subscribeToMeetings(
-        { role: profile.role, userId: profile.uid, companyId: profile.companyId },
+        { role: profile.role, userId: profile.uid, companyId: profile.companyId, salesDomains: [salesDomain] },
         setMeetings,
         () => setMeetings([]),
       ),
       subscribeToCalendarEvents(
-        { companyId: profile.companyId, userId: profile.uid, isAdmin: profile.role === "admin" },
+        { companyId: profile.companyId, userId: profile.uid, isAdmin: profile.role === "admin", salesDomains: [salesDomain] },
         setCalendarEvents,
         () => setCalendarEvents([]),
       ),
     ];
 
     return () => unsubscribers.forEach((unsubscribe) => unsubscribe());
-  }, [profile?.companyId, profile?.role, profile?.uid]);
+  }, [profile?.companyId, profile?.role, profile?.uid, salesDomain]);
 
   useEffect(() => {
     if (!profile?.companyId) return;

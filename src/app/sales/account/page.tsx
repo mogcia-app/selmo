@@ -10,6 +10,7 @@ import { assertFirebaseClient } from "@/lib/firebase/client";
 import { uploadUserAvatar } from "@/lib/firebase/auth";
 import { subscribeToMeetings, type MeetingRecord } from "@/lib/firebase/meetings";
 import { subscribeToRoleplayResults, type RoleplayResult } from "@/lib/firebase/roleplay";
+import { canUseSalesDomain } from "@/lib/sales-domains";
 
 type ActivityCounts = {
   knowledgeSearch: number;
@@ -22,6 +23,14 @@ export default function SalesAccountPage() {
   const [activityCounts, setActivityCounts] = useState<ActivityCounts>({ knowledgeSearch: 0 });
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [avatarPreview, setAvatarPreview] = useState<string | null>(null);
+  const allowedSalesDomains = useMemo(
+    () => [
+      ...(canUseSalesDomain(profile, "meeting") ? (["meeting"] as const) : []),
+      ...(canUseSalesDomain(profile, "teleapo") ? (["teleapo"] as const) : []),
+    ],
+    [profile],
+  );
+  const canUseRoleplay = allowedSalesDomains.length > 0;
   const [avatarFile, setAvatarFile] = useState<File | null>(null);
   const [isSavingAvatar, setIsSavingAvatar] = useState(false);
   const [avatarMessage, setAvatarMessage] = useState<string | null>(null);
@@ -49,19 +58,26 @@ export default function SalesAccountPage() {
 
     const unsubscribers = [
       subscribeToMeetings(
-        { role: profile.role, userId: profile.uid, companyId: profile.companyId },
+        {
+          role: profile.role,
+          userId: profile.uid,
+          companyId: profile.companyId,
+          salesDomains: allowedSalesDomains,
+        },
         setMeetings,
         () => setErrorMessage("商談分析の利用状況を取得できませんでした。"),
       ),
-      subscribeToRoleplayResults(
+      canUseRoleplay
+        ? subscribeToRoleplayResults(
         { userId: profile.uid, companyId: profile.companyId, isAdmin: profile.role === "admin" },
         setRoleplayResults,
         () => setErrorMessage("ロープレの利用状況を取得できませんでした。"),
-      ),
+      )
+        : () => setRoleplayResults([]),
     ];
 
     return () => unsubscribers.forEach((unsubscribe) => unsubscribe());
-  }, [profile?.companyId, profile?.role, profile?.uid]);
+  }, [allowedSalesDomains, canUseRoleplay, profile?.companyId, profile?.role, profile?.uid]);
 
   useEffect(() => {
     if (!profile?.companyId || !profile.uid) {
