@@ -462,7 +462,7 @@ export function DashboardShell({ children, variant }: DashboardShellProps) {
                     <Link
                       key={item.href}
                       href={item.href}
-                      className={`group flex items-center gap-3 rounded-[18px] px-4 py-3.5 text-[15px] font-medium transition ${
+                      className={`group flex items-center gap-3 rounded-[18px] px-4 py-3.5 text-[14px] font-medium transition ${
                         isActive
                           ? "bg-[linear-gradient(180deg,#fff2c8_0%,#ffe7a0_100%)] text-[#171717] shadow-[0_8px_18px_rgba(245,189,7,0.18)]"
                           : "text-[#616875] hover:bg-[#f7f7fa] hover:text-[#171717]"
@@ -477,7 +477,7 @@ export function DashboardShell({ children, variant }: DashboardShellProps) {
                       >
                         {item.num}
                       </span>
-                      <span className="flex-1">{item.label}</span>
+                      <span className="flex-1 whitespace-nowrap">{item.label}</span>
                       <span
                         className={`text-[12px] transition ${
                           isActive ? "text-[#d79d00]" : "text-[#c6ccd5] group-hover:text-[#8d94a1]"
