@@ -34,7 +34,7 @@ export function KnowledgeCreateDialog({
   defaultScope = "personal",
   initialItem = null,
   title: dialogTitle = "ナレッジを作成",
-  description: dialogDescription = "商談で使う切り返し、提案メモ、Q&Aを保存できます。",
+  description: dialogDescription = "商談で使う切り返し、提案トーク、Q&Aを保存できます。",
   submitLabel = "作成する",
   onClose,
   onSubmit,
@@ -156,7 +156,6 @@ export function KnowledgeCreateDialog({
               className="mt-2 h-12 w-full rounded-[14px] border border-[#e4e8ef] bg-white px-4 text-[14px] text-[#171717] outline-none transition focus:border-[#e0bd4b]"
             >
               <option value="knowledge">ナレッジ</option>
-              <option value="memo">メモ</option>
               <option value="qa">Q&A</option>
             </select>
           </label>
@@ -239,7 +238,6 @@ function buildKnowledgeTitle(title: string, body: string, kind: CreateKnowledgeI
   const bodyTitle = body.trim().replace(/\s+/g, " ").slice(0, 32);
   if (bodyTitle) return bodyTitle;
 
-  if (kind === "memo") return "無題のメモ";
   if (kind === "qa") return "無題のQ&A";
   return "無題のナレッジ";
 }

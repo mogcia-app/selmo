@@ -10,6 +10,11 @@ import { MONTHLY_AI_LIMIT_MESSAGE } from "@/lib/ai-usage-limit";
 import type { AnalysisContext } from "@/lib/server/analysis-context";
 import { buildAnalysisContextPrompt, loadAnalysisContext } from "@/lib/server/analysis-context";
 import {
+  buildAnalysisConfigPrompt,
+  loadAnalysisConfig,
+  type ServerAnalysisConfig,
+} from "@/lib/server/analysis-configs";
+import {
   assertMeetingAccess,
   handleApiAuthError,
   requireApiUser,
@@ -160,10 +165,16 @@ export async function POST(
       manualCategory: resolveManualCategory(body.customerType ?? readString(meeting.data.customerType), body.meetingPurpose ?? readString(meeting.data.meetingPurpose)),
       manualDomain: meeting.salesDomain,
     });
+    const analysisConfig = await loadAnalysisConfig({
+      companyId: apiUser.companyId,
+      productName: body.productName ?? readString(meeting.data.productType),
+      analysisType: meeting.salesDomain === "teleapo" ? "teleapo_upload" : "meeting_upload",
+    });
     const result = await summarizeTranscript(conversationInput, analysisContext, {
       meetingPurpose: body.meetingPurpose ?? readString(meeting.data.meetingPurpose),
       customerType: body.customerType ?? readString(meeting.data.customerType),
       salesDomain: meeting.salesDomain,
+      analysisConfig,
     });
     await saveAiUsageLog({
       companyId: apiUser.companyId,
@@ -233,10 +244,12 @@ async function summarizeTranscript(
     meetingPurpose?: string | null;
     customerType?: string | null;
     salesDomain?: string | null;
+    analysisConfig?: ServerAnalysisConfig | null;
   },
 ) {
   const model = "gpt-4o-mini";
   const contextPrompt = buildAnalysisContextPrompt(analysisContext);
+  const analysisConfigPrompt = buildAnalysisConfigPrompt(input.analysisConfig ?? null);
   const meetingPurposeLabel = getMeetingPurposeLabel(input.meetingPurpose);
   const customerTypeLabel = input.customerType === "existing" ? "既存" : input.customerType === "new" ? "新規" : "未設定";
   const isTeleapo = input.salesDomain === "teleapo";
@@ -400,6 +413,7 @@ async function summarizeTranscript(
               `あなたは営業${domainLabel}の文字起こしを分析するAIコーチです。`,
               "全体要約は2〜4文で簡潔にまとめ、ポイントは3〜4個の短い箇条書き向け文で返してください。",
               "会社の営業成功基準や商材情報がある場合は、それを最優先して評価してください。",
+              "admin管理の分析設定がある場合は、その評価項目・加点減点ルール・追加AI指示も最優先の会社基準として扱ってください。",
               conversationInput.hasStructuredLogs
                 ? "入力には確定済みの話者別会話ログがあります。全文よりも話者別ログを優先し、営業発話・顧客発話・同席者発話を混同しないでください。"
                 : "話者別ログがない場合は、全文から慎重に推定してください。",
@@ -411,10 +425,10 @@ async function summarizeTranscript(
               "顧客が不安・反論・条件提示をした直後に、営業が一般論や商品説明だけで返している場合は、反論対応や提案接続を低く評価してください。",
               "良い返答は、顧客の発言を受け止め、背景を確認し、商材価値や事例に接続し、必要に応じて予算・決裁・時期・次回アクションへ進めているものです。",
               "営業成功基準の評価基準・必須ヒアリング・反論対応・クロージング基準は、各項目ごとに達成/未達を判定してください。",
-              "営業成功基準が入力に含まれる場合、manualCompliance.mode は必ず manual にしてください。generic にしてはいけません。",
-              "matchedCriteria と missingCriteria には、営業成功基準に登録されている評価基準・必須ヒアリング・クロージング基準の文言だけを使ってください。言い換えや新規項目の作成は禁止です。",
-              "営業成功基準が入力に含まれる場合、matchedCriteria と missingCriteria の両方が空になることは禁止です。評価基準・必須ヒアリング・クロージング基準の全項目を達成/未達のどちらかに分類してください。",
-              "checklistItems には、営業成功基準に登録されている評価基準・必須ヒアリング・クロージング基準の全項目を1件ずつ入れてください。category は 評価基準 / 必須ヒアリング / クロージング基準 のいずれか、label は登録項目の文言そのまま、status は done または missing にしてください。",
+              "営業成功基準またはadmin分析設定が入力に含まれる場合、manualCompliance.mode は必ず manual にしてください。generic にしてはいけません。",
+              "matchedCriteria と missingCriteria には、営業成功基準またはadmin分析設定に登録されている文言だけを使ってください。言い換えや新規項目の作成は禁止です。",
+              "営業成功基準またはadmin分析設定が入力に含まれる場合、matchedCriteria と missingCriteria の両方が空になることは禁止です。登録項目の全項目を達成/未達のどちらかに分類してください。",
+              "checklistItems には、営業成功基準またはadmin分析設定に登録されている全項目を1件ずつ入れてください。label は登録項目の文言そのまま、status は done または missing にしてください。",
               "checklistItems.reason は短く、文字起こし上の根拠がある場合だけ書いてください。根拠が弱い場合は missing にしてください。",
               "AIの推測で基準を増やしたり、マニュアル外の項目を checklistItems に入れたりしないでください。",
               "達成/未達の判定はキーワード一致だけでなく、前後の会話で実質的に確認・説明・合意できているかで判定してください。",
@@ -454,6 +468,7 @@ async function summarizeTranscript(
             `種別: ${domainLabel}`,
             `顧客種別: ${customerTypeLabel}`,
             contextPrompt ? `以下の基準を使って分析してください。\n\n${contextPrompt}` : "会社固有の基準は未登録です。汎用的な営業観点で分析してください。",
+            analysisConfigPrompt ? `以下のadmin分析設定も必ず使ってください。\n\n${analysisConfigPrompt}` : "admin分析設定は未登録です。",
             conversationInput.hasStructuredLogs
               ? [
                   "以下の確定済み話者別ログを最優先で分析してください。",
@@ -521,7 +536,7 @@ async function summarizeTranscript(
         ? summary.bullets.map((bullet) => bullet.trim()).filter(Boolean).slice(0, 4)
         : [],
       diagnosis: normalizeDiagnosis(summary.diagnosis, input.salesDomain),
-      manualCompliance: normalizeManualCompliance(summary.manualCompliance, analysisContext.manual),
+      manualCompliance: normalizeManualCompliance(summary.manualCompliance, analysisContext.manual, input.analysisConfig ?? null),
     },
     usage: {
       inputTokens: parsed.usage?.prompt_tokens ?? null,
@@ -533,12 +548,13 @@ async function summarizeTranscript(
 function normalizeManualCompliance(
   value: SummaryResponse["manualCompliance"] | undefined,
   manual: AnalysisContext["manual"],
+  analysisConfig: ServerAnalysisConfig | null,
 ): NonNullable<SummaryResponse["manualCompliance"]> {
   const productNotes = readStringArray(value?.productNotes).slice(0, 10);
   const improvementPhrases = readStringArray(value?.improvementPhrases).slice(0, 5);
   const explicitScore = typeof value?.score === "number" ? clampNumber(value.score, 0, 100, value.score) : null;
 
-  if (!manual) {
+  if (!manual && !analysisConfig) {
     const matchedCriteria = readStringArray(value?.matchedCriteria).slice(0, 16);
     const missingCriteria = readStringArray(value?.missingCriteria).slice(0, 16);
 
@@ -553,7 +569,7 @@ function normalizeManualCompliance(
     };
   }
 
-  const manualChecklist = buildManualChecklist(manual);
+  const manualChecklist = buildManualChecklist(manual, analysisConfig);
   const checklistItems = applyManualScoreImpacts(manual, normalizeManualChecklistItems(value, manualChecklist));
   const matchedCriteria = checklistItems
     .filter((item) => item.status === "done")
@@ -573,18 +589,24 @@ function normalizeManualCompliance(
     score: fallbackScore ?? explicitScore,
     matchedCriteria: matchedCriteria.slice(0, 24),
     missingCriteria: finalMissingCriteria,
-    productNotes: productNotes.length > 0 ? productNotes : [`適用マニュアル: ${manual.title}`],
+    productNotes: productNotes.length > 0
+      ? productNotes
+      : [manual ? `適用マニュアル: ${manual.title}` : `適用分析設定: ${analysisConfig?.title ?? "admin分析設定"}`],
     improvementPhrases,
     checklistItems,
   };
 }
 
-function buildManualChecklist(manual: AnalysisContext["manual"]) {
-  if (!manual) return [];
+function buildManualChecklist(manual: AnalysisContext["manual"], analysisConfig: ServerAnalysisConfig | null) {
   return [
-    ...manual.criteria.map((item) => ({ category: "評価基準", label: item.trim(), display: item.trim() })),
-    ...manual.requiredQuestions.map((item) => ({ category: "必須ヒアリング", label: item.trim(), display: `必須ヒアリング: ${item.trim()}` })),
-    ...manual.closingRules.map((item) => ({ category: "クロージング基準", label: item.trim(), display: `クロージング: ${item.trim()}` })),
+    ...(analysisConfig?.checklistItems.map((item) => ({
+      category: item.required ? "admin必須項目" : "admin評価項目",
+      label: item.label.trim(),
+      display: `${item.required ? "admin必須項目" : "admin評価項目"}: ${item.label.trim()}`,
+    })) ?? []),
+    ...(manual?.criteria.map((item) => ({ category: "評価基準", label: item.trim(), display: item.trim() })) ?? []),
+    ...(manual?.requiredQuestions.map((item) => ({ category: "必須ヒアリング", label: item.trim(), display: `必須ヒアリング: ${item.trim()}` })) ?? []),
+    ...(manual?.closingRules.map((item) => ({ category: "クロージング基準", label: item.trim(), display: `クロージング: ${item.trim()}` })) ?? []),
   ].filter((item) => item.label);
 }
 

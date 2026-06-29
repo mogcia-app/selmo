@@ -77,6 +77,7 @@ export default function SalesKnowledgeCategoryPage() {
         : null),
     [categories, categoryId],
   );
+  const visibleItems = useMemo(() => items.filter((item) => item.kind !== "memo"), [items]);
 
   return (
     <main className="min-h-[calc(100vh-73px)] overflow-x-hidden bg-white">
@@ -114,15 +115,14 @@ export default function SalesKnowledgeCategoryPage() {
                     {category?.title ?? "カテゴリ"}
                   </h1>
                   <p className="mt-4 max-w-[640px] text-[15px] leading-7 text-[#172033]">
-                    {category?.description || "このカテゴリに追加したナレッジやメモを確認できます。"}
+                    {category?.description || "このカテゴリに追加したナレッジを確認できます。"}
                   </p>
                 </div>
               </div>
 
               <div className="mt-6 flex flex-wrap gap-3 text-[13px] text-[#596273]">
-                <Pill>{`ナレッジ ${items.filter((item) => item.kind === "knowledge").length}件`}</Pill>
-                <Pill>{`メモ ${items.filter((item) => item.kind === "memo").length}件`}</Pill>
-                <Pill>{`最終更新：${formatLatestDate(items)}`}</Pill>
+                <Pill>{`ナレッジ ${visibleItems.filter((item) => item.kind === "knowledge").length}件`}</Pill>
+                <Pill>{`最終更新：${formatLatestDate(visibleItems)}`}</Pill>
               </div>
             </div>
 
@@ -148,9 +148,9 @@ export default function SalesKnowledgeCategoryPage() {
           </section>
 
           <section className="mt-10">
-            {items.length > 0 ? (
+            {visibleItems.length > 0 ? (
               <div className="mt-6 space-y-3">
-                {items.map((item) => (
+                {visibleItems.map((item) => (
                   <Link
                     key={item.id}
                     href={`${basePath}/categories/${categoryId}/knowledge/${item.id}`}
@@ -186,7 +186,7 @@ export default function SalesKnowledgeCategoryPage() {
                 </div>
                 <h2 className="mt-4 text-[22px] font-bold text-[#171717]">まだナレッジがありません</h2>
                 <p className="mx-auto mt-2 max-w-[420px] text-[14px] leading-7 text-[#7a808c]">
-                  このカテゴリに追加したナレッジやメモが、ここに表示されます。
+                  このカテゴリに追加したナレッジが、ここに表示されます。
                 </p>
               </div>
             )}

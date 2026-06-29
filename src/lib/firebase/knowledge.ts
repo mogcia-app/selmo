@@ -7,7 +7,6 @@ import {
   collection,
   doc,
   increment,
-  getDocs,
   limit,
   onSnapshot,
   orderBy,
@@ -241,6 +240,22 @@ export function subscribeToVisibleKnowledgeItems(
     callback([]);
     return () => undefined;
   }
+
+  if (input.role === "admin") {
+    const allItemsQuery = query(collection(firestore, "knowledgeItems"), where("companyId", "==", input.companyId));
+
+    return onSnapshot(
+      allItemsQuery,
+      (snapshot) =>
+        callback(
+          mergeSystemKnowledgeItems(snapshot.docs.map(mapKnowledgeItem), input.role).sort(
+            (left, right) => (right.updatedAt?.getTime() ?? 0) - (left.updatedAt?.getTime() ?? 0),
+          ),
+        ),
+      onError,
+    );
+  }
+
   const sharedQuery = query(
     collection(firestore, "knowledgeItems"),
     where("companyId", "==", input.companyId),
@@ -257,34 +272,37 @@ export function subscribeToVisibleKnowledgeItems(
     where("sharedWithUserIds", "array-contains", input.userId),
   );
 
-  let isActive = true;
+  const snapshotsBySource = new Map<string, KnowledgeItem[]>();
+  const emitItems = () => {
+    const itemsById = new Map<string, KnowledgeItem>();
 
-  Promise.all([getDocs(sharedQuery), getDocs(personalQuery), getDocs(assignedQuery)])
-    .then(([sharedSnapshot, personalSnapshot, assignedSnapshot]) => {
-      if (!isActive) {
-        return;
-      }
-
-      const itemsById = new Map<string, KnowledgeItem>();
-      [...sharedSnapshot.docs, ...personalSnapshot.docs, ...assignedSnapshot.docs].forEach((snapshot) => {
-        itemsById.set(snapshot.id, mapKnowledgeItem(snapshot));
-      });
-
-      callback(
-        mergeSystemKnowledgeItems(Array.from(itemsById.values()), input.role).sort(
-          (left, right) => (right.updatedAt?.getTime() ?? 0) - (left.updatedAt?.getTime() ?? 0),
-        ),
-      );
-    })
-    .catch((error: FirestoreError) => {
-      if (isActive) {
-        onError?.(error);
-      }
+    Array.from(snapshotsBySource.values()).flat().forEach((item) => {
+      itemsById.set(item.id, item);
     });
 
-  return () => {
-    isActive = false;
+    callback(
+      mergeSystemKnowledgeItems(Array.from(itemsById.values()), input.role).sort(
+        (left, right) => (right.updatedAt?.getTime() ?? 0) - (left.updatedAt?.getTime() ?? 0),
+      ),
+    );
   };
+
+  const unsubscribers = [
+    onSnapshot(sharedQuery, (snapshot) => {
+      snapshotsBySource.set("shared", snapshot.docs.map(mapKnowledgeItem));
+      emitItems();
+    }, onError),
+    onSnapshot(personalQuery, (snapshot) => {
+      snapshotsBySource.set("personal", snapshot.docs.map(mapKnowledgeItem));
+      emitItems();
+    }, onError),
+    onSnapshot(assignedQuery, (snapshot) => {
+      snapshotsBySource.set("assigned", snapshot.docs.map(mapKnowledgeItem));
+      emitItems();
+    }, onError),
+  ];
+
+  return () => unsubscribers.forEach((unsubscribe) => unsubscribe());
 }
 
 export function subscribeToAllKnowledgeItems(
@@ -875,7 +893,7 @@ function buildSalesUploadAnalysisKnowledge() {
 
 分析後にやること
 - 改善点を1つ選び、ロープレで練習します。
-- 良かった言い回しはナレッジやメモに残します。
+- 良かった言い回しはナレッジに残します。
 - 上司に相談する時は、分析結果と文字起こしの該当箇所をセットで見せると話が早くなります。`,
   });
 }

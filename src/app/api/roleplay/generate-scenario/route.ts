@@ -135,7 +135,7 @@ export async function POST(request: Request) {
             role: "system",
             content: [
               "あなたは営業ロープレ教材を作る営業教育設計者です。",
-              "このロープレは長時間の模擬商談ではなく、10分以内で苦手テーマを集中的に反復する練習です。",
+              "このロープレは長時間の模擬商談ではなく、苦手テーマを1つから2つに絞って自分のペースで反復する集中練習です。時間制限がある前提で作らないでください。",
               isTeleapo
                 ? "今回はテレアポ/テレマの練習です。通常商談の短縮版ではなく、冒頭突破、話す許可取り、受付/担当者接続、短い興味喚起、断り文句への1回切り返し、アポ打診に特化したAI顧客シナリオを日本語で作成してください。"
                 : "商材情報、カテゴリー、ターゲット層、過去のアップロード分析に合わせて、営業担当者の弱点を1つから2つに絞ったAI顧客シナリオを日本語で作成してください。",
@@ -156,9 +156,9 @@ export async function POST(request: Request) {
                     "テレアポの場合、長い商品説明、粘りすぎ、相手の時間を奪う会話は減点条件として採点基準に入れてください。",
                   ]
                 : []),
-              "title にはできるだけ苦手テーマが分かる言葉を入れてください。例: 価格反論を効果訴求に切り返す10分練習、決裁者確認の抜け漏れ克服。",
-              "description には、どの弱点を何分程度で練習する課題かを明記してください。",
-              "goal には、10分以内に達成する行動を1文で具体的に書いてください。例: 価格反論に対して確認質問を返し、効果・事例・次回アクションまでつなげる。",
+              "title にはできるだけ苦手テーマが分かる言葉を入れてください。例: 価格反論を効果訴求に切り返す集中練習、決裁者確認の抜け漏れ克服。",
+              "description には、どの弱点をどの場面で重点練習する課題かを明記してください。分数や時間制限は書かないでください。",
+              "goal には、今回の練習で達成したい行動を1文で具体的に書いてください。例: 価格反論に対して確認質問を返し、効果・事例・次回アクションまでつなげる。",
               "difficulty は原則 hard にしてください。明らかに初回練習向けの場合のみ normal を許可します。easy は使わないでください。",
               "evaluationCriteria には、できたかどうか判定できる行動基準を6〜10個入れてください。最初の3項目は必ず弱点テーマに直結する合格条件にしてください。",
               "特に課題深掘り、価値接続、予算確認、決裁/社内確認、導入時期確認、次回アクション確定を優先してください。",
@@ -214,16 +214,16 @@ function buildFallbackScenario(product: ProductPayload, category: ScenarioCatego
   const improvementFocus = normalizeInsightFocus(meetingInsights[0] ?? "顧客課題を深掘りし、導入効果を具体的に示す");
   const fillerFocus = meetingInsights.find((item) => item.includes("話し癖改善") || item.includes("口癖") || item.includes("フィラー"));
   return {
-    title: `${product.name} ${category} ${resolvedTargetSegment} 弱点克服10分練習`,
-    description: `${resolvedTargetSegment}の${category}顧客に対して、過去分析で見えた改善点を10分以内で集中的に練習するシナリオです。`,
+    title: `${product.name} ${category} ${resolvedTargetSegment} 弱点克服集中練習`,
+    description: `${resolvedTargetSegment}の${category}顧客に対して、過去分析で見えた改善点を重点的に練習するシナリオです。`,
     targetSegment: resolvedTargetSegment,
     customerRole: category === "新規" ? "部門責任者" : "既存顧客の責任者",
     customerProfile: `${resolvedTargetSegment}領域で課題を感じているが、導入効果や運用負担に慎重な顧客。過去商談での改善テーマは「${improvementFocus}」。`,
-    goal: `10分以内に「${improvementFocus}」を重点練習し、顧客課題の確認、価値訴求、次回アクション合意までつなげる。${fillerFocus ? "話し癖を抑え、短く明確に話す練習も行う。" : ""}`,
+    goal: `「${improvementFocus}」を重点練習し、顧客課題の確認、価値訴求、次回アクション合意までつなげる。${fillerFocus ? "話し癖を抑え、短く明確に話す練習も行う。" : ""}`,
     objections: ["費用対効果が見えません", "今のやり方でも困っていません", "導入や運用が大変そうです"],
     evaluationCriteria: [
       `重点弱点「${improvementFocus}」に対して、確認質問または切り返しができている`,
-      "10分以内に練習テーマから話をそらさず、改善したい行動を実行できている",
+      "練習テーマから話をそらさず、改善したい行動を実行できている",
       "課題の背景・原因・影響まで深掘りできている",
       "商材価値を顧客の課題や成果に接続できている",
       "予算感・費用対効果・判断基準を確認できている",
@@ -245,7 +245,7 @@ function buildTeleapoFallbackScenario(product: ProductPayload, category: Scenari
   const improvementFocus = normalizeInsightFocus(meetingInsights[0] ?? "冒頭10秒で用件を伝え、話す許可を取る");
   return {
     title: `${product.name} ${resolvedTargetSegment} テレアポ弱点克服`,
-    description: `${resolvedTargetSegment}の${category}顧客に対して、${improvementFocus}を10分以内で反復するテレアポ専用シナリオです。`,
+    description: `${resolvedTargetSegment}の${category}顧客に対して、${improvementFocus}を重点的に反復するテレアポ専用シナリオです。`,
     targetSegment: resolvedTargetSegment,
     customerRole: "受付または担当者",
     customerProfile: `${resolvedTargetSegment}領域の電話対応者。忙しく、営業電話には警戒している。短く要件が伝わらない場合は会話を切ろうとする。`,

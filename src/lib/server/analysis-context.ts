@@ -80,14 +80,20 @@ function selectBestManual(
   manuals: DocumentData[],
   input: { productName: string; manualCategory: string; targetSegment: string; manualDomain: "meeting" | "teleapo" },
 ) {
+  const normalizedInputProductName = normalizeText(input.productName);
   const scored = manuals
     .map((manual) => {
       const manualDomain = readManualDomain(manual.manualDomain);
       const productName = normalizeText(readString(manual.productName));
       const manualCategory = normalizeText(readString(manual.manualCategory));
       const targetSegment = normalizeText(readString(manual.targetSegment));
+      const productMatches = normalizedInputProductName && isTextMatch(productName, normalizedInputProductName);
+      if (normalizedInputProductName && !productMatches) {
+        return { manual, score: -100 };
+      }
+
       const domainScore = manualDomain === input.manualDomain ? 10 : -20;
-      const productScore = input.productName && isTextMatch(productName, normalizeText(input.productName)) ? 8 : 0;
+      const productScore = productMatches ? 8 : 0;
       const categoryScore = input.manualCategory && manualCategory === input.manualCategory ? 5 : 0;
       const targetScore = input.targetSegment && isTextMatch(targetSegment, input.targetSegment) ? 4 : 0;
       return { manual, score: domainScore + productScore + categoryScore + targetScore };
@@ -95,7 +101,15 @@ function selectBestManual(
     .filter((item) => item.score > 0)
     .sort((left, right) => right.score - left.score);
 
-  return scored[0]?.manual ?? manuals.find((manual) => readManualDomain(manual.manualDomain) === input.manualDomain) ?? manuals[0] ?? null;
+  if (scored[0]) {
+    return scored[0].manual;
+  }
+
+  if (normalizedInputProductName) {
+    return null;
+  }
+
+  return manuals.find((manual) => readManualDomain(manual.manualDomain) === input.manualDomain) ?? null;
 }
 
 function isTextMatch(left: string, right: string) {
@@ -126,7 +140,7 @@ export function buildAnalysisContextPrompt(context: AnalysisContext) {
         `成功トーク: ${context.product.successTalk.join(" / ")}`,
         `NGトーク: ${context.product.ngTalk.join(" / ")}`,
         ...context.product.customFields.map((field) => `${field.label}: ${field.value}`),
-        `URL解析メモ: ${context.product.sourceSummary}`,
+        `URL解析: ${context.product.sourceSummary}`,
       ].filter((line) => !line.endsWith(": ")).join("\n"),
     );
   }

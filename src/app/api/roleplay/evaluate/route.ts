@@ -12,6 +12,11 @@ import { hashRoleplayPayload, normalizeRoleplaySessionId } from "@/lib/server/ro
 import type { AnalysisContext } from "@/lib/server/analysis-context";
 import { buildAnalysisContextPrompt, loadAnalysisContext } from "@/lib/server/analysis-context";
 import {
+  buildAnalysisConfigPrompt,
+  loadAnalysisConfig,
+  type ServerAnalysisConfig,
+} from "@/lib/server/analysis-configs";
+import {
   assertSalesDomainAccess,
   handleApiAuthError,
   requireApiUser,
@@ -108,11 +113,26 @@ export async function POST(request: NextRequest) {
     const roleplayType = body.scenario.roleplayType === "teleapo" ? "teleapo" : "meeting";
     assertSalesDomainAccess(apiUser, roleplayType);
     const sessionId = normalizeRoleplaySessionId(body.sessionId);
+    const analysisContext = await loadAnalysisContext({
+      companyId: apiUser.companyId,
+      productName: body.scenario.productName,
+      manualCategory: body.scenario.scenarioCategory,
+      targetSegment: body.scenario.targetSegment,
+      manualDomain: roleplayType,
+    });
+    const analysisConfig = await loadAnalysisConfig({
+      companyId: apiUser.companyId,
+      productName: body.scenario.productName,
+      analysisType: roleplayType === "teleapo" ? "teleapo_roleplay" : "meeting_roleplay",
+    });
+    const contextPrompt = buildAnalysisContextPrompt(analysisContext);
+    const analysisConfigPrompt = buildAnalysisConfigPrompt(analysisConfig);
     const cacheKey = buildEvaluationCacheKey({
       companyId: apiUser.companyId,
       userId: apiUser.uid,
       scenario: body.scenario,
       messages: body.messages,
+      analysisConfigPrompt,
     });
     const cachedEvaluation = await readCachedEvaluation(cacheKey);
     if (cachedEvaluation) {
@@ -135,14 +155,6 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const analysisContext = await loadAnalysisContext({
-      companyId: apiUser.companyId,
-      productName: body.scenario.productName,
-      manualCategory: body.scenario.scenarioCategory,
-      targetSegment: body.scenario.targetSegment,
-      manualDomain: roleplayType,
-    });
-    const contextPrompt = buildAnalysisContextPrompt(analysisContext);
     const response = await fetchWithTimeout("https://api.openai.com/v1/chat/completions", {
       method: "POST",
       headers: {
@@ -188,13 +200,14 @@ export async function POST(request: NextRequest) {
         messages: [
           {
             role: "system",
-            content: buildEvaluationSystemPrompt(roleplayType, Boolean(analysisContext.manual)),
+            content: buildEvaluationSystemPrompt(roleplayType, Boolean(analysisContext.manual || analysisConfig)),
           },
           {
             role: "user",
             content: [
               buildScenarioPrompt(body.scenario),
               contextPrompt ? `会社基準・商材情報:\n${contextPrompt}` : "会社基準・商材情報: 未登録",
+              analysisConfigPrompt ? `admin分析設定:\n${analysisConfigPrompt}` : "admin分析設定: 未登録",
               `会話ログ:\n${formatMessages(body.messages)}`,
             ].join("\n\n"),
           },
@@ -215,7 +228,7 @@ export async function POST(request: NextRequest) {
     if (!content) {
       throw new Error("AI評価本文が返りませんでした。");
     }
-    const evaluation = normalizeEvaluation(JSON.parse(content) as EvaluationResponse, analysisContext.manual);
+    const evaluation = normalizeEvaluation(JSON.parse(content) as EvaluationResponse, analysisContext.manual, analysisConfig);
     await saveCachedEvaluation({
       cacheKey,
       companyId: apiUser.companyId,
@@ -276,21 +289,21 @@ function buildEvaluationSystemPrompt(roleplayType: "meeting" | "teleapo", hasMan
 
   return [
     `あなたは営業${domainLabel}ロープレの評価者です。`,
-    "このロープレは10分以内で苦手テーマを反復する練習です。総合評価だけでなく、次回もう一度練習すべき弱点テーマを明確にしてください。",
+    "このロープレは時間制限ではなく、苦手テーマを絞って反復する集中練習です。総合評価だけでなく、次回もう一度練習すべき弱点テーマを明確にしてください。",
     "会話ログを時系列で読み、顧客発話に対する営業返答の質を評価してください。",
     "キーワードの有無だけで採点せず、直前の顧客の質問・懸念・反論に正面から答えているか、論点をずらしていないか、会話を前に進めているかを重視してください。",
     "顧客の発話を受け止めずに一般的な商品説明へ移った場合、返答品質を低く評価してください。",
     "良い返答は、顧客の発言を受け止め、必要な追加質問をし、商材価値・事例・条件確認へ自然につなげています。",
     "会社基準、商材情報、マニュアル、シナリオ採点基準、自由項目を全て分類軸として使ってください。",
     hasManual
-      ? "マニュアルがあるため、manualChecklistItems には登録マニュアルの評価基準・必須ヒアリング・クロージング基準の全項目を1件ずつ入れてください。AIの判断で項目を増やしたり言い換えたりしてはいけません。"
-      : "マニュアルがない場合、manualChecklistItems は空配列にしてください。",
-    "manualChecklistItems の category は 評価基準 / 必須ヒアリング / クロージング基準 のいずれか、label は登録項目の文言そのまま、status は done または missing にしてください。",
+      ? "マニュアルまたはadmin分析設定があるため、manualChecklistItems には登録された評価項目・必須項目・クロージング基準を1件ずつ入れてください。AIの判断で項目を増やしたり言い換えたりしてはいけません。"
+      : "マニュアルもadmin分析設定もない場合、manualChecklistItems は空配列にしてください。",
+    "manualChecklistItems の category は登録文脈に合わせ、label は登録項目の文言そのまま、status は done または missing にしてください。",
     "ロープレ会話上で実質的に確認・説明・合意できている場合だけ done にしてください。根拠が弱い、触れていない、曖昧な場合は missing です。",
     `評価軸は、課題把握、返答の的確さ、価値接続、反論対応、予算/決裁/時期確認、${finalAction}です。`,
-    "summary は、今回のロープレで最優先に直す弱点テーマと、次回10分練習で意識する行動を含めてください。",
+    "summary は、今回のロープレで最優先に直す弱点テーマと、次回の集中練習で意識する行動を含めてください。",
     "strengths と improvements は、できるだけ会話中の具体的な場面に触れてください。",
-    "improvements の先頭には、次回10分で集中的に練習するべき弱点テーマを1つ入れてください。",
+    "improvements の先頭には、次回集中的に練習するべき弱点テーマを1つ入れてください。",
     "improvementPhrases は次回そのまま使える自然な営業トークにしてください。特に弱点テーマの場面で使う言い換えを優先してください。",
     "根拠のない高得点は禁止です。会話が短い、質問に答えていない、マニュアル項目が未達なら厳しめに採点してください。",
     "日本語で返してください。",
@@ -302,20 +315,21 @@ function buildTeleapoEvaluationSystemPrompt(hasManual: boolean) {
     "あなたはテレアポ/テレマの営業ロープレ評価者です。",
     "このロープレは通常商談の短縮版ではありません。電話口での冒頭突破、話す許可、受付/担当者接続、短い興味喚起、断り対応、アポ打診を評価してください。",
     "会話ログを時系列で読み、営業が相手の時間を奪わず、短く自然に会話を前に進めたかを重視してください。",
+    "summary、strengths、improvements では、課題深掘り、予算確認、決裁確認、導入時期確認など通常商談の評価軸を主軸にしないでください。テレアポの目的は次接点を作ることです。",
     "評価軸は、冒頭10秒、話す許可、用件の明確さ、相手メリット、受付突破/担当者確認、断り文句への1回切り返し、アポ打診・日程候補提示、声の印象・テンポです。",
     "長い商品説明、相手の断りを無視した粘りすぎ、資料送付だけで終わる、アポ打診がない、担当者確認がない場合は厳しく評価してください。",
     "『営業電話ですか』『忙しいです』『資料送ってください』『結構です』『担当ではありません』への返し方を必ず評価してください。",
     "良い返答は、相手の状況を受け止め、30秒だけよいか等の許可を取り、相手に関係ある課題を一言で示し、短い日程候補または次接点を出しています。",
     "会社基準、商材情報、マニュアル、シナリオ採点基準、自由項目を全て分類軸として使ってください。",
     hasManual
-      ? "マニュアルがあるため、manualChecklistItems には登録マニュアルの評価基準・必須ヒアリング・クロージング基準の全項目を1件ずつ入れてください。AIの判断で項目を増やしたり言い換えたりしてはいけません。"
-      : "マニュアルがない場合、manualChecklistItems は空配列にしてください。",
-    "manualChecklistItems の category は 評価基準 / 必須ヒアリング / クロージング基準 のいずれか、label は登録項目の文言そのまま、status は done または missing にしてください。",
+      ? "マニュアルまたはadmin分析設定があるため、manualChecklistItems には登録された評価項目・必須項目・クロージング基準を1件ずつ入れてください。AIの判断で項目を増やしたり言い換えたりしてはいけません。"
+      : "マニュアルもadmin分析設定もない場合、manualChecklistItems は空配列にしてください。",
+    "manualChecklistItems の category は登録文脈に合わせ、label は登録項目の文言そのまま、status は done または missing にしてください。",
     "ロープレ会話上で実質的に確認・説明・合意できている場合だけ done にしてください。根拠が弱い、触れていない、曖昧な場合は missing です。",
-    "summary は、今回のテレアポで最優先に直す弱点テーマと、次回10分練習で意識する行動を含めてください。",
+    "summary は、今回のテレアポで最優先に直す弱点テーマと、次回の集中練習で意識する行動を含めてください。",
     "strengths と improvements は、できるだけ会話中の具体的な場面に触れてください。",
-    "improvements の先頭には、次回10分で集中的に練習するべきテレアポ弱点を1つ入れてください。",
-    "improvementPhrases は次回そのまま電話口で使える短い営業トークにしてください。1フレーズは長くしすぎないでください。",
+    "improvements の先頭には、次回集中的に練習するべきテレアポ弱点を1つ入れてください。",
+    "improvementPhrases は次回そのまま電話口で使える短い営業トークにしてください。冒頭突破、許可取り、断り切り返し、アポ打診のいずれかに寄せ、1フレーズは長くしすぎないでください。",
     "根拠のない高得点は禁止です。会話が短い、許可取りがない、断りに対応できていない、アポ打診がない場合は厳しめに採点してください。",
     "日本語で返してください。",
   ].join("\n");
@@ -348,8 +362,10 @@ function buildEvaluationCacheKey(input: {
   userId: string;
   scenario: RoleplayScenarioPayload;
   messages: RoleplayMessage[];
+  analysisConfigPrompt: string;
 }) {
   return hashRoleplayPayload({
+    evaluationContextVersion: 5,
     companyId: input.companyId ?? null,
     userId: input.userId,
     scenario: {
@@ -361,6 +377,7 @@ function buildEvaluationCacheKey(input: {
       evaluationCriteria: input.scenario.evaluationCriteria ?? [],
       customFields: input.scenario.customFields ?? [],
     },
+    analysisConfigPrompt: input.analysisConfigPrompt,
     messages: input.messages.map((message) => ({
       role: message.role,
       content: message.content.trim(),
@@ -409,8 +426,15 @@ function isRoleplayEvaluation(value: unknown): value is RoleplayEvaluation {
     Array.isArray(data.manualChecklistItems);
 }
 
-function normalizeEvaluation(value: EvaluationResponse, manual: AnalysisContext["manual"]) {
-  const manualChecklistItems = applyManualScoreImpacts(manual, normalizeManualChecklistItems(value.manualChecklistItems, manual));
+function normalizeEvaluation(
+  value: EvaluationResponse,
+  manual: AnalysisContext["manual"],
+  analysisConfig: ServerAnalysisConfig | null,
+) {
+  const manualChecklistItems = applyManualScoreImpacts(
+    manual,
+    normalizeManualChecklistItems(value.manualChecklistItems, manual, analysisConfig),
+  );
   const score = manualChecklistItems.length > 0
     ? calculateManualChecklistScore(manual, manualChecklistItems)
     : clampNumber(value.score, 0, 100, 40);
@@ -425,10 +449,14 @@ function normalizeEvaluation(value: EvaluationResponse, manual: AnalysisContext[
   };
 }
 
-function normalizeManualChecklistItems(value: unknown, manual: AnalysisContext["manual"]) {
-  if (!manual) return [];
+function normalizeManualChecklistItems(
+  value: unknown,
+  manual: AnalysisContext["manual"],
+  analysisConfig: ServerAnalysisConfig | null,
+) {
+  if (!manual && !analysisConfig) return [];
 
-  const checklist = buildManualChecklist(manual);
+  const checklist = buildManualChecklist(manual, analysisConfig);
   const returnedItems = Array.isArray(value) ? value : [];
   const returnedByDisplay = new Map<string, { status: "done" | "missing"; reason: string; scoreImpact: number | null }>();
 
@@ -484,12 +512,16 @@ function applyManualScoreImpacts(
   });
 }
 
-function buildManualChecklist(manual: AnalysisContext["manual"]) {
-  if (!manual) return [];
+function buildManualChecklist(manual: AnalysisContext["manual"], analysisConfig: ServerAnalysisConfig | null) {
   return [
-    ...manual.criteria.map((item) => ({ category: "評価基準", label: item.trim(), display: item.trim() })),
-    ...manual.requiredQuestions.map((item) => ({ category: "必須ヒアリング", label: item.trim(), display: `必須ヒアリング: ${item.trim()}` })),
-    ...manual.closingRules.map((item) => ({ category: "クロージング基準", label: item.trim(), display: `クロージング: ${item.trim()}` })),
+    ...(analysisConfig?.checklistItems.map((item) => ({
+      category: item.required ? "admin必須項目" : "admin評価項目",
+      label: item.label.trim(),
+      display: `${item.required ? "admin必須項目" : "admin評価項目"}: ${item.label.trim()}`,
+    })) ?? []),
+    ...(manual?.criteria.map((item) => ({ category: "評価基準", label: item.trim(), display: item.trim() })) ?? []),
+    ...(manual?.requiredQuestions.map((item) => ({ category: "必須ヒアリング", label: item.trim(), display: `必須ヒアリング: ${item.trim()}` })) ?? []),
+    ...(manual?.closingRules.map((item) => ({ category: "クロージング基準", label: item.trim(), display: `クロージング: ${item.trim()}` })) ?? []),
   ].filter((item) => item.label);
 }
 

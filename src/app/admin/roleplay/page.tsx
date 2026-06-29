@@ -216,7 +216,7 @@ export default function AdminRoleplayPage() {
         <PageHeader
           eyebrow="ROLEPLAY MANAGEMENT"
           title="ロープレ管理"
-          description="商談・テレアポ分析で見えた苦手テーマを、10分以内で繰り返し練習できる課題に変換します。"
+          description="商談・テレアポ分析で見えた苦手テーマを、自分のペースで繰り返し練習できる課題に変換します。"
           action={
             <button
               type="button"
@@ -483,7 +483,7 @@ export default function AdminRoleplayPage() {
                   value={assignmentReason}
                   onChange={(event) => setAssignmentReason(event.target.value)}
                   className="min-h-[96px] w-full resize-y rounded-[14px] border border-[#e4e8ef] bg-white px-3 py-3 text-[13px] leading-6 text-[#343b48] outline-none focus:border-[#e0bd4b]"
-                  placeholder="表示理由。例：価格反論で効果訴求が弱いため、10分で切り返しを練習"
+                  placeholder="表示理由。例：価格反論で効果訴求が弱いため、切り返しを重点練習"
                 />
                 <button
                   type="submit"
@@ -761,7 +761,7 @@ function ScenarioCreateDialog({
             <h2 className="text-[24px] font-black tracking-[-0.03em] text-[#171717]">{scenario ? "弱点特化シナリオ編集" : "弱点特化シナリオ作成"}</h2>
             <p className="mt-1 text-[13px] leading-6 text-[#7a808c]">
               {sourceDraft
-                ? "レビュー内容から苦手テーマを抽出し、10分以内で反復できる課題に変換します。"
+                ? "レビュー内容から苦手テーマを抽出し、重点的に反復できる課題に変換します。"
                 : "商材・カテゴリーから、苦手な反論や確認漏れを集中練習する課題をAI生成できます。"}
             </p>
           </div>
@@ -823,7 +823,7 @@ function ScenarioCreateDialog({
             </button>
           </div>
           <Field label="タイトル" className="md:col-span-2">
-            <input value={title} onChange={(event) => setTitle(event.target.value)} className="h-12 w-full rounded-[14px] border border-[#e4e8ef] bg-white px-4 text-[14px] text-[#171717] outline-none transition focus:border-[#e0bd4b]" placeholder="例：価格反論で効果訴求に切り返す10分練習" />
+            <input value={title} onChange={(event) => setTitle(event.target.value)} className="h-12 w-full rounded-[14px] border border-[#e4e8ef] bg-white px-4 text-[14px] text-[#171717] outline-none transition focus:border-[#e0bd4b]" placeholder="例：価格反論で効果訴求に切り返す集中練習" />
           </Field>
           <Field label="顧客役職">
             <input value={customerRole} onChange={(event) => setCustomerRole(event.target.value)} className="h-12 w-full rounded-[14px] border border-[#e4e8ef] bg-white px-4 text-[14px] text-[#171717] outline-none transition focus:border-[#e0bd4b]" placeholder="例：営業部長" />

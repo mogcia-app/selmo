@@ -623,7 +623,7 @@ export function KnowledgeEditorScreen({ mode, knowledgeId, audience = "sales" }:
         {isAdminAuthoring ? (
           <div className="mt-5 rounded-[18px] border border-[#f0e3c1] bg-[#fffaf0] px-5 py-4 text-[13px] leading-6 text-[#6f6250]">
             このページで作成したナレッジは、全salesが検索・閲覧できる公式ナレッジとして保存されます。
-            個人メモではなく、商談準備や回答品質の基準になる内容として登録してください。
+            個人用ではなく、商談準備や回答品質の基準になる内容として登録してください。
           </div>
         ) : null}
 
@@ -1167,7 +1167,7 @@ function RadioButton({
 }
 
 function readKind(value: string | null): CreateKnowledgeItemInput["kind"] | null {
-  if (value === "memo" || value === "qa" || value === "knowledge") {
+  if (value === "qa" || value === "knowledge") {
     return value;
   }
 
@@ -1306,7 +1306,6 @@ function buildKnowledgeTitle(input: {
   const bodyTitle = input.body.trim().replace(/\s+/g, " ").slice(0, 32);
   if (bodyTitle) return bodyTitle;
 
-  if (input.kind === "memo") return "無題のメモ";
   if (input.kind === "qa") return "無題のQ&A";
   return "無題のナレッジ";
 }

@@ -61,20 +61,25 @@ export default function SalesKnowledgeProductPage() {
     () => products.find((candidate) => candidate.id === productId) ?? null,
     [productId, products],
   );
+  const knowledgeItems = useMemo(() => items.filter((item) => item.kind !== "memo"), [items]);
   const productSections = useMemo(() => buildProductSections(product), [product]);
-  const tabs = useMemo(() => buildProductTabs(items, product?.tabs ?? [], productSections), [items, product?.tabs, productSections]);
+  const tabs = useMemo(() => buildProductTabs(knowledgeItems, product?.tabs ?? [], productSections), [knowledgeItems, product?.tabs, productSections]);
   const visibleItems = useMemo(
-    () =>
-      activeTab === "all"
-        ? items
-        : items.filter((item) => getProductTabTitle(item) === activeTab),
-    [activeTab, items],
+    () => {
+      const filteredItems =
+        activeTab === "all"
+          ? knowledgeItems
+          : knowledgeItems.filter((item) => getProductTabTitle(item) === activeTab);
+
+      return [...filteredItems].sort(compareKnowledgeItemsByCreatedAt);
+    },
+    [activeTab, knowledgeItems],
   );
   const visibleProductSections = useMemo(
     () => (activeTab === "all" ? productSections : productSections.filter((section) => section.title === activeTab)),
     [activeTab, productSections],
   );
-  const latestDate = formatLatestDate(items);
+  const latestDate = formatLatestDate(knowledgeItems);
   const handleDeleteProductTab = async (title: string) => {
     if (deletingTabTitle) return;
 
@@ -187,9 +192,8 @@ export default function SalesKnowledgeProductPage() {
 
             <div className="mt-6 flex flex-wrap gap-3 text-[13px] text-[#596273]">
               <Pill>{`商材情報 ${productSections.length > 0 ? 1 : 0}件`}</Pill>
-              <Pill>{`ナレッジ ${items.filter((item) => item.kind === "knowledge").length}件`}</Pill>
-              <Pill>{`メモ ${items.filter((item) => item.kind === "memo").length}件`}</Pill>
-              <Pill>{`Q&A ${items.filter((item) => item.kind === "qa").length}件`}</Pill>
+              <Pill>{`ナレッジ ${knowledgeItems.filter((item) => item.kind === "knowledge").length}件`}</Pill>
+              <Pill>{`Q&A ${knowledgeItems.filter((item) => item.kind === "qa").length}件`}</Pill>
               {latestDate ? <Pill>{`最終更新：${latestDate}`}</Pill> : null}
             </div>
           </section>
@@ -370,7 +374,7 @@ function buildProductSections(product: KnowledgeProduct | null): ProductSection[
     { title: "商材概要", body: product.description },
     { title: "商材URL", body: product.sourceUrl },
     { title: "ターゲット顧客", body: product.targetCustomer },
-    { title: "URL解析メモ", body: product.sourceSummary },
+    { title: "URL解析", body: product.sourceSummary },
     { title: "顧客課題", body: product.painPoints.join("\n") },
     { title: "価値訴求", body: product.valueProposition },
     { title: "料金", body: product.pricing },
@@ -387,6 +391,13 @@ function buildProductSections(product: KnowledgeProduct | null): ProductSection[
 
 function getProductTabTitle(item: KnowledgeItem) {
   return item.tabTitle || "未分類";
+}
+
+function compareKnowledgeItemsByCreatedAt(left: KnowledgeItem, right: KnowledgeItem) {
+  const leftTime = left.createdAt?.getTime() ?? left.updatedAt?.getTime() ?? 0;
+  const rightTime = right.createdAt?.getTime() ?? right.updatedAt?.getTime() ?? 0;
+
+  return leftTime - rightTime;
 }
 
 function TabButton({
@@ -442,7 +453,6 @@ function formatDate(date: Date | null) {
 }
 
 function formatKind(kind: KnowledgeItem["kind"]) {
-  if (kind === "memo") return "メモ";
   if (kind === "qa") return "Q&A";
   return "ナレッジ";
 }

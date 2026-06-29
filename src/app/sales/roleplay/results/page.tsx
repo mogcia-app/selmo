@@ -144,7 +144,7 @@ function ResultCard({
   isDeleting: boolean;
   onDelete: () => void;
 }) {
-  const analysis = buildTalkAnalysis(result.messages);
+  const analysis = buildTalkAnalysis(result.messages, result.evaluationCriteria, result.roleplayType);
   const salesTurnCount = result.messages.filter((message) => message.role === "sales").length;
   const primaryImprovement = result.improvements[0] ?? "詳細で改善ポイントを確認できます。";
 

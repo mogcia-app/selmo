@@ -27,6 +27,12 @@ const maxRoleplayAiResponses = 12;
 
 type VoicePreference = "female" | "male" | "default";
 type SpeechSpeed = "slow" | "normal" | "fast";
+type RoleplayResponseHint = {
+  breakthrough: string;
+  intent: string;
+  question: string;
+  phrase: string;
+};
 
 export default function SalesRoleplayPage() {
   const router = useRouter();
@@ -73,6 +79,10 @@ export default function SalesRoleplayPage() {
   const scenario = useMemo(
     () => visibleScenarios.find((item) => item.id === scenarioId) ?? null,
     [scenarioId, visibleScenarios],
+  );
+  const responseHint = useMemo(
+    () => (scenario ? buildRoleplayResponseHint(scenario, messages) : null),
+    [messages, scenario],
   );
 
   useEffect(() => {
@@ -382,7 +392,7 @@ export default function SalesRoleplayPage() {
                     <p className="text-[12px] font-bold text-[#8a6500]">{scenario.productName || "商材未設定"}</p>
                     <h1 className="mt-1 text-[24px] font-black tracking-[-0.03em] text-[#171717]">{scenario.title}</h1>
                     <p className="mt-2 text-[13px] leading-6 text-[#707783]">
-                      10分以内で苦手テーマを集中練習します。録音停止後に文字起こしし、AI顧客が音声で返答します。
+                      苦手テーマを自分のペースで集中練習します。録音停止後に文字起こしし、AI顧客が音声で返答します。
                     </p>
                   </div>
                   <div className="flex shrink-0 items-center gap-2">
@@ -417,6 +427,7 @@ export default function SalesRoleplayPage() {
                     音声を文字起こししています...
                   </div>
                 ) : null}
+                {responseHint ? <ResponseHintCard hint={responseHint} /> : null}
                 {isThinking ? (
                   <div className="max-w-[76%] rounded-[18px] border border-[#e6eaf0] bg-[#fcfcfd] px-4 py-3 text-[13px] font-semibold text-[#7a808c]">
                     AI顧客が考えています...
@@ -470,7 +481,7 @@ export default function SalesRoleplayPage() {
             <Image src="/mojiokoshi.png" alt="AIロープレ" width={180} height={180} priority className="mx-auto h-[140px] w-[140px] object-contain" />
             <h1 className="mt-5 text-[28px] font-black tracking-[-0.04em] text-[#171717]">シナリオを選択してください</h1>
             <p className="mx-auto mt-3 max-w-[560px] text-[15px] leading-7 text-[#596273]">
-              商材別・弱点別の練習テーマを選択すると、10分以内のAIロープレを開始できます。
+              商材別・弱点別の練習テーマを選択すると、AI顧客との集中ロープレを開始できます。
             </p>
             <Link href={`/sales/roleplay/scenarios?category=${roleplayType}`} className="mt-7 inline-flex h-12 items-center justify-center rounded-[14px] bg-[#ffd12f] px-7 text-[14px] font-black text-[#171717] shadow-[0_10px_22px_rgba(245,189,7,0.22)]">
               苦手テーマを選択
@@ -505,6 +516,35 @@ function CompactStatus({ label, value, active = false }: { label: string; value:
     <div className={`rounded-[14px] border px-3 py-2 ${active ? "border-[#ffd0cc] bg-[#fff4f2]" : "border-[#e6eaf0] bg-[#fcfcfd]"}`}>
       <div className="text-[10px] font-black text-[#8a909b]">{label}</div>
       <div className={`mt-0.5 truncate text-[12px] font-black ${active ? "text-[#d92d20]" : "text-[#171717]"}`}>{value}</div>
+    </div>
+  );
+}
+
+function ResponseHintCard({ hint }: { hint: RoleplayResponseHint }) {
+  return (
+    <aside className="ml-auto max-w-[86%] rounded-[18px] border border-[#f0d98a] bg-[#fffdf7] px-4 py-3 shadow-[0_8px_20px_rgba(245,189,7,0.08)]">
+      <div className="flex items-center gap-2 text-[12px] font-black text-[#8a6500]">
+        <HintIcon />
+        切り返しヒント
+      </div>
+      <div className="mt-3 rounded-[14px] border border-[#f4e0a2] bg-white px-3 py-2 text-[13px] leading-6">
+        <div className="text-[10px] font-black text-[#9a7a1d]">打破ポイント</div>
+        <div className="mt-1 font-black text-[#171717]">{hint.breakthrough}</div>
+      </div>
+      <div className="mt-2 grid gap-2 text-[13px] leading-6 text-[#343b48] md:grid-cols-3">
+        <HintStep label="受け止め" value={hint.intent} />
+        <HintStep label="確認質問" value={hint.question} />
+        <HintStep label="次の一言" value={hint.phrase} strong />
+      </div>
+    </aside>
+  );
+}
+
+function HintStep({ label, value, strong = false }: { label: string; value: string; strong?: boolean }) {
+  return (
+    <div className="rounded-[14px] bg-white px-3 py-2">
+      <div className="text-[10px] font-black text-[#9a7a1d]">{label}</div>
+      <div className={`mt-1 ${strong ? "font-black text-[#171717]" : "font-bold text-[#343b48]"}`}>{value}</div>
     </div>
   );
 }
@@ -563,7 +603,7 @@ function RoleplaySettingsModal({
             <div className="space-y-3">
               <InfoBlock label="役職" value={scenario.customerRole} />
               <InfoBlock label="プロフィール" value={scenario.customerProfile} />
-              <InfoBlock label="10分練習ゴール" value={scenario.goal} />
+              <InfoBlock label="練習ゴール" value={scenario.goal} />
               <InfoBlock label="苦手テーマを再現する想定反論" value={scenario.objections.join(" / ") || "未設定"} />
               {scenario.customFields.map((field) => (
                 <InfoBlock key={field.id} label={field.label} value={field.value} />
@@ -633,6 +673,16 @@ function VoiceSettingsIcon() {
       <path d="M5 9v6h3.2l4.3 3.3V5.7L8.2 9H5Z" />
       <path d="M16.2 8.2a5.2 5.2 0 0 1 0 7.6" />
       <path d="M18.8 5.8a8.8 8.8 0 0 1 0 12.4" />
+    </svg>
+  );
+}
+
+function HintIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true" className="h-4 w-4 fill-none stroke-current stroke-[2]">
+      <path d="M9 18h6" />
+      <path d="M10 22h4" />
+      <path d="M8.2 14.5a6 6 0 1 1 7.6 0c-.8.6-1.3 1.4-1.5 2.5H9.7c-.2-1.1-.7-1.9-1.5-2.5Z" />
     </svg>
   );
 }
@@ -811,8 +861,8 @@ function evaluateRoleplay(scenario: RoleplayScenario, messages: RoleplayMessage[
     summary: score >= 80
       ? "ロープレを完了しました。今回の苦手テーマに対して、課題確認から次回アクションまで進められています。"
       : score >= 65
-        ? "ロープレを完了しました。次回10分練習では、検討条件や次回アクションの確認を重点的に反復しましょう。"
-        : "ロープレを完了しました。次回10分練習では、提案説明より先に課題・予算・決裁・時期を確認する練習が必要です。",
+        ? "ロープレを完了しました。次回の集中練習では、検討条件や次回アクションの確認を重点的に反復しましょう。"
+        : "ロープレを完了しました。次回の集中練習では、提案説明より先に課題・予算・決裁・時期を確認する練習が必要です。",
     strengths: [
       questionCount > 0 ? "顧客に確認質問を投げられています。" : "提案内容を最後まで伝えられています。",
       hasValueConnection ? "商材価値を顧客の課題に結びつけようとしています。" : "会話を継続し、顧客の反応に合わせて回答できています。",
@@ -873,7 +923,7 @@ function evaluateTeleapoRoleplay(scenario: RoleplayScenario, messages: RoleplayM
     score,
     summary: score >= 70
       ? "テレアポロープレを完了しました。冒頭突破から次接点の提示まで進められています。"
-      : "テレアポロープレを完了しました。次回10分練習では、冒頭10秒・話す許可・アポ打診を重点的に反復しましょう。",
+      : "テレアポロープレを完了しました。次回の集中練習では、冒頭・話す許可・アポ打診を重点的に反復しましょう。",
     strengths: [
       hasOpening ? "電話口の入り方は作れています。" : "最後まで会話を続けられています。",
       hasShortValue ? "相手に関係する価値を伝えようとしています。" : "顧客の反応に合わせて返答できています。",
@@ -931,6 +981,103 @@ async function evaluateRoleplayWithAi(input: {
 
 function includesAny(text: string, keywords: string[]) {
   return keywords.some((keyword) => text.includes(keyword));
+}
+
+function buildRoleplayResponseHint(scenario: RoleplayScenario, messages: RoleplayMessage[]): RoleplayResponseHint | null {
+  const latestCustomerMessage = [...messages].reverse().find((message) => message.role === "customer");
+  if (!latestCustomerMessage) {
+    return null;
+  }
+
+  const customerText = latestCustomerMessage.content;
+  const normalizedText = customerText.toLowerCase();
+  const productName = scenario.productName || "このご提案";
+
+  if (scenario.roleplayType === "teleapo") {
+    return buildTeleapoResponseHint(scenario, normalizedText, productName);
+  }
+
+  if (includesAny(normalizedText, ["高い", "費用", "料金", "予算", "価格", "コスト"])) {
+    return {
+      breakthrough: "価格反論は説明で押さず、損失・工数・成果の比較軸に戻す",
+      intent: "金額だけで判断せず、費用対効果で整理する",
+      question: "今いちばん費用対効果を確認したい項目はどこですか？",
+      phrase: `「費用の懸念は当然です。${productName}で削減できる時間や失注リスクも含めて、比較材料を一緒に整理させてください。」`,
+    };
+  }
+
+  if (includesAny(normalizedText, ["忙しい", "時間", "今は", "後で", "余裕"])) {
+    return {
+      breakthrough: "商談化を急がず、短い確認の許可を取り直して会話を続ける",
+      intent: "相手の状況を受け止めて、短い確認に切り替える",
+      question: "今後検討するなら、何が分かると判断しやすいですか？",
+      phrase: "「お忙しいところありがとうございます。今日は結論まで求めず、判断に必要な条件だけ3分で確認させてください。」",
+    };
+  }
+
+  if (includesAny(normalizedText, ["必要ない", "いらない", "困ってない", "間に合って", "現状"])) {
+    return {
+      breakthrough: "必要性を説得せず、現状維持のリスクや例外ケースを聞く",
+      intent: "否定せず、現状維持の理由を聞く",
+      question: "今の運用で、あえて変えたくない理由はどこですか？",
+      phrase: "「現状で回っているのは良い状態ですね。逆に、今後もこのまま維持する上で不安な点がないかだけ確認させてください。」",
+    };
+  }
+
+  if (includesAny(normalizedText, ["他社", "比較", "競合", "すでに", "使って"])) {
+    return {
+      breakthrough: "他社利用を否定せず、比較軸を聞いて差分を作る",
+      intent: "他社利用を前提に、比較軸を聞く",
+      question: "今のサービスで満足している点と、少し足りない点は何ですか？",
+      phrase: `「すでに比較されているんですね。${productName}が合うか判断するために、今の比較軸を先に教えてください。」`,
+    };
+  }
+
+  const firstObjection = scenario.objections[0];
+  return {
+    breakthrough: "相手の拒否を1つに絞り、次の質問で会話の入口を作る",
+    intent: firstObjection ? `想定反論「${firstObjection}」に寄せて深掘りする` : "相手の発言を具体化する",
+    question: "その点で、具体的に不安なのは運用面・費用面・効果面のどれですか？",
+    phrase: "「ありがとうございます。今の懸念を一つずつ整理したいので、いちばん引っかかっている点から確認させてください。」",
+  };
+}
+
+function buildTeleapoResponseHint(scenario: RoleplayScenario, normalizedText: string, productName: string): RoleplayResponseHint {
+  if (includesAny(normalizedText, ["忙しい", "今無理", "時間ない", "結構", "大丈夫"])) {
+    return {
+      breakthrough: "断りを受けたら説明を増やさず、30秒の許可取りに戻す",
+      intent: "引かずに、短時間の許可取りに戻す",
+      question: "30秒だけ確認してもよろしいですか？",
+      phrase: `「お忙しいところ失礼しました。${productName}の件で、御社に関係あるか30秒だけ確認させてください。」`,
+    };
+  }
+
+  if (includesAny(normalizedText, ["資料", "送って", "メール", "あとで"])) {
+    return {
+      breakthrough: "資料送付で終えず、資料を見る理由と次回接点を先に作る",
+      intent: "資料送付で終わらせず、見る観点を作る",
+      question: "資料を見るなら、どの課題に関係する内容がよさそうですか？",
+      phrase: "「資料だけ送ると埋もれやすいので、見る観点を15分だけ先にすり合わせてもよろしいですか？」",
+    };
+  }
+
+  if (includesAny(normalizedText, ["担当じゃない", "わからない", "別部署", "担当者"])) {
+    return {
+      breakthrough: "売り込まず、担当部署・判断者にたどり着く質問へ切り替える",
+      intent: "担当者接続の情報を取りに行く",
+      question: "この領域はどちらの部署が見ていますか？",
+      phrase: "「ありがとうございます。確認だけですが、このテーマを見ている部署かご担当者様はどちらになりますか？」",
+    };
+  }
+
+  return {
+    breakthrough: scenario.difficulty === "hard"
+      ? "見込みなしに見える相手ほど、売り込まず「該当するか確認」で会話を1ターン延ばす"
+      : "興味喚起を短くして、相手が答えやすい確認質問にする",
+    intent: scenario.objections[0] ? `想定反論「${scenario.objections[0]}」を短く受ける` : "短く興味喚起する",
+    question: "今の運用で、少しでも改善したい点はありますか？",
+    phrase: "「売り込みではなく、該当するかの確認です。もし関係なければすぐ切りますので、一点だけ伺ってもよろしいですか？」",
+  };
 }
 
 function buildImprovementPhrases(scenario: RoleplayScenario, salesText: string) {

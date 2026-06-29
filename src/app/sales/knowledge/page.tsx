@@ -4,7 +4,7 @@ import { FirebaseError } from "firebase/app";
 import Image from "next/image";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { FormEvent, useEffect, useMemo, useState, type ReactNode } from "react";
+import { FormEvent, useEffect, useState, type ReactNode } from "react";
 
 import { useAuth } from "@/features/auth/auth-provider";
 import { getKnowledgeBasePath } from "@/lib/knowledge-paths";
@@ -12,10 +12,8 @@ import {
   createKnowledgeProduct,
   subscribeToKnowledgeProducts,
   subscribeToRecentKnowledgeSearches,
-  subscribeToVisibleKnowledgeItems,
   updateKnowledgeProduct,
   uploadKnowledgeProductLogo,
-  type KnowledgeItem,
   type KnowledgeProduct,
   type KnowledgeSearchHistory,
 } from "@/lib/firebase/knowledge";
@@ -29,7 +27,6 @@ export default function SalesKnowledgePage() {
   const knowledgeRole = basePath.startsWith("/admin") ? "admin" : "sales";
   const [searchTerm, setSearchTerm] = useState("");
   const [products, setProducts] = useState<KnowledgeProduct[]>([]);
-  const [items, setItems] = useState<KnowledgeItem[]>([]);
   const [searchHistory, setSearchHistory] = useState<KnowledgeSearchHistory[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [productDialogOpen, setProductDialogOpen] = useState(false);
@@ -45,7 +42,6 @@ export default function SalesKnowledgePage() {
   useEffect(() => {
     if (!userId || !companyId || !canAccessKnowledge) {
       setProducts([]);
-      setItems([]);
       setSearchHistory([]);
       return;
     }
@@ -55,7 +51,6 @@ export default function SalesKnowledgePage() {
     };
     const unsubscribers = [
       subscribeToKnowledgeProducts(companyId, setProducts, handleError),
-      subscribeToVisibleKnowledgeItems({ userId, companyId, role: knowledgeRole }, setItems, handleError),
       subscribeToRecentKnowledgeSearches(userId, setSearchHistory, handleError),
     ];
 
@@ -64,14 +59,6 @@ export default function SalesKnowledgePage() {
     };
   }, [canAccessKnowledge, companyId, knowledgeRole, userId]);
 
-  const personalItems = useMemo(
-    () => items.filter((item) => item.ownerId === userId && item.scope === "personal").slice(0, 3),
-    [items, userId],
-  );
-  const sharedItems = useMemo(
-    () => items.filter((item) => item.scope === "shared" && item.categoryId !== "how-to").slice(0, 3),
-    [items],
-  );
   const handleSearch = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const term = searchTerm.trim();
@@ -99,7 +86,7 @@ export default function SalesKnowledgePage() {
   };
 
   const openCreateDialog = (input?: {
-    kind?: "knowledge" | "memo" | "qa";
+    kind?: "knowledge" | "qa";
     scope?: "personal" | "shared";
     categoryId?: string | null;
   }) => {
@@ -131,7 +118,7 @@ export default function SalesKnowledgePage() {
                   </div>
                 </div>
                 <p className="mt-4 max-w-[760px] text-[14px] leading-7 text-[#596273]">
-                  管理者が共有した商材資料やマニュアル、自分で保存したメモをまとめて検索できます。
+                  管理者が共有した商材資料やマニュアル、自分で保存したナレッジをまとめて検索できます。
                 </p>
               </div>
               <div className="flex flex-wrap gap-3">
@@ -229,12 +216,12 @@ export default function SalesKnowledgePage() {
           </button>
         </div>
 
-        <div className="mt-5 flex gap-4 overflow-x-auto pb-2">
+        <div className="mt-5 grid gap-4 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
           {products.map((product) => (
             <Link
               key={product.id}
               href={`${basePath}/products/${product.id}`}
-              className="min-w-[240px] shrink-0 basis-[calc(50%_-_8px)] rounded-[20px] border border-[#eceef4] bg-[#fcfcfd] px-5 py-5 transition hover:border-[#ead8a8] hover:bg-[#fffdf7] xl:basis-[calc(25%_-_12px)]"
+              className="min-w-0 rounded-[20px] border border-[#eceef4] bg-[#fcfcfd] px-5 py-5 transition hover:border-[#ead8a8] hover:bg-[#fffdf7]"
             >
               <ProductLogo product={product} />
               <h3 className="mt-4 truncate text-[22px] font-bold text-[#171717]">{product.name}</h3>
@@ -246,34 +233,6 @@ export default function SalesKnowledgePage() {
           ))}
           <AddCard title="商材を追加" count="公式ナレッジの入口を作成" onClick={() => setProductDialogOpen(true)} />
         </div>
-      </section>
-
-      <section className="mt-6 grid gap-5 xl:grid-cols-2">
-        <KnowledgePanel
-          title="自分のナレッジ"
-          description="商談メモや、自分用にアレンジした内容"
-          items={personalItems}
-          emptyTitle="自分用メモを作成"
-          emptyBody="商材に紐づかないメモも保存できます"
-          actionLabel="メモを作成"
-          onAction={() => openCreateDialog({ kind: "memo", scope: "personal" })}
-          basePath={basePath}
-        />
-
-        <KnowledgePanel
-          title="共有されたナレッジ"
-          description="管理者やチームから配られた公式情報"
-          items={sharedItems}
-          emptyTitle="共有ナレッジはまだありません"
-          emptyBody="商材別に作られた公式ナレッジもここに表示されます"
-          actionLabel={canCreateShared ? "公式ナレッジを作成" : undefined}
-          onAction={
-            canCreateShared
-              ? () => openCreateDialog({ kind: "knowledge", scope: "shared" })
-              : undefined
-          }
-          basePath={basePath}
-        />
       </section>
 
       <ProductCreateDialog
@@ -433,93 +392,12 @@ function SimpleDialogFrame({
   );
 }
 
-function KnowledgePanel({
-  title,
-  description,
-  items,
-  emptyTitle,
-  emptyBody,
-  actionLabel,
-  onAction,
-  basePath,
-}: {
-  title: string;
-  description: string;
-  items: KnowledgeItem[];
-  emptyTitle: string;
-  emptyBody: string;
-  actionLabel?: string;
-  onAction?: () => void;
-  basePath: string;
-}) {
-  return (
-    <article className="min-w-0 rounded-[24px] border border-[#eceef4] bg-white px-6 py-6 shadow-[0_8px_20px_rgba(17,24,39,0.04)]">
-      <div>
-        <h2 className="text-[28px] font-bold tracking-[-0.04em] text-[#171717]">{title}</h2>
-        <p className="mt-1 text-[14px] text-[#7a808c]">{description}</p>
-      </div>
-
-      {items.length > 0 ? (
-        <div className="mt-5 grid gap-3">
-          {items.map((item) => (
-            <Link
-              key={item.id}
-              href={getKnowledgeDetailHref(item, basePath)}
-              className="block w-full min-w-0 rounded-[16px] border border-[#eef1f5] bg-[#fcfcfd] px-4 py-4 transition hover:border-[#ead8a8] hover:bg-[#fffdf7]"
-            >
-              <div className="min-w-0">
-                <div className="truncate text-[15px] font-semibold text-[#171717]">{item.title}</div>
-                <div className="mt-1 truncate text-[12px] leading-5 text-[#7a808c]">
-                  {item.description || item.body || "本文未入力"}
-                </div>
-              </div>
-              <div className="mt-3 flex flex-wrap items-center gap-2 text-[11px] font-bold text-[#8a909b]">
-                {item.tabTitle ? (
-                  <span className="rounded-full bg-[#fff3cf] px-2 py-0.5 text-[#8a6500]">{item.tabTitle}</span>
-                ) : null}
-                <span>更新：{formatDate(item.updatedAt)}</span>
-              </div>
-            </Link>
-          ))}
-        </div>
-      ) : (
-        <div className="mt-5 rounded-[18px] border border-dashed border-[#e0c36b] bg-[#fffdf7] px-5 py-8 text-center">
-          <span className="mx-auto inline-flex h-12 w-12 items-center justify-center rounded-[14px] bg-white text-[#9c7600] shadow-[0_6px_14px_rgba(17,24,39,0.05)]">
-            <PlusIcon />
-          </span>
-          <h3 className="mt-4 text-[18px] font-bold text-[#171717]">{emptyTitle}</h3>
-          <p className="mx-auto mt-2 max-w-[260px] text-[13px] leading-6 text-[#7a808c]">{emptyBody}</p>
-        </div>
-      )}
-
-      {actionLabel && onAction ? (
-        <button
-          type="button"
-          onClick={onAction}
-          className="mt-5 inline-flex h-[44px] w-full items-center justify-center gap-2 rounded-[14px] border border-[#f0c655] bg-white text-[14px] font-semibold text-[#171717]"
-        >
-          <PlusIcon />
-          {actionLabel}
-        </button>
-      ) : null}
-    </article>
-  );
-}
-
-function getKnowledgeDetailHref(item: KnowledgeItem, basePath: string) {
-  if (item.productId) {
-    return `${basePath}/products/${item.productId}/knowledge/${item.id}`;
-  }
-
-  return `${basePath}/categories/${item.categoryId ?? "how-to"}/knowledge/${item.id}`;
-}
-
 function AddCard({ title, count, onClick }: { title: string; count: string; onClick: () => void }) {
   return (
     <button
       type="button"
       onClick={onClick}
-      className="min-h-[126px] min-w-[240px] shrink-0 basis-[calc(50%_-_8px)] rounded-[20px] border border-dashed border-[#e0c36b] bg-[#fffdf7] px-6 py-5 text-left transition hover:border-[#d7ad35] hover:bg-[#fff9e8] xl:basis-[calc(25%_-_12px)]"
+      className="min-h-[126px] min-w-0 rounded-[20px] border border-dashed border-[#e0c36b] bg-[#fffdf7] px-6 py-5 text-left transition hover:border-[#d7ad35] hover:bg-[#fff9e8]"
     >
       <span className="inline-flex h-11 w-11 items-center justify-center rounded-[14px] bg-white text-[#9c7600] shadow-[0_6px_14px_rgba(17,24,39,0.05)]">
         <PlusIcon />
@@ -528,15 +406,6 @@ function AddCard({ title, count, onClick }: { title: string; count: string; onCl
       <span className="mt-2 block text-[14px] text-[#6d7481]">{count}</span>
     </button>
   );
-}
-
-function formatDate(date: Date | null) {
-  if (!date) return "未登録";
-
-  return new Intl.DateTimeFormat("ja-JP", {
-    month: "2-digit",
-    day: "2-digit",
-  }).format(date);
 }
 
 function SearchIcon() {

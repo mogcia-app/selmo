@@ -102,7 +102,7 @@ export default function SalesKnowledgeSearchPage() {
     });
   }, [canAccessKnowledge, query, userId]);
 
-  const results = useMemo(() => filterKnowledgeItems(items, query), [items, query]);
+  const results = useMemo(() => filterKnowledgeItems(items, query).filter((item) => item.kind !== "memo"), [items, query]);
   const productResults = useMemo(() => filterKnowledgeProducts(products, query), [products, query]);
   const knowledgeEvidence = useMemo(() => buildSearchEvidence(results, query, basePath), [basePath, query, results]);
   const productEvidence = useMemo(() => buildProductEvidence(productResults, basePath), [basePath, productResults]);
@@ -110,10 +110,6 @@ export default function SalesKnowledgeSearchPage() {
     () => [...knowledgeEvidence, ...productEvidence],
     [knowledgeEvidence, productEvidence],
   );
-  const personalResults = results.filter((item) => item.scope === "personal");
-  const sharedResults = results.filter((item) => item.scope === "shared");
-  const qaResults = results.filter((item) => item.kind === "qa");
-
   useEffect(() => {
     if (!userId || !query || !canAccessKnowledge) return;
 
@@ -237,13 +233,6 @@ export default function SalesKnowledgeSearchPage() {
               <PlusIcon />
               ナレッジを作成
             </Link>
-            <Link
-              href={`${basePath}/new?kind=memo&scope=personal`}
-              className="inline-flex h-[42px] items-center gap-2 rounded-[14px] border border-[#e6eaf0] bg-white px-4 text-[13px] font-semibold text-[#3d4350] shadow-[0_8px_18px_rgba(17,24,39,0.05)]"
-            >
-              <PenIcon />
-              メモを作成
-            </Link>
             <span className="inline-flex h-[42px] w-[42px] items-center justify-center rounded-full bg-[#171717] shadow-[0_10px_18px_rgba(17,24,39,0.12)]">
               <Image src="/nareji.png" alt="ナレッジ" width={30} height={30} className="h-[30px] w-[30px] object-contain" />
             </span>
@@ -327,10 +316,6 @@ export default function SalesKnowledgeSearchPage() {
 
           <EvidenceSection query={query} evidence={evidence} />
           <ProductResultSection query={query} products={productResults} basePath={basePath} />
-          <ResultSection title="関連ナレッジ" query={query} items={results} emptyTitle="関連ナレッジはまだありません" basePath={basePath} />
-          <ResultSection title="マイナレッジ" query={query} items={personalResults} emptyTitle="自分のナレッジはまだありません" basePath={basePath} />
-          <ResultSection title="共有ナレッジ" query={query} items={sharedResults} emptyTitle="共有ナレッジはまだありません" basePath={basePath} />
-          <ResultSection title="関連するQ&A" query={query} items={qaResults} emptyTitle="関連するQ&Aはまだありません" basePath={basePath} />
         </div>
 
         <aside className="space-y-5">
@@ -340,33 +325,12 @@ export default function SalesKnowledgeSearchPage() {
               <SummaryRow label="商材情報" value={`${productResults.length}件`} icon={<BriefcaseIcon />} />
               <SummaryRow label="関連ナレッジ" value={`${results.length}件`} icon={<DocumentIcon />} />
               <SummaryRow label="根拠箇所" value={`${evidence.reduce((total, item) => total + item.snippets.length, 0)}件`} icon={<SparkIcon />} />
-              <SummaryRow label="マイナレッジ" value={`${personalResults.length}件`} icon={<DocumentIcon />} />
-              <SummaryRow label="共有ナレッジ" value={`${sharedResults.length}件`} icon={<BriefcaseIcon />} />
-              <SummaryRow label="関連Q&A" value={`${qaResults.length}件`} icon={<QuestionIcon />} />
             </div>
             <div className="mt-5 border-t border-[#eef1f5] pt-5">
               <SummaryRow label="最終更新日" value={formatLatestDate(results)} icon={<ClockIcon />} />
             </div>
           </section>
 
-          <section className="rounded-[20px] border border-[#eceef4] bg-white px-5 py-6 text-center shadow-[0_8px_22px_rgba(17,24,39,0.04)]">
-            <Image src="/nareji.png" alt="ナレッジ" width={76} height={76} className="mx-auto h-[76px] w-[76px] object-contain" />
-            <h2 className="mt-4 text-[16px] font-bold leading-6 text-[#171717]">
-              探している情報が
-              <br />
-              見つかりませんか？
-            </h2>
-            <p className="mt-3 text-[13px] leading-6 text-[#7a808c]">
-              ナレッジのリクエストやメモの作成ができます
-            </p>
-            <button
-              type="button"
-              className="mt-5 inline-flex h-[42px] w-full items-center justify-center gap-2 rounded-[14px] border border-[#f0c655] bg-white text-[13px] font-semibold text-[#171717]"
-            >
-              <MailIcon />
-              リクエストする
-            </button>
-          </section>
         </aside>
       </div>
     </main>
@@ -470,65 +434,6 @@ function ProductResultSection({
   );
 }
 
-function ResultSection({
-  title,
-  query,
-  items,
-  emptyTitle,
-  basePath,
-}: {
-  title: string;
-  query: string;
-  items: KnowledgeItem[];
-  emptyTitle: string;
-  basePath: string;
-}) {
-  return (
-    <section className="rounded-[20px] border border-[#eceef4] bg-white px-5 py-5 shadow-[0_8px_22px_rgba(17,24,39,0.04)]">
-      <h2 className="text-[17px] font-bold text-[#171717]">{title}</h2>
-      {items.length > 0 ? (
-        <div className="mt-4 grid gap-4 lg:grid-cols-3">
-          {items.map((item) => (
-            <Link
-              key={item.id}
-              href={getKnowledgeDetailHref(item, basePath)}
-              className="min-w-0 rounded-[16px] border border-[#eef1f5] bg-[#fcfcfd] px-4 py-4 transition hover:border-[#ead8a8] hover:bg-[#fffdf7]"
-            >
-              <div className="flex items-start gap-3">
-                <span className="mt-0.5 text-[#4f7df3]">
-                  <DocumentIcon />
-                </span>
-                <h3 className="text-[14px] font-bold leading-5 text-[#171717]">{item.title}</h3>
-              </div>
-              <p className="mt-3 line-clamp-2 text-[12px] leading-5 text-[#6d7481]">
-                {item.description || item.body || "本文未入力"}
-              </p>
-              {query ? (
-                <p className="mt-3 border-l-4 border-[#ffd84d] bg-white px-3 py-2 text-[12px] leading-5 text-[#343b48]">
-                  <HighlightedText text={buildBestSnippet(item, query) || "該当箇所を詳細で確認できます。"} query={query} />
-                </p>
-              ) : null}
-              <div className="mt-4 flex flex-wrap items-center justify-between gap-2 text-[11px] text-[#8a909b]">
-                <span className="flex flex-wrap items-center gap-1.5">
-                  <span>{item.scope === "shared" ? "共有" : "自分用"}</span>
-                  {item.tabTitle ? (
-                    <span className="rounded-full bg-[#fff3cf] px-2 py-0.5 font-bold text-[#8a6500]">
-                      {item.tabTitle}
-                    </span>
-                  ) : null}
-                </span>
-                <span>{formatDate(item.updatedAt)}</span>
-              </div>
-            </Link>
-          ))}
-        </div>
-      ) : (
-        <EmptyBlock icon={<DocumentIcon />} title={emptyTitle} body="条件に合うデータが登録されると、ここに表示されます。" />
-      )}
-    </section>
-  );
-}
-
 function getKnowledgeDetailHref(item: KnowledgeItem, basePath: string) {
   if (item.productId) {
     return `${basePath}/products/${item.productId}/knowledge/${item.id}`;
@@ -558,22 +463,18 @@ function buildSearchEvidence(items: KnowledgeItem[], query: string, basePath: st
 function buildKnowledgeSnippets(item: KnowledgeItem, query: string) {
   const searchTerms = buildKnowledgeSearchTerms(query);
   const candidates = [
-    item.description,
-    ...splitTextIntoSentences(item.body),
-    ...item.links.flatMap((link) => [link.title, link.description, link.url]),
-    ...item.attachments.map((attachment) => attachment.name),
+    ...extractMatchingSnippets(item.description, searchTerms),
+    ...extractMatchingSnippets(item.body, searchTerms),
+    ...item.links.flatMap((link) => [
+      ...extractMatchingSnippets(link.title, searchTerms),
+      ...extractMatchingSnippets(link.description, searchTerms),
+      ...extractMatchingSnippets(link.url, searchTerms),
+    ]),
+    ...item.attachments.flatMap((attachment) => extractMatchingSnippets(attachment.name, searchTerms)),
   ].filter(Boolean);
 
   return Array.from(
-    new Set(
-      candidates
-        .filter((candidate) => {
-          const normalizedCandidate = candidate.toLowerCase();
-          return searchTerms.some((term) => normalizedCandidate.includes(term));
-        })
-        .map((candidate) => candidate.trim())
-        .filter(Boolean),
-    ),
+    new Set(candidates.map((candidate) => candidate.trim()).filter(Boolean)),
   ).slice(0, 4);
 }
 
@@ -585,10 +486,7 @@ function filterKnowledgeProducts(products: KnowledgeProduct[], query: string) {
 
   return products
     .map((product) => {
-      const snippets = buildProductSnippets(product).filter((snippet) => {
-        const searchableText = `${product.name} ${snippet.label} ${snippet.value}`.toLowerCase();
-        return searchTerms.some((term) => searchableText.includes(term));
-      });
+      const snippets = buildProductSnippets(product, searchTerms);
 
       return { product, snippets };
     })
@@ -607,12 +505,12 @@ function buildProductEvidence(products: Array<{ product: KnowledgeProduct; snipp
   }));
 }
 
-function buildProductSnippets(product: KnowledgeProduct): ProductSnippet[] {
-  return [
+function buildProductSnippets(product: KnowledgeProduct, searchTerms: string[]): ProductSnippet[] {
+  const sourceSnippets = [
     { label: "商材概要", value: product.description },
     { label: "商材URL", value: product.sourceUrl },
     { label: "ターゲット顧客", value: product.targetCustomer },
-    { label: "URL解析メモ", value: product.sourceSummary },
+    { label: "URL解析", value: product.sourceSummary },
     { label: "顧客課題", value: product.painPoints.join("\n") },
     { label: "価値訴求", value: product.valueProposition },
     { label: "料金", value: product.pricing },
@@ -622,13 +520,80 @@ function buildProductSnippets(product: KnowledgeProduct): ProductSnippet[] {
     { label: "成功トーク", value: product.successTalk.join("\n") },
     { label: "NGトーク", value: product.ngTalk.join("\n") },
     ...product.customFields.map((field) => ({ label: field.label, value: field.value })),
-  ]
-    .map((snippet) => ({ label: snippet.label.trim(), value: snippet.value.trim() }))
+  ];
+  const snippets = sourceSnippets
+    .flatMap((snippet) =>
+      extractMatchingSnippets(snippet.value, searchTerms)
+        .slice(0, 1)
+        .map((value) => ({ label: snippet.label.trim(), value })),
+    )
     .filter((snippet) => snippet.label && snippet.value);
+
+  if (snippets.length > 0) {
+    return snippets;
+  }
+
+  const productNameMatches = searchTerms.some((term) => product.name.toLowerCase().includes(term));
+  const fallbackSnippet = sourceSnippets.find((snippet) => snippet.value.trim());
+
+  return productNameMatches && fallbackSnippet
+    ? [{ label: fallbackSnippet.label, value: truncateSnippet(fallbackSnippet.value) }]
+    : [];
 }
 
-function buildBestSnippet(item: KnowledgeItem, query: string) {
-  return buildKnowledgeSnippets(item, query)[0] ?? "";
+function extractMatchingSnippets(value: string, searchTerms: string[]) {
+  const normalizedValue = value.trim();
+  if (!normalizedValue || searchTerms.length === 0) {
+    return [];
+  }
+
+  const segments = splitTextIntoSentences(normalizedValue.replace(/\s+(Q[.．]|A[.．])/g, "\n$1"));
+  const snippets = segments.flatMap((segment, index) => {
+    const normalizedSegment = segment.toLowerCase();
+    const isMatch = searchTerms.some((term) => normalizedSegment.includes(term));
+    if (!isMatch) {
+      return [];
+    }
+
+    const nextSegment = segments[index + 1] ?? "";
+    const shouldIncludeAnswer = /^Q[.．]/i.test(segment) && /^A[.．]/i.test(nextSegment);
+    return [truncateSnippet(shouldIncludeAnswer ? `${segment} ${nextSegment}` : segment)];
+  });
+
+  if (snippets.length > 0) {
+    return Array.from(new Set(snippets));
+  }
+
+  const normalizedText = normalizedValue.toLowerCase();
+  if (!searchTerms.some((term) => normalizedText.includes(term))) {
+    return [];
+  }
+
+  return [truncateAroundMatch(normalizedValue, searchTerms)];
+}
+
+function truncateSnippet(value: string, maxLength = 220) {
+  const normalized = value.replace(/\s+/g, " ").trim();
+  return normalized.length > maxLength ? `${normalized.slice(0, maxLength - 1)}…` : normalized;
+}
+
+function truncateAroundMatch(value: string, searchTerms: string[]) {
+  const normalized = value.replace(/\s+/g, " ").trim();
+  const lower = normalized.toLowerCase();
+  const matchIndex = searchTerms.reduce((bestIndex, term) => {
+    const index = lower.indexOf(term);
+    if (index < 0) return bestIndex;
+    if (bestIndex < 0 || index < bestIndex) return index;
+    return bestIndex;
+  }, -1);
+
+  if (matchIndex < 0) {
+    return truncateSnippet(normalized);
+  }
+
+  const start = Math.max(0, matchIndex - 50);
+  const end = Math.min(normalized.length, matchIndex + 170);
+  return `${start > 0 ? "…" : ""}${normalized.slice(start, end)}${end < normalized.length ? "…" : ""}`;
 }
 
 function splitTextIntoSentences(text: string) {
@@ -689,7 +654,6 @@ function escapeRegExp(value: string) {
 
 function formatKind(kind: KnowledgeItem["kind"] | "product") {
   if (kind === "product") return "商材情報";
-  if (kind === "memo") return "メモ";
   if (kind === "qa") return "Q&A";
   return "ナレッジ";
 }
@@ -755,15 +719,6 @@ function PlusIcon() {
   );
 }
 
-function PenIcon() {
-  return (
-    <svg viewBox="0 0 24 24" aria-hidden="true" className="h-4 w-4 fill-none stroke-current stroke-[1.9]">
-      <path d="m4 20 4.2-1 9.9-9.9a1.8 1.8 0 0 0 0-2.6l-.6-.6a1.8 1.8 0 0 0-2.6 0L5 15.8 4 20Z" />
-      <path d="m13.5 6.5 4 4" />
-    </svg>
-  );
-}
-
 function ArrowLeftIcon() {
   return (
     <svg viewBox="0 0 24 24" aria-hidden="true" className="h-4 w-4 fill-none stroke-current stroke-[2]">
@@ -798,30 +753,11 @@ function BriefcaseIcon() {
   );
 }
 
-function QuestionIcon() {
-  return (
-    <svg viewBox="0 0 24 24" aria-hidden="true" className="h-4 w-4 fill-none stroke-current stroke-[1.9]">
-      <circle cx="12" cy="12" r="8" />
-      <path d="M9.8 9a2.4 2.4 0 0 1 4.4 1.3c0 1.7-2.2 2.1-2.2 3.7" />
-      <path d="M12 17h.01" />
-    </svg>
-  );
-}
-
 function ClockIcon() {
   return (
     <svg viewBox="0 0 24 24" aria-hidden="true" className="h-4 w-4 fill-none stroke-current stroke-[1.9]">
       <circle cx="12" cy="12" r="8" />
       <path d="M12 8v4.5l3 1.8" />
-    </svg>
-  );
-}
-
-function MailIcon() {
-  return (
-    <svg viewBox="0 0 24 24" aria-hidden="true" className="h-4 w-4 fill-none stroke-current stroke-[1.9]">
-      <rect x="4" y="6" width="16" height="12" rx="2.5" />
-      <path d="m5 8 7 5 7-5" />
     </svg>
   );
 }

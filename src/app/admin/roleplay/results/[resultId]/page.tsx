@@ -5,6 +5,7 @@ import { FormEvent, useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
 
 import { EmptyState, PageHeader, PageShell, Panel, useAdminInsights } from "@/app/admin/_components/admin-insights";
+import { RoleplayEmotionAnalysisBlock } from "@/app/sales/roleplay/results/roleplay-result-analysis";
 import { useAuth } from "@/features/auth/auth-provider";
 import { createAppNotification } from "@/lib/firebase/notifications";
 import {
@@ -218,6 +219,7 @@ export default function AdminRoleplayResultDetailPage() {
                   <ListBlock title="改善ポイント" items={result.improvements} />
                   <DetailBlock title="実施情報" body={`営業マン: ${member?.name ?? "未設定"}\n会話数: ${result.messages.length}件\n実施日: ${formatDate(result.createdAt)}`} />
                 </div>
+                <RoleplayEmotionAnalysisBlock messages={result.messages} />
                 {result.manualChecklistItems && result.manualChecklistItems.length > 0 ? (
                   <ManualChecklistBlock items={result.manualChecklistItems} score={result.score} />
                 ) : null}

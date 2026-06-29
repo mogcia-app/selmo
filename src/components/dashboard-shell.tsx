@@ -68,6 +68,7 @@ const adminSections: Array<{ label: string; items: NavItem[] }> = [
       { href: "/admin/roleplay", label: "ロープレ管理", num: "08" },
       { href: "/admin/products", label: "商材管理", num: "09" },
       { href: "/admin/manuals", label: "マニュアル", num: "10" },
+      { href: "/admin/analysis-configs", label: "AI分析設定", num: "11" },
     ],
   },
 ];

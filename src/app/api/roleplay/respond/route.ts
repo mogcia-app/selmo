@@ -12,6 +12,7 @@ import {
   reserveRoleplayAiResponse,
 } from "@/lib/server/roleplay-cost-control";
 import { MONTHLY_AI_LIMIT_MESSAGE } from "@/lib/ai-usage-limit";
+import { buildAnalysisContextPrompt, loadAnalysisContext } from "@/lib/server/analysis-context";
 import {
   assertSalesDomainAccess,
   handleApiAuthError,
@@ -74,7 +75,8 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    assertSalesDomainAccess(apiUser, body.scenario.roleplayType === "teleapo" ? "teleapo" : "meeting");
+    const roleplayType = body.scenario.roleplayType === "teleapo" ? "teleapo" : "meeting";
+    assertSalesDomainAccess(apiUser, roleplayType);
     const sessionId = normalizeRoleplaySessionId(body.sessionId);
     if (!sessionId) {
       return NextResponse.json({ error: "ロープレセッション情報が必要です。" }, { status: 400 });
@@ -104,6 +106,15 @@ export async function POST(request: NextRequest) {
       roleplayType: body.scenario.roleplayType ?? null,
     });
 
+    const analysisContext = await loadAnalysisContext({
+      companyId: apiUser.companyId,
+      productName: body.scenario.productName,
+      manualCategory: body.scenario.scenarioCategory,
+      targetSegment: body.scenario.targetSegment,
+      manualDomain: roleplayType,
+    });
+    const contextPrompt = buildAnalysisContextPrompt(analysisContext);
+
     const response = await fetchWithTimeout("https://api.openai.com/v1/chat/completions", {
       method: "POST",
       headers: {
@@ -113,7 +124,7 @@ export async function POST(request: NextRequest) {
       body: JSON.stringify({
         model,
         temperature: 0.75,
-        messages: buildOpenAiMessages(body.scenario, body.messages),
+        messages: buildOpenAiMessages(body.scenario, body.messages, contextPrompt),
       }),
     });
 
@@ -203,7 +214,7 @@ export async function POST(request: NextRequest) {
   }
 }
 
-function buildOpenAiMessages(scenario: RoleplayScenarioPayload, messages: RoleplayMessage[]) {
+function buildOpenAiMessages(scenario: RoleplayScenarioPayload, messages: RoleplayMessage[], contextPrompt: string) {
   const recentMessages = messages.slice(-8);
   const earlierMessages = messages.slice(0, -8);
 
@@ -212,6 +223,14 @@ function buildOpenAiMessages(scenario: RoleplayScenarioPayload, messages: Rolepl
       role: "system",
       content: buildSystemPrompt(scenario),
     },
+    ...(contextPrompt
+      ? [
+          {
+            role: "system",
+            content: buildCustomerContextPrompt(scenario, contextPrompt),
+          },
+        ]
+      : []),
     ...(earlierMessages.length > 0
       ? [
           {
@@ -225,6 +244,20 @@ function buildOpenAiMessages(scenario: RoleplayScenarioPayload, messages: Rolepl
       content: truncateMessageContent(message.content, 900),
     })),
   ];
+}
+
+function buildCustomerContextPrompt(scenario: RoleplayScenarioPayload, contextPrompt: string) {
+  const isTeleapo = scenario.roleplayType === "teleapo";
+  return [
+    "以下はAI顧客役が裏側で知っている商材ナレッジ・該当マニュアル・過去分析です。",
+    "営業担当者にはこの文脈をそのまま開示せず、顧客として自然な反応に変換してください。",
+    "商材情報やFAQは、顧客が質問したり営業説明を受けた時の判断材料として使ってください。",
+    "営業成功基準やマニュアルは、営業ができているかを顧客の反応で試すために使ってください。模範解答や採点コメントとして返してはいけません。",
+    isTeleapo
+      ? "テレアポでは、商材ナレッジに合う短い興味喚起・よくある反論・FAQを踏まえつつ、許可取りや次接点打診が弱ければ電話口らしく警戒してください。"
+      : "商談では、商材ナレッジに合う課題・価値・料金・FAQを踏まえつつ、確認不足や説明不足があれば顧客として懸念を返してください。",
+    `【参照文脈】\n${contextPrompt}`,
+  ].join("\n");
 }
 
 function summarizeEarlierMessages(messages: RoleplayMessage[]) {
@@ -259,6 +292,9 @@ function buildSystemPrompt(scenario: RoleplayScenarioPayload) {
     "あなたは必ず顧客としてだけ話してください。営業担当者の台詞、営業側の提案文、模範解答、解説を生成してはいけません。",
     "返答の主語は顧客側です。「私は営業として」「弊社では提案します」のような営業側の発言は禁止です。",
     "営業担当者の練習になるように、顧客として自然に返答してください。",
+    "人間味のある顧客として、短い相づち、迷い、面倒くささ、社内事情、少しの本音を混ぜてください。",
+    "毎回きれいな反論文にせず、『うーん』『正直』『今の話だと』『そこは少し気になります』のような自然な温度感を使ってください。",
+    "ただし感情表現を大げさにしすぎず、実際の商談・電話でありそうな口調にしてください。",
     "一度に長く話しすぎず、1〜3文で返してください。",
     ...(isTeleapo
       ? [
@@ -268,6 +304,7 @@ function buildSystemPrompt(scenario: RoleplayScenarioPayload) {
           "受付役の場合、担当者名・部署・用件が明確でないと取り次がないでください。",
           "担当者役の場合、興味喚起が弱いと『資料送ってください』『今は間に合っています』『結構です』で終わらせようとしてください。",
           "営業が断りに対して粘りすぎた場合は、さらに強く断ってください。自然な1回の切り返しには、少しだけ会話を続けてください。",
+          "難しい相手でも完全な無関心だけで終わらせず、営業がうまく許可取り・課題仮説・短い確認を出した場合は、少しだけ本音や条件を漏らしてください。",
           "営業が30秒だけよいか等の許可を取り、業界課題を短く刺し、日程候補を出した場合のみ、前向きに反応してください。",
           "テレアポでは売り込みの詳細説明より、話す許可、担当者接続、短い課題仮説、アポ打診を重視してください。",
         ]
@@ -279,7 +316,7 @@ function buildSystemPrompt(scenario: RoleplayScenarioPayload) {
       ? "商品説明だけが長く、話す許可・担当者確認・アポ打診がない場合は、電話を終えようとしてください。"
       : "商材説明だけが長く、課題・予算・決裁・時期・次回アクションの確認が弱い場合は、前向きな相づちだけで終えず懸念を返してください。",
     "根拠や事例がない効果説明には慎重に反応し、具体例・費用対効果・導入後の流れを確認してください。",
-    "相手の説明が曖昧な時は、優しく受け止めすぎず、実際の顧客のように不安や違和感を短く返してください。",
+    "相手の説明が曖昧な時は、優しく受け止めすぎず、実際の顧客のように不安や違和感を短く返してください。ただし会話が完全に途切れないよう、1つだけ答えやすい確認余地を残してください。",
     "営業の発話に「たぶん」「だと思います」「いけると思います」「いい感じ」「大丈夫です」など曖昧な表現がある場合は、根拠や条件を確認してください。",
     "質問に対して一般論や商品説明だけで返された場合は、「私のケースではどうなのか」を確認してください。",
     "営業が話しすぎて顧客確認を挟まない場合は、理解できたふりをせず、判断材料が足りない点を短く返してください。",
@@ -321,18 +358,18 @@ function buildFallbackCustomerReply(scenario: RoleplayScenarioPayload, messages:
   const objections = scenario.objections.length > 0 ? scenario.objections : ["費用対効果がまだ見えません。"];
 
   if (salesTurns <= 1) {
-    return `ありがとうございます。ただ、まだ${scenario.goal || "導入する価値"}が本当にあるのか判断できません。具体的にどんな効果が見込めて、根拠はありますか？`;
+    return `うーん、話は分かるんですが、まだ${scenario.goal || "導入する価値"}が本当にあるのかピンと来ていません。近い会社でどんな効果が出たのか、短く聞けますか？`;
   }
 
   if (salesTurns === 2) {
-    return `${objections[0]} 先ほどの説明だけだと判断材料が足りません。具体的な根拠や近い事例はありますか？`;
+    return `正直、${objections[0]} 先ほどの説明だけだと社内に持ち帰る材料が弱いです。近い事例か数字で言えるものはありますか？`;
   }
 
   if (salesTurns === 3) {
-    return "なるほど。ただ、社内で検討するには導入までの流れと初期対応の負担がまだ見えません。そこを具体的に教えてください。";
+    return "なるほど、少しイメージは湧きました。ただ、導入時にこちらの手間が増えるなら厳しいです。最初に必要な対応はどのくらいですか？";
   }
 
-  return "少しイメージはできましたが、まだ決め手には欠けます。他社と比べて一番違う点と、費用対効果を短く教えてください。";
+  return "少し分かってきました。ただ、決め手まではまだ弱いです。他社と比べて一番違う点を一言で言うと何ですか？";
 }
 
 function buildTeleapoFallbackCustomerReply(scenario: RoleplayScenarioPayload, messages: RoleplayMessage[]) {
@@ -341,22 +378,22 @@ function buildTeleapoFallbackCustomerReply(scenario: RoleplayScenarioPayload, me
   const objections = scenario.objections.length > 0 ? scenario.objections : ["今忙しいです。"];
 
   if (salesTurns <= 1) {
-    return "すみません、営業のお電話ですか？今あまり時間がないのですが、要件だけ短くお願いできますか。";
+    return "すみません、営業のお電話ですか？今ちょっと立て込んでいて、要件だけ30秒で聞いてもいいですか。";
   }
 
   if (/資料|メール|送/.test(latestSales)) {
-    return "資料だけなら送っていただければ見ておきます。お打ち合わせまでは今のところ考えていません。";
+    return "資料だけなら送ってください。ただ、正直そのままだと見ないかもしれないので、見るポイントだけ先に教えてもらえますか。";
   }
 
   if (/日程|候補|打ち合わせ|お時間|アポ|15分|30分/.test(latestSales)) {
-    return "内容は少し分かりました。短時間なら確認してもいいですが、具体的に何分くらいですか？";
+    return "内容は少し分かりました。長い打ち合わせは難しいですが、15分くらいなら確認してもいいです。何を確認する時間ですか？";
   }
 
   if (salesTurns === 2) {
-    return `${objections[0]} 何の件かまだよく分からないので、先に要点だけ教えてください。`;
+    return `${objections[0]} ただ、何の件かまだ少し曖昧なので、うちに関係ある話かだけ先に教えてください。`;
   }
 
-  return "必要性がまだ分からないです。今すぐ話す理由があるなら一言で教えてください。";
+  return "必要性がまだ分からないです。今すぐ聞く理由があるなら、一言だけ聞きます。";
 }
 
 function fetchWithTimeout(url: string, init: RequestInit, timeoutMs = 30000) {

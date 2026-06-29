@@ -25,6 +25,15 @@ type FillerAnalysisItem = {
   turnLabel: string | null;
 };
 
+type EmotionAnalysisItem = {
+  turnLabel: string;
+  tone: "positive" | "interested" | "hesitant" | "negative" | "neutral";
+  label: string;
+  score: number;
+  change: "up" | "down" | "flat";
+  evidence: string;
+};
+
 type TalkAnalysis = {
   checklist: TalkAnalysisItem[];
   fillers: FillerAnalysisItem[];
@@ -32,7 +41,7 @@ type TalkAnalysis = {
 };
 
 export function RoleplayResultDetailPanel({ result }: { result: RoleplayResult }) {
-  const analysis = buildTalkAnalysis(result.messages, result.evaluationCriteria);
+  const analysis = buildTalkAnalysis(result.messages, result.evaluationCriteria, result.roleplayType);
   const { profile } = useAuth();
 
   return (
@@ -52,6 +61,7 @@ export function RoleplayResultDetailPanel({ result }: { result: RoleplayResult }
         <ListBlock title="良かった点" items={result.strengths} />
         <ListBlock title="改善ポイント" items={result.improvements} />
       </div>
+      <RoleplayEmotionAnalysisBlock messages={result.messages} />
       {result.manualChecklistItems && result.manualChecklistItems.length > 0 ? (
         <ManualChecklistBlock items={result.manualChecklistItems} score={result.score} />
       ) : null}
@@ -59,6 +69,70 @@ export function RoleplayResultDetailPanel({ result }: { result: RoleplayResult }
       <AdminCommentBlock companyId={profile?.companyId ?? result.companyId} resultId={result.id} />
       <ConversationBlock messages={result.messages} />
     </article>
+  );
+}
+
+export function RoleplayEmotionAnalysisBlock({ messages }: { messages: RoleplayResult["messages"] }) {
+  const analysis = buildEmotionAnalysis(messages);
+  if (analysis.items.length === 0) return null;
+
+  return (
+    <section className="mt-3 rounded-[16px] border border-[#e6edf4] bg-white px-4 py-4">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h3 className="text-[14px] font-black text-[#171717]">顧客感情の推移</h3>
+          <p className="mt-1 text-[12px] leading-5 text-[#7a808c]">
+            AI顧客の発話から、警戒・迷い・関心・前向き度の変化を見ています。
+          </p>
+        </div>
+        <div className="rounded-[14px] border border-[#e6eaf0] bg-[#fcfcfd] px-3 py-2 text-right">
+          <div className="text-[11px] font-bold text-[#8a909b]">最終温度感</div>
+          <div className={`mt-0.5 text-[13px] font-black ${getEmotionTextColor(analysis.latest.tone)}`}>
+            {analysis.latest.label}
+          </div>
+        </div>
+      </div>
+
+      <div className="mt-4 grid gap-3 md:grid-cols-3">
+        <EmotionSummaryCard label="平均温度" value={`${analysis.averageScore}/5`} tone={analysis.latest.tone} />
+        <EmotionSummaryCard label="一番上がった場面" value={analysis.peakTurnLabel} tone={analysis.peakTone} />
+        <EmotionSummaryCard label="一番落ちた場面" value={analysis.lowestTurnLabel} tone={analysis.lowestTone} />
+      </div>
+
+      <div className="mt-4 space-y-2">
+        {analysis.items.map((item) => (
+          <div key={`${item.turnLabel}-${item.evidence}`} className="grid gap-3 rounded-[14px] border border-[#eef1f5] bg-[#fcfcfd] px-3 py-3 md:grid-cols-[92px_118px_1fr] md:items-start">
+            <div className="text-[12px] font-black text-[#8a909b]">{item.turnLabel}</div>
+            <div>
+              <span className={`inline-flex rounded-full px-2.5 py-1 text-[11px] font-black ${getEmotionBadgeClass(item.tone)}`}>
+                {item.label}
+              </span>
+              <div className="mt-1 text-[11px] font-bold text-[#8a909b]">
+                {formatEmotionChange(item.change)} {item.score}/5
+              </div>
+            </div>
+            <p className="text-[12px] leading-5 text-[#343b48]">{item.evidence}</p>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function EmotionSummaryCard({
+  label,
+  value,
+  tone,
+}: {
+  label: string;
+  value: string;
+  tone: EmotionAnalysisItem["tone"];
+}) {
+  return (
+    <div className="rounded-[14px] border border-[#eef1f5] bg-[#fcfcfd] px-4 py-3">
+      <div className="text-[11px] font-black text-[#8a909b]">{label}</div>
+      <div className={`mt-1 truncate text-[15px] font-black ${getEmotionTextColor(tone)}`}>{value}</div>
+    </div>
   );
 }
 
@@ -316,11 +390,15 @@ function ListBlock({ title, items }: { title: string; items: string[] }) {
   );
 }
 
-export function buildTalkAnalysis(messages: RoleplayResult["messages"], criteria: string[] = []): TalkAnalysis {
+export function buildTalkAnalysis(
+  messages: RoleplayResult["messages"],
+  criteria: string[] = [],
+  roleplayType: RoleplayResult["roleplayType"] = "meeting",
+): TalkAnalysis {
   const salesTurns = messages
     .map((message, index) => ({ message, index }))
     .filter((item) => item.message.role === "sales");
-  const definitions = buildAnalysisDefinitions(criteria);
+  const definitions = buildAnalysisDefinitions(criteria, roleplayType);
   const checklist = definitions.map((definition) => {
     const evidenceTurn = findEvidenceTurn(definition, salesTurns, messages);
     return {
@@ -381,7 +459,40 @@ const analysisDefinitions: AnalysisDefinition[] = [
   },
 ];
 
-function buildAnalysisDefinitions(criteria: string[]): AnalysisDefinition[] {
+const teleapoAnalysisDefinitions: AnalysisDefinition[] = [
+  {
+    id: "teleapo-opening",
+    label: "冒頭10秒",
+    description: "名乗り、用件、相手の時間への配慮を短く伝えられているか",
+  },
+  {
+    id: "teleapo-permission",
+    label: "話す許可",
+    description: "30秒だけ、少しだけなど、電話口で話す許可を取れているか",
+  },
+  {
+    id: "teleapo-purpose",
+    label: "用件の明確さ",
+    description: "何の件か、相手に関係する理由を短く伝えられているか",
+  },
+  {
+    id: "teleapo-gatekeeper",
+    label: "担当者確認",
+    description: "受付や代表番号で、担当部署・担当者につながる確認ができているか",
+  },
+  {
+    id: "teleapo-rebuttal",
+    label: "断り切り返し",
+    description: "忙しい、資料送って、結構です等に対して1回だけ自然に切り返せているか",
+  },
+  {
+    id: "teleapo-appointment",
+    label: "アポ打診",
+    description: "短時間の次接点、日程候補、確認時間を提示できているか",
+  },
+];
+
+function buildAnalysisDefinitions(criteria: string[], roleplayType: RoleplayResult["roleplayType"]): AnalysisDefinition[] {
   const manualDefinitions = criteria
     .map((criterion) => criterion.trim())
     .filter(Boolean)
@@ -393,6 +504,9 @@ function buildAnalysisDefinitions(criteria: string[]): AnalysisDefinition[] {
       keywords: buildCriterionKeywords(criterion),
     }));
 
+  if (roleplayType === "teleapo") {
+    return manualDefinitions.length > 0 ? [...teleapoAnalysisDefinitions, ...manualDefinitions] : teleapoAnalysisDefinitions;
+  }
   return manualDefinitions.length > 0 ? manualDefinitions : analysisDefinitions;
 }
 
@@ -438,6 +552,18 @@ function isEvidenceTurn(
       return isQuestionLike(text) && includesAny(text, timingKeywords);
     case "next-action":
       return includesAny(text, nextActionKeywords) && includesAny(text, nextActionCommitmentKeywords);
+    case "teleapo-opening":
+      return text.length <= 260 && includesAny(text, teleapoOpeningKeywords);
+    case "teleapo-permission":
+      return text.length <= 260 && includesAny(text, teleapoPermissionKeywords);
+    case "teleapo-purpose":
+      return text.length <= 320 && includesAny(text, teleapoPurposeKeywords);
+    case "teleapo-gatekeeper":
+      return includesAny(text, teleapoGatekeeperKeywords);
+    case "teleapo-rebuttal":
+      return hasPriorCustomerObjection(messages, turn.index) && text.length <= 360 && includesAny(text, teleapoRebuttalKeywords);
+    case "teleapo-appointment":
+      return includesAny(text, teleapoAppointmentKeywords) && includesAny(text, teleapoAppointmentCommitmentKeywords);
     default:
       return false;
   }
@@ -451,11 +577,24 @@ const decisionKeywords = ["決裁", "上司", "社内", "判断", "稟議", "意
 const timingKeywords = ["時期", "いつ", "導入", "開始", "スケジュール", "タイミング", "何月"];
 const nextActionKeywords = ["次回", "日程", "資料", "見積", "送付", "打ち合わせ", "お送りします", "確認します"];
 const nextActionCommitmentKeywords = ["次回", "日程", "送付", "提出", "お送りします", "いつ", "何日", "何時", "打ち合わせ"];
+const teleapoOpeningKeywords = ["お世話", "突然", "失礼", "こんにちは", "お忙しい", "お電話"];
+const teleapoPermissionKeywords = ["30秒", "少し", "お時間", "よろしい", "大丈夫", "今", "確認させて"];
+const teleapoPurposeKeywords = ["件", "用件", "課題", "改善", "削減", "効率", "売上", "集客", "採用", "確認"];
+const teleapoGatekeeperKeywords = ["担当", "部署", "責任者", "どなた", "お繋ぎ", "ご担当", "担当者"];
+const teleapoRebuttalKeywords = ["資料", "忙しい", "結構", "必要", "間に合", "30秒", "少し", "確認", "見るポイント", "担当"];
+const teleapoAppointmentKeywords = ["日程", "候補", "打ち合わせ", "お時間", "アポ", "15分", "30分", "来週", "明日"];
+const teleapoAppointmentCommitmentKeywords = ["日程", "候補", "15分", "30分", "来週", "明日", "火曜", "水曜", "木曜", "金曜"];
 
 function hasPriorCustomerIssue(messages: RoleplayResult["messages"], turnIndex: number) {
   return messages
     .slice(0, turnIndex)
     .some((message) => message.role === "customer" && includesAny(message.content, customerIssueReferenceKeywords));
+}
+
+function hasPriorCustomerObjection(messages: RoleplayResult["messages"], turnIndex: number) {
+  return messages
+    .slice(0, turnIndex)
+    .some((message) => message.role === "customer" && includesAny(message.content, ["忙しい", "資料", "結構", "必要ない", "担当", "わからない", "間に合", "営業"]));
 }
 
 function isQuestionLike(text: string) {
@@ -468,6 +607,105 @@ function hasMetaTalk(text: string) {
 
 function includesAny(text: string, keywords: readonly string[]) {
   return keywords.some((keyword) => text.includes(keyword));
+}
+
+function buildEmotionAnalysis(messages: RoleplayResult["messages"]) {
+  const items = messages
+    .map((message, index) => ({ message, index }))
+    .filter((item) => item.message.role === "customer")
+    .map((item, customerIndex, customerTurns) => {
+      const emotion = detectCustomerEmotion(item.message.content);
+      const previous = customerIndex > 0 ? detectCustomerEmotion(customerTurns[customerIndex - 1].message.content) : null;
+      return {
+        ...emotion,
+        turnLabel: `顧客${countCustomerTurn(messages, item.index)}回目`,
+        change: !previous ? "flat" : emotion.score > previous.score ? "up" : emotion.score < previous.score ? "down" : "flat",
+        evidence: trimEvidence(item.message.content),
+      } satisfies EmotionAnalysisItem;
+    });
+  const latest = items[items.length - 1] ?? {
+    turnLabel: "-",
+    tone: "neutral",
+    label: "判断材料なし",
+    score: 3,
+    change: "flat",
+    evidence: "",
+  } satisfies EmotionAnalysisItem;
+  const peak = [...items].sort((left, right) => right.score - left.score)[0] ?? latest;
+  const lowest = [...items].sort((left, right) => left.score - right.score)[0] ?? latest;
+  const averageScore = items.length > 0
+    ? Math.round((items.reduce((sum, item) => sum + item.score, 0) / items.length) * 10) / 10
+    : 0;
+
+  return {
+    items,
+    latest,
+    averageScore,
+    peakTurnLabel: peak.turnLabel,
+    peakTone: peak.tone,
+    lowestTurnLabel: lowest.turnLabel,
+    lowestTone: lowest.tone,
+  };
+}
+
+function detectCustomerEmotion(text: string): Pick<EmotionAnalysisItem, "tone" | "label" | "score"> {
+  if (includesAny(text, strongPositiveEmotionKeywords)) {
+    return { tone: "positive", label: "前向き", score: 5 };
+  }
+  if (includesAny(text, interestedEmotionKeywords)) {
+    return { tone: "interested", label: "関心あり", score: 4 };
+  }
+  if (includesAny(text, negativeEmotionKeywords)) {
+    return { tone: "negative", label: "警戒/拒否", score: 1 };
+  }
+  if (includesAny(text, hesitantEmotionKeywords)) {
+    return { tone: "hesitant", label: "迷い/保留", score: 2 };
+  }
+  if (/[？?]|どの|どう|いくら|料金|事例|実績|可能|できます|できますか|詳しく/.test(text)) {
+    return { tone: "interested", label: "確認中", score: 4 };
+  }
+  return { tone: "neutral", label: "中立", score: 3 };
+}
+
+const strongPositiveEmotionKeywords = ["いいですね", "良さそう", "興味あります", "前向き", "お願いします", "ぜひ", "助かります", "聞きたい", "進めたい", "検討したい"];
+const interestedEmotionKeywords = ["詳しく", "教えて", "どのくらい", "どういう", "できますか", "可能ですか", "料金", "費用", "事例", "実績", "効果", "導入"];
+const negativeEmotionKeywords = ["結構です", "必要ない", "いらない", "興味ない", "忙しい", "営業電話", "間に合って", "不要", "無理", "高い", "怪しい", "不安"];
+const hesitantEmotionKeywords = ["うーん", "ただ", "でも", "とはいえ", "まだ", "わからない", "分からない", "迷", "検討", "確認します", "微妙", "難しい", "悩"];
+
+function getEmotionBadgeClass(tone: EmotionAnalysisItem["tone"]) {
+  switch (tone) {
+    case "positive":
+      return "bg-[#e9f8ef] text-[#15803d]";
+    case "interested":
+      return "bg-[#eef6ff] text-[#2563a7]";
+    case "hesitant":
+      return "bg-[#fff7df] text-[#9a6a00]";
+    case "negative":
+      return "bg-[#fff0ed] text-[#c53628]";
+    default:
+      return "bg-[#eef1f5] text-[#596273]";
+  }
+}
+
+function getEmotionTextColor(tone: EmotionAnalysisItem["tone"]) {
+  switch (tone) {
+    case "positive":
+      return "text-[#15803d]";
+    case "interested":
+      return "text-[#2563a7]";
+    case "hesitant":
+      return "text-[#9a6a00]";
+    case "negative":
+      return "text-[#c53628]";
+    default:
+      return "text-[#343b48]";
+  }
+}
+
+function formatEmotionChange(change: EmotionAnalysisItem["change"]) {
+  if (change === "up") return "上昇";
+  if (change === "down") return "低下";
+  return "維持";
 }
 
 function extractFrequentWords(

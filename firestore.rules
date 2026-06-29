@@ -403,6 +403,13 @@ service cloud.firestore {
       allow update, delete: if canAdminCompanyData(resource.data.companyId);
     }
 
+    match /analysisConfigs/{configId} {
+      allow read: if canReadCompanyData(resource.data.companyId);
+      allow create: if canAdminCompanyData(request.resource.data.companyId)
+        && request.resource.data.createdBy == request.auth.uid;
+      allow update, delete: if canAdminCompanyData(resource.data.companyId);
+    }
+
     match /knowledgeCategories/{categoryId} {
       allow read: if canReadCompanyData(resource.data.companyId) && canUseKnowledgeDomain();
       allow create: if isSignedIn()

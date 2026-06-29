@@ -72,7 +72,7 @@ export function SalesKnowledgeChatWidget() {
   }, [companyId]);
 
   const knowledgeResults = useMemo(
-    () => filterKnowledgeItems(items, submittedQuery).slice(0, 8),
+    () => filterKnowledgeItems(items, submittedQuery).filter((item) => item.kind !== "memo").slice(0, 8),
     [items, submittedQuery],
   );
   const productResults = useMemo(
@@ -168,7 +168,7 @@ export function SalesKnowledgeChatWidget() {
             ) : null}
 
             {!submittedQuery ? (
-              <EmptyState title="ナレッジをすぐ確認" body="ロープレ中や商談準備中に、キーワードでメモ・Q&A・商材情報を探せます。" />
+              <EmptyState title="ナレッジをすぐ確認" body="ロープレ中や商談準備中に、キーワードでQ&A・商材情報を探せます。" />
             ) : resultCount === 0 ? (
               <EmptyState title="該当ナレッジなし" body="別のキーワードで検索するか、ナレッジを追加してください。" />
             ) : (
@@ -482,6 +482,5 @@ function escapeRegExp(value: string) {
 
 function formatKind(kind: KnowledgeItem["kind"]) {
   if (kind === "qa") return "Q&A";
-  if (kind === "memo") return "メモ";
   return "ナレッジ";
 }

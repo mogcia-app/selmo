@@ -122,7 +122,7 @@ export default function SalesRoleplayScenariosPage() {
                 <p className="text-[12px] font-bold text-[#8a6500]">SCENARIOS</p>
                 <h2 className="mt-1 text-[28px] font-black tracking-[-0.04em] text-[#171717]">苦手テーマを選択</h2>
                 <p className="mt-2 text-[14px] leading-6 text-[#596273]">
-                  商談・テレアポ分析で見えた弱点を、10分以内のAI顧客ロープレで集中練習できます。
+                  商談・テレアポ分析で見えた弱点を、AI顧客ロープレで自分のペースで集中練習できます。
                 </p>
               </div>
               <button
@@ -190,7 +190,7 @@ export default function SalesRoleplayScenariosPage() {
                 </span>
                 <h3 className="mt-4 text-[20px] font-black text-[#171717]">弱点課題はまだありません</h3>
                 <p className="mx-auto mt-2 max-w-[460px] text-[14px] leading-7 text-[#7a808c]">
-                  管理者が苦手テーマ別の練習課題を追加すると、ここから10分ロープレを開始できます。
+                  管理者が苦手テーマ別の練習課題を追加すると、ここから集中ロープレを開始できます。
                 </p>
               </div>
             )}
@@ -204,7 +204,7 @@ export default function SalesRoleplayScenariosPage() {
                   <h3 className="text-[22px] font-black text-[#171717]">{activeScenario.title}</h3>
                   <p className="mt-2 text-[13px] leading-6 text-[#596273]">{activeScenario.customerProfile}</p>
                 </div>
-                <InfoBlock label="10分練習ゴール" value={activeScenario.goal} />
+                <InfoBlock label="練習ゴール" value={activeScenario.goal} />
                 <InfoBlock label="想定反論" value={activeScenario.objections.join(" / ") || "未設定"} />
                 <InfoBlock label="弱点克服の採点基準" value={activeScenario.evaluationCriteria.join(" / ") || "未設定"} />
                 {activeScenario.customFields.map((field) => (
@@ -425,7 +425,7 @@ function ScenarioCreateDialog({
         <div className="flex items-start justify-between gap-4">
           <div>
             <h2 className="text-[24px] font-black tracking-[-0.03em] text-[#171717]">{scenario ? "弱点課題編集" : "弱点課題作成"}</h2>
-            <p className="mt-1 text-[13px] leading-6 text-[#7a808c]">商材・カテゴリーと過去分析から、10分で反復できる苦手克服シナリオをAI生成できます。</p>
+            <p className="mt-1 text-[13px] leading-6 text-[#7a808c]">商材・カテゴリーと過去分析から、重点的に反復できる苦手克服シナリオをAI生成できます。</p>
           </div>
           <button type="button" onClick={onClose} className="text-[24px] leading-none text-[#9aa1ac]" aria-label="閉じる">
             ×
@@ -479,7 +479,7 @@ function ScenarioCreateDialog({
             </button>
           </div>
           <Field label="タイトル" className="md:col-span-2">
-            <input value={title} onChange={(event) => setTitle(event.target.value)} className="h-12 w-full rounded-[14px] border border-[#e4e8ef] bg-white px-4 text-[14px] text-[#171717] outline-none transition focus:border-[#e0bd4b]" placeholder="例：料金反論を効果訴求に切り返す10分練習" />
+            <input value={title} onChange={(event) => setTitle(event.target.value)} className="h-12 w-full rounded-[14px] border border-[#e4e8ef] bg-white px-4 text-[14px] text-[#171717] outline-none transition focus:border-[#e0bd4b]" placeholder="例：料金反論を効果訴求に切り返す集中練習" />
           </Field>
           <Field label="顧客役職">
             <input value={customerRole} onChange={(event) => setCustomerRole(event.target.value)} className="h-12 w-full rounded-[14px] border border-[#e4e8ef] bg-white px-4 text-[14px] text-[#171717] outline-none transition focus:border-[#e0bd4b]" placeholder="例：営業部長" />
