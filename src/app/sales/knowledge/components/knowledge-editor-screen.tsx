@@ -4,7 +4,7 @@ import { FirebaseError } from "firebase/app";
 import Image from "next/image";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 
 import { useAuth } from "@/features/auth/auth-provider";
 import { subscribeToUserProfiles, type AppUserProfile } from "@/lib/firebase/auth";
@@ -31,6 +31,22 @@ type KnowledgeEditorScreenProps = {
   mode: "create" | "edit";
   knowledgeId?: string;
   audience?: "sales" | "admin";
+};
+
+type ProductTabDraft = {
+  title: string;
+  description: string;
+  body: string;
+  tagsText: string;
+};
+
+type BodyFormat = "h2" | "h3" | "bold" | "italic" | "underline" | "list" | "link";
+
+const emptyProductTabDraft: ProductTabDraft = {
+  title: "",
+  description: "",
+  body: "",
+  tagsText: "",
 };
 
 export function KnowledgeEditorScreen({ mode, knowledgeId, audience = "sales" }: KnowledgeEditorScreenProps) {
@@ -61,6 +77,7 @@ export function KnowledgeEditorScreen({ mode, knowledgeId, audience = "sales" }:
   const [description, setDescription] = useState("");
   const [body, setBody] = useState("");
   const [tabTitle, setTabTitle] = useState(searchParams.get("tabTitle") ?? "");
+  const [productTabDrafts, setProductTabDrafts] = useState<Record<string, ProductTabDraft>>({});
   const [newTabTitle, setNewTabTitle] = useState("");
   const [categoryId, setCategoryId] = useState(searchParams.get("categoryId") ?? "");
   const [productId, setProductId] = useState(searchParams.get("productId") ?? "");
@@ -83,6 +100,7 @@ export function KnowledgeEditorScreen({ mode, knowledgeId, audience = "sales" }:
   const [error, setError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [isAddingTab, setIsAddingTab] = useState(false);
+  const bodyTextareaRef = useRef<HTMLTextAreaElement | null>(null);
 
   useEffect(() => {
     if (!companyId || !canAccessKnowledge) {
@@ -147,6 +165,7 @@ export function KnowledgeEditorScreen({ mode, knowledgeId, audience = "sales" }:
     () => products.find((product) => product.id === productId),
     [productId, products],
   );
+  const categoryOptions = useMemo(() => buildCategoryOptions(categories), [categories]);
   const selectableSalesUsers = useMemo(
     () => salesUsers.filter((user) => user.role === "sales" && user.status === "active" && user.uid !== userId),
     [salesUsers, userId],
@@ -157,6 +176,25 @@ export function KnowledgeEditorScreen({ mode, knowledgeId, audience = "sales" }:
   const wordCount = body.length;
   const lineCount = body ? body.split(/\n/).length : 0;
   const canEdit = mode === "create" || Boolean(knowledge && (knowledge.ownerId === userId || profile?.role === "admin"));
+  const isProductTabCreate = mode === "create" && Boolean(productId);
+  const productTabSaveCount = useMemo(
+    () => buildSavableProductTabEntries(
+      mergeProductTabDraft(productTabDrafts, tabTitle, { title, description, body, tagsText }),
+      tabOptions,
+    ).length,
+    [body, description, productTabDrafts, tabOptions, tabTitle, tagsText, title],
+  );
+  const previewDraft = useMemo(() => {
+    if (!productId || !previewTab) {
+      return { title, description, body, tagsText };
+    }
+
+    if (previewTab === tabTitle) {
+      return { title, description, body, tagsText };
+    }
+
+    return productTabDrafts[previewTab] ?? emptyProductTabDraft;
+  }, [body, description, previewTab, productId, productTabDrafts, tabTitle, tagsText, title]);
 
   useEffect(() => {
     if (!previewTab || !tabOptions.includes(previewTab)) {
@@ -182,7 +220,12 @@ export function KnowledgeEditorScreen({ mode, knowledgeId, audience = "sales" }:
       return;
     }
 
-    if (!title.trim()) {
+    const nextProductTabDrafts = mergeProductTabDraft(productTabDrafts, tabTitle, { title, description, body, tagsText });
+    const productTabEntries = isProductTabCreate
+      ? buildSavableProductTabEntries(nextProductTabDrafts, tabOptions)
+      : [];
+
+    if (!title.trim() && productTabEntries.length === 0) {
       setError("タイトルを入力してください。");
       return;
     }
@@ -199,12 +242,8 @@ export function KnowledgeEditorScreen({ mode, knowledgeId, audience = "sales" }:
     setIsSaving(true);
     setError(null);
 
-    const payload: CreateKnowledgeItemInput = {
+    const basePayload: Omit<CreateKnowledgeItemInput, "title" | "description" | "body" | "tabTitle" | "tags"> = {
       companyId,
-      title: title.trim(),
-      description: buildAutoDescription(body, title, description),
-      body: body.trim(),
-      tabTitle: productId ? tabTitle.trim() : "",
       categoryId: categoryId || null,
       productId: productId || null,
       ownerId: userId,
@@ -212,12 +251,54 @@ export function KnowledgeEditorScreen({ mode, knowledgeId, audience = "sales" }:
       sharedWithUserIds: nextSharedWithUserIds,
       visibleToAdmin: isAdminAuthoring || visibleToAdmin,
       kind,
-      tags,
       links,
       attachments,
     };
+    const payload: CreateKnowledgeItemInput = {
+      ...basePayload,
+      title: title.trim(),
+      description: buildAutoDescription(body, title, description),
+      body: body.trim(),
+      tabTitle: productId ? tabTitle.trim() : "",
+      tags,
+    };
 
     try {
+      const shouldCreateProductTabs = isProductTabCreate && productTabEntries.length > 0;
+
+      if (shouldCreateProductTabs) {
+        for (const entry of productTabEntries) {
+          const entryPayload: CreateKnowledgeItemInput = {
+            ...basePayload,
+            title: entry.draft.title.trim() || `${selectedProduct?.name ?? "商材"} ${entry.tabTitle}`,
+            description: buildAutoDescription(entry.draft.body, entry.draft.title, entry.draft.description),
+            body: entry.draft.body.trim(),
+            tabTitle: entry.tabTitle,
+            tags: buildSearchTags(entry.draft.tagsText, entry.tabTitle),
+          };
+          const nextId = await createKnowledgeItem(entryPayload);
+
+          if (pendingFiles.length > 0) {
+            const uploadedAttachments = await uploadKnowledgeAttachments({
+              knowledgeId: nextId,
+              userId,
+              files: pendingFiles,
+              onUploadProgress: ({ fileName, progress }) => {
+                setUploadProgress((current) => ({ ...current, [fileName]: progress }));
+              },
+            });
+            await updateKnowledgeItem({
+              ...entryPayload,
+              id: nextId,
+              attachments: [...attachments, ...uploadedAttachments],
+            });
+          }
+        }
+
+        router.replace(isAdminAuthoring ? "/admin/knowledge" : `/sales/knowledge/products/${productId}`);
+        return;
+      }
+
       const nextId =
         mode === "edit" && knowledgeId
           ? await updateExistingKnowledge(knowledgeId, payload)
@@ -294,7 +375,71 @@ export function KnowledgeEditorScreen({ mode, knowledgeId, audience = "sales" }:
     void saveKnowledge(publicationTarget);
   };
 
+  const updateCurrentProductTabDraft = (patch: Partial<ProductTabDraft>) => {
+    if (!isProductTabCreate || !tabTitle.trim()) {
+      return;
+    }
+
+    setProductTabDrafts((current) => ({
+      ...current,
+      [tabTitle]: {
+        ...emptyProductTabDraft,
+        ...current[tabTitle],
+        title,
+        description,
+        body,
+        tagsText,
+        ...patch,
+      },
+    }));
+  };
+
+  const handleChangeTitle = (nextTitle: string) => {
+    setTitle(nextTitle);
+    updateCurrentProductTabDraft({ title: nextTitle });
+  };
+
+  const handleChangeBody = (nextBody: string) => {
+    setBody(nextBody);
+    updateCurrentProductTabDraft({ body: nextBody });
+  };
+
+  const handleApplyBodyFormat = (format: BodyFormat) => {
+    const textarea = bodyTextareaRef.current;
+    const selectionStart = textarea?.selectionStart ?? body.length;
+    const selectionEnd = textarea?.selectionEnd ?? body.length;
+    const result = formatBodySelection(body, selectionStart, selectionEnd, format);
+
+    handleChangeBody(result.value);
+    requestAnimationFrame(() => {
+      bodyTextareaRef.current?.focus();
+      bodyTextareaRef.current?.setSelectionRange(result.selectionStart, result.selectionEnd);
+    });
+  };
+
+  const handleChangeTagsText = (nextTagsText: string) => {
+    setTagsText(nextTagsText);
+    updateCurrentProductTabDraft({ tagsText: nextTagsText });
+  };
+
+  const handleChangeProductId = (nextProductId: string) => {
+    setProductId(nextProductId);
+    setProductTabDrafts({});
+    setTabTitle("");
+    setPreviewTab("");
+  };
+
   const handleSelectTabTitle = (nextTabTitle: string) => {
+    if (isProductTabCreate) {
+      const nextDrafts = mergeProductTabDraft(productTabDrafts, tabTitle, { title, description, body, tagsText });
+      const nextDraft = nextDrafts[nextTabTitle] ?? emptyProductTabDraft;
+      setProductTabDrafts(nextDrafts);
+      setTitle(nextDraft.title);
+      setDescription(nextDraft.description);
+      setBody(nextDraft.body);
+      setTagsText(nextDraft.tagsText);
+    }
+
     setTabTitle(nextTabTitle);
     setPreviewTab(nextTabTitle);
   };
@@ -400,7 +545,7 @@ export function KnowledgeEditorScreen({ mode, knowledgeId, audience = "sales" }:
                 <Field label="商材">
                   <select
                     value={productId}
-                    onChange={(event) => setProductId(event.target.value)}
+                    onChange={(event) => handleChangeProductId(event.target.value)}
                     className="h-12 w-full rounded-[14px] border border-[#e4e8ef] bg-white px-4 text-[14px] text-[#171717] outline-none transition focus:border-[#e0bd4b]"
                   >
                     <option value="">未設定</option>
@@ -429,6 +574,11 @@ export function KnowledgeEditorScreen({ mode, knowledgeId, audience = "sales" }:
                         </button>
                       ))}
                     </div>
+                    {isProductTabCreate && productTabSaveCount > 0 ? (
+                      <div className="text-[12px] font-bold text-[#8a6500]">
+                        入力済み {productTabSaveCount}タブ
+                      </div>
+                    ) : null}
                     <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_112px]">
                       <input
                         value={newTabTitle}
@@ -454,21 +604,20 @@ export function KnowledgeEditorScreen({ mode, knowledgeId, audience = "sales" }:
                 <Field label="タイトル" required>
                   <input
                     value={title}
-                    onChange={(event) => setTitle(event.target.value)}
+                    onChange={(event) => handleChangeTitle(event.target.value)}
                     placeholder="例：商材Aの概要"
                     className="h-12 w-full rounded-[14px] border border-[#e4e8ef] bg-white px-4 text-[14px] text-[#171717] outline-none transition focus:border-[#e0bd4b]"
                   />
                 </Field>
 
-                <Field label="商談シーン">
+                <Field label="カテゴリ">
                   <select
                     value={categoryId}
                     onChange={(event) => setCategoryId(event.target.value)}
                     className="h-12 w-full rounded-[14px] border border-[#e4e8ef] bg-white px-4 text-[14px] text-[#171717] outline-none transition focus:border-[#e0bd4b]"
                   >
                     <option value="">未設定</option>
-                    <option value="how-to">使い方</option>
-                    {categories.map((category) => (
+                    {categoryOptions.map((category) => (
                       <option key={category.id} value={category.id}>
                         {category.title}
                       </option>
@@ -476,17 +625,29 @@ export function KnowledgeEditorScreen({ mode, knowledgeId, audience = "sales" }:
                   </select>
                 </Field>
 
-                <Field label="検索タグ" className="md:col-span-1">
+                <Field label="検索キーワード（任意）" className="md:col-span-1">
                   <input
                     value={tagsText}
-                    onChange={(event) => setTagsText(event.target.value)}
-                    placeholder="サービス概要, SFA, 営業支援"
+                    onChange={(event) => handleChangeTagsText(event.target.value)}
+                    placeholder="例：料金 競合比較 初回商談"
                     className="h-12 w-full rounded-[14px] border border-[#e4e8ef] bg-white px-4 text-[14px] text-[#171717] outline-none transition focus:border-[#e0bd4b]"
                   />
+                  <p className="mt-2 text-[12px] leading-5 text-[#7a808c]">
+                    あとで検索で見つけたい言葉を入れます。スペース・カンマ・読点で区切れます。
+                  </p>
                   {productId && tabTitle ? (
                     <p className="mt-2 text-[12px] leading-5 text-[#7a808c]">
-                      商材内タブ「{tabTitle}」は保存時に検索タグへ自動追加されます。
+                      商材内タブ「{tabTitle}」も保存時に自動追加されます。
                     </p>
+                  ) : null}
+                  {tags.length > 0 ? (
+                    <div className="mt-2 flex flex-wrap gap-1.5">
+                      {tags.map((tag) => (
+                        <span key={tag} className="rounded-full bg-[#f1f2f5] px-2.5 py-1 text-[11px] font-bold text-[#596273]">
+                          {tag}
+                        </span>
+                      ))}
+                    </div>
                   ) : null}
                 </Field>
 
@@ -498,7 +659,7 @@ export function KnowledgeEditorScreen({ mode, knowledgeId, audience = "sales" }:
                 <h2 className="text-[18px] font-bold text-[#171717]">本文</h2>
                 <button
                   type="button"
-                  onClick={() => setBody(formatBody(body))}
+                  onClick={() => handleChangeBody(formatBody(body))}
                   className="inline-flex h-9 items-center gap-2 rounded-[12px] border border-[#e4e8ef] bg-white px-3 text-[12px] font-bold text-[#343b48]"
                 >
                   <SparkIcon />
@@ -507,15 +668,29 @@ export function KnowledgeEditorScreen({ mode, knowledgeId, audience = "sales" }:
               </div>
               <div className="mt-4 rounded-[16px] border border-[#e4e8ef] bg-white">
                 <div className="flex flex-wrap items-center gap-1 border-b border-[#eef1f5] px-3 py-2 text-[12px] font-bold text-[#596273]">
-                  {["H2", "H3", "B", "I", "U", "箇条書き", "リンク"].map((label) => (
-                    <span key={label} className="rounded-[9px] px-2 py-1">
-                      {label}
-                    </span>
+                  {[
+                    { label: "H2", format: "h2" },
+                    { label: "H3", format: "h3" },
+                    { label: "B", format: "bold" },
+                    { label: "I", format: "italic" },
+                    { label: "U", format: "underline" },
+                    { label: "箇条書き", format: "list" },
+                    { label: "リンク", format: "link" },
+                  ].map((item) => (
+                    <button
+                      key={item.format}
+                      type="button"
+                      onClick={() => handleApplyBodyFormat(item.format as BodyFormat)}
+                      className="rounded-[9px] px-2 py-1 transition hover:bg-[#f7f8fb] hover:text-[#171717]"
+                    >
+                      {item.label}
+                    </button>
                   ))}
                 </div>
                 <textarea
+                  ref={bodyTextareaRef}
                   value={body}
-                  onChange={(event) => setBody(event.target.value)}
+                  onChange={(event) => handleChangeBody(event.target.value)}
                   placeholder="本文を入力してください"
                   className="min-h-[360px] w-full resize-y rounded-b-[16px] border-0 bg-white px-4 py-4 text-[14px] leading-7 text-[#171717] outline-none"
                 />
@@ -523,14 +698,6 @@ export function KnowledgeEditorScreen({ mode, knowledgeId, audience = "sales" }:
               <div className="mt-3 flex flex-wrap items-center justify-between gap-3 text-[12px] text-[#7a808c]">
                 <span>{`文字数：${wordCount}　行数：${lineCount}`}</span>
                 <span className="font-semibold text-[#0a9d58]">下書きは保存ボタンで保存できます</span>
-              </div>
-            </section>
-
-            <section id="related" className="rounded-[24px] border border-[#eceef4] bg-white p-5 shadow-[0_10px_28px_rgba(17,24,39,0.04)] md:p-6">
-              <h2 className="text-[18px] font-bold text-[#171717]">関連情報</h2>
-              <div className="mt-4 grid gap-4 md:grid-cols-2">
-                <RelatedBox title="関連ナレッジ" value={title ? `${title} に関連するナレッジ` : "保存後に関連候補を表示"} />
-                <RelatedBox title="関連商談" value="商談データ連携後に候補を表示" />
               </div>
             </section>
 
@@ -655,11 +822,11 @@ export function KnowledgeEditorScreen({ mode, knowledgeId, audience = "sales" }:
                   </div>
                 ) : null}
                 <div className="p-5">
-                  {!productId || previewTab === tabTitle || (!tabTitle && previewTab === tabOptions[0]) ? (
+                  {!productId || hasProductTabDraftContent(previewDraft) ? (
                     <PreviewArticle
-                      title={title}
-                      body={body}
-                      description={description}
+                      title={previewDraft.title}
+                      body={previewDraft.body}
+                      description={previewDraft.description}
                       selectedProduct={selectedProduct}
                       links={links}
                       attachments={attachments}
@@ -800,18 +967,6 @@ function Field({
       </span>
       {children}
     </label>
-  );
-}
-
-function RelatedBox({ title, value }: { title: string; value: string }) {
-  return (
-    <div>
-      <div className="text-[13px] font-bold text-[#343b48]">{title}</div>
-      <div className="mt-2 flex min-h-12 items-center justify-between rounded-[14px] border border-[#e4e8ef] bg-white px-4 text-[13px] text-[#596273]">
-        <span className="truncate">{value}</span>
-        <span className="text-[#9aa1ac]">×</span>
-      </div>
-    </div>
   );
 }
 
@@ -1014,12 +1169,64 @@ function formatPublicationTarget(target: PublicationTarget) {
   return "自分のみ";
 }
 
+function buildCategoryOptions(categories: KnowledgeCategory[]) {
+  const seen = new Set<string>();
+  return categories.filter((category) => {
+    const key = category.id === "how-to" || category.title === "使い方" ? "how-to" : `${category.id}:${category.title}`;
+
+    if (seen.has(key)) {
+      return false;
+    }
+
+    seen.add(key);
+    return true;
+  });
+}
+
+function mergeProductTabDraft(
+  drafts: Record<string, ProductTabDraft>,
+  tabTitle: string,
+  draft: ProductTabDraft,
+) {
+  const normalizedTabTitle = tabTitle.trim();
+
+  if (!normalizedTabTitle) {
+    return drafts;
+  }
+
+  return {
+    ...drafts,
+    [normalizedTabTitle]: draft,
+  };
+}
+
+function buildSavableProductTabEntries(
+  drafts: Record<string, ProductTabDraft>,
+  tabOptions: string[],
+) {
+  return tabOptions
+    .map((tabTitle) => ({
+      tabTitle,
+      draft: drafts[tabTitle] ?? emptyProductTabDraft,
+    }))
+    .filter((entry) => hasProductTabDraftContent(entry.draft));
+}
+
+function hasProductTabDraftContent(draft: ProductTabDraft) {
+  return Boolean(
+    draft.title.trim() ||
+    draft.description.trim() ||
+    draft.body.trim() ||
+    draft.tagsText.trim(),
+  );
+}
+
 function buildSearchTags(tagsText: string, tabTitle: string) {
   return Array.from(
     new Set([
       tabTitle.trim(),
       ...tagsText
-        .split(",")
+        .split(/[\s　,、]+/)
         .map((tag) => tag.trim())
         .filter(Boolean),
     ].filter(Boolean)),
@@ -1049,6 +1256,63 @@ function buildAutoDescription(body: string, title: string, fallback = "") {
   }
 
   return `${normalized.slice(0, 117)}...`;
+}
+
+function formatBodySelection(value: string, selectionStart: number, selectionEnd: number, format: BodyFormat) {
+  const selectedText = value.slice(selectionStart, selectionEnd);
+
+  if (format === "h2" || format === "h3" || format === "list") {
+    return formatSelectedLines(value, selectionStart, selectionEnd, format);
+  }
+
+  const fallbackText =
+    format === "link"
+      ? "リンク名"
+      : format === "bold"
+        ? "太字"
+        : format === "italic"
+          ? "斜体"
+          : "下線";
+  const text = selectedText || fallbackText;
+  const wrapped =
+    format === "bold"
+      ? `**${text}**`
+      : format === "italic"
+        ? `*${text}*`
+        : format === "underline"
+          ? `<u>${text}</u>`
+          : `[${text}](https://)`;
+  const nextSelectionStart = selectionStart + wrapped.indexOf(text);
+  const nextSelectionEnd = nextSelectionStart + text.length;
+
+  return {
+    value: `${value.slice(0, selectionStart)}${wrapped}${value.slice(selectionEnd)}`,
+    selectionStart: nextSelectionStart,
+    selectionEnd: nextSelectionEnd,
+  };
+}
+
+function formatSelectedLines(value: string, selectionStart: number, selectionEnd: number, format: Extract<BodyFormat, "h2" | "h3" | "list">) {
+  const lineStart = value.lastIndexOf("\n", selectionStart - 1) + 1;
+  const lineEndIndex = value.indexOf("\n", selectionEnd);
+  const lineEnd = lineEndIndex === -1 ? value.length : lineEndIndex;
+  const selectedBlock = value.slice(lineStart, lineEnd);
+  const prefix = format === "h2" ? "## " : format === "h3" ? "### " : "- ";
+  const fallbackText = format === "h2" ? "見出し" : format === "h3" ? "小見出し" : "箇条書き";
+  const lines = selectedBlock || fallbackText;
+  const formattedBlock = lines
+    .split("\n")
+    .map((line) => {
+      if (!line.trim()) return line;
+      return line.startsWith(prefix) ? line : `${prefix}${line}`;
+    })
+    .join("\n");
+
+  return {
+    value: `${value.slice(0, lineStart)}${formattedBlock}${value.slice(lineEnd)}`,
+    selectionStart: lineStart + prefix.length,
+    selectionEnd: lineStart + formattedBlock.length,
+  };
 }
 
 function formatBody(value: string) {

@@ -98,7 +98,10 @@ export default function AdminDashboardPage() {
   const winRate = selectedMeetingsForMonth.length > 0 ? Math.round((wonMeetings / selectedMeetingsForMonth.length) * 1000) / 10 : null;
   const analyzedMeetingCount = useMemo(() => selectedMeetingsForMonth.filter((meeting) => meeting.aiSummary).length, [selectedMeetingsForMonth]);
   const productRows = useMemo(() => buildProductRows(products, knowledgeItems), [knowledgeItems, products]);
-  const repRows = useMemo(() => buildRepRows(activeSalesUsers, selectedMeetingsForMonth, selectedRoleplayResultsForMonth), [activeSalesUsers, selectedMeetingsForMonth, selectedRoleplayResultsForMonth]);
+  const repRows = useMemo(
+    () => buildRepRows(activeSalesUsers, selectedMeetingsForMonth, selectedRoleplayResultsForMonth, activityEvents, customerLogs),
+    [activeSalesUsers, activityEvents, customerLogs, selectedMeetingsForMonth, selectedRoleplayResultsForMonth],
+  );
   const attentionRows = useMemo(() => repRows.filter((row) => row.needsCoaching).slice(0, 6), [repRows]);
   const selectedRep = useMemo(
     () => repRows.find((row) => row.id === selectedMemberId) ?? repRows[0] ?? null,
@@ -1661,7 +1664,16 @@ function buildMonthlyTrend(meetings: MeetingRecord[]) {
     }));
 }
 
-function buildRepRows(users: AppUserProfile[], meetings: MeetingRecord[], results: RoleplayResult[]) {
+function buildRepRows(
+  users: AppUserProfile[],
+  meetings: MeetingRecord[],
+  results: RoleplayResult[],
+  activityEvents: SalesActivityEvent[],
+  customerLogs: CustomerLogRecord[],
+) {
+  const inactivityThresholdMs = 2 * 24 * 60 * 60 * 1000;
+  const now = Date.now();
+
   return users.map((user) => {
     const userMeetings = meetings.filter((meeting) => meeting.userId === user.uid);
     const wonCount = userMeetings.filter((meeting) => meeting.status === "won").length;
@@ -1676,18 +1688,26 @@ function buildRepRows(users: AppUserProfile[], meetings: MeetingRecord[], result
       : null;
     const userResults = results.filter((result) => result.userId === user.uid);
     const lowRoleplayCount = userResults.filter((result) => result.score < 70).length;
+    const userActivityEvents = activityEvents.filter((event) => event.userId === user.uid);
+    const userCustomerLogs = customerLogs.filter((log) => log.userId === user.uid);
     const latestActivityAt = [
       ...userMeetings.map((meeting) => meeting.recordedAt),
       ...userResults.map((result) => result.createdAt),
+      ...userActivityEvents.map((event) => event.createdAt),
+      ...userCustomerLogs.map((log) => log.actionDate ?? log.createdAt),
     ]
       .filter((date): date is Date => Boolean(date))
       .sort((left, right) => right.getTime() - left.getTime())[0] ?? null;
+    const isInactiveForTwoDays = !latestActivityAt || now - latestActivityAt.getTime() >= inactivityThresholdMs;
     const winRate = userMeetings.length > 0 ? Math.round((wonCount / userMeetings.length) * 1000) / 10 : null;
     const averageScore = userResults.length > 0 ? Math.round(userResults.reduce((sum, result) => sum + result.score, 0) / userResults.length) : null;
-    const coachingReasons = user.adminCoachingReason ? [user.adminCoachingReason] : [];
-    const needsCoaching = user.adminCoachingStatus === "needs_coaching";
+    const coachingReasons = [
+      ...(user.adminCoachingReason ? [user.adminCoachingReason] : []),
+      ...(isInactiveForTwoDays ? [latestActivityAt ? "2日以上アクションなし" : "活動履歴なし"] : []),
+    ];
+    const needsCoaching = user.adminCoachingStatus === "needs_coaching" || isInactiveForTwoDays;
     const coachingPriority: "high" | "medium" | "low" =
-      user.adminCoachingStatus === "none" ? "low" : user.adminCoachingPriority;
+      user.adminCoachingStatus === "none" && isInactiveForTwoDays ? "medium" : user.adminCoachingStatus === "none" ? "low" : user.adminCoachingPriority;
     const tone: "good" | "normal" | "risk" =
       coachingPriority === "high"
         ? "risk"
@@ -1712,7 +1732,7 @@ function buildRepRows(users: AppUserProfile[], meetings: MeetingRecord[], result
       lowRoleplayCount,
       averageScore,
       tone,
-      status: user.adminCoachingStatus === "needs_coaching" ? "指導必要" : user.adminCoachingStatus === "watch" ? "要確認" : "通常",
+      status: needsCoaching ? "指導必要" : user.adminCoachingStatus === "watch" ? "要確認" : "通常",
       latestActivity: formatShortDate(latestActivityAt),
       nextAction,
       needsCoaching,

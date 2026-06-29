@@ -73,12 +73,13 @@ export function KnowledgeCreateDialog({
   const normalizedTags = useMemo(
     () =>
       tagsText
-        .split(",")
+        .split(/[\s　,、]+/)
         .map((tag) => tag.trim())
         .filter(Boolean)
         .slice(0, 12),
     [tagsText],
   );
+  const categoryOptions = useMemo(() => buildCategoryOptions(categories), [categories]);
 
   if (!open) {
     return null;
@@ -194,8 +195,7 @@ export function KnowledgeCreateDialog({
               className="mt-2 h-12 w-full rounded-[14px] border border-[#e4e8ef] bg-white px-4 text-[14px] text-[#171717] outline-none transition focus:border-[#e0bd4b]"
             >
               <option value="">未設定</option>
-              <option value="how-to">使い方</option>
-              {categories.map((category) => (
+              {categoryOptions.map((category) => (
                 <option key={category.id} value={category.id}>
                   {category.title}
                 </option>
@@ -240,13 +240,25 @@ export function KnowledgeCreateDialog({
           </label>
 
           <label className="md:col-span-2">
-            <span className="text-[13px] font-bold text-[#343b48]">タグ</span>
+            <span className="text-[13px] font-bold text-[#343b48]">検索キーワード（任意）</span>
             <input
               value={tagsText}
               onChange={(event) => setTagsText(event.target.value)}
-              placeholder="価格, 競合比較, 初回商談"
+              placeholder="例：料金 競合比較 初回商談"
               className="mt-2 h-12 w-full rounded-[14px] border border-[#e4e8ef] bg-white px-4 text-[14px] text-[#171717] outline-none transition focus:border-[#e0bd4b]"
             />
+            <p className="mt-2 text-[12px] leading-5 text-[#7a808c]">
+              あとで検索で見つけたい言葉を入れます。スペース・カンマ・読点で区切れます。
+            </p>
+            {normalizedTags.length > 0 ? (
+              <div className="mt-2 flex flex-wrap gap-1.5">
+                {normalizedTags.map((tag) => (
+                  <span key={tag} className="rounded-full bg-[#f1f2f5] px-2.5 py-1 text-[11px] font-bold text-[#596273]">
+                    {tag}
+                  </span>
+                ))}
+              </div>
+            ) : null}
           </label>
         </div>
 
@@ -269,4 +281,18 @@ export function KnowledgeCreateDialog({
       </form>
     </div>
   );
+}
+
+function buildCategoryOptions(categories: KnowledgeCategory[]) {
+  const seen = new Set<string>();
+  return categories.filter((category) => {
+    const key = category.id === "how-to" || category.title === "使い方" ? "how-to" : `${category.id}:${category.title}`;
+
+    if (seen.has(key)) {
+      return false;
+    }
+
+    seen.add(key);
+    return true;
+  });
 }
