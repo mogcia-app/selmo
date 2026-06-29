@@ -530,6 +530,10 @@ function ResultSection({
 }
 
 function getKnowledgeDetailHref(item: KnowledgeItem, basePath: string) {
+  if (item.productId) {
+    return `${basePath}/products/${item.productId}/knowledge/${item.id}`;
+  }
+
   return `${basePath}/categories/${item.categoryId ?? "how-to"}/knowledge/${item.id}`;
 }
 

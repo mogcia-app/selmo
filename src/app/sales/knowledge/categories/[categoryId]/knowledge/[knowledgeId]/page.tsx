@@ -15,7 +15,7 @@ import {
 
 export default function SalesKnowledgeDetailPage() {
   const router = useRouter();
-  const params = useParams<{ categoryId: string; knowledgeId: string }>();
+  const params = useParams<{ categoryId?: string; productId?: string; knowledgeId: string }>();
   const pathname = usePathname();
   const { profile } = useAuth();
   const basePath = getKnowledgeBasePath(pathname);
@@ -25,6 +25,13 @@ export default function SalesKnowledgeDetailPage() {
   const [isDeleting, setIsDeleting] = useState(false);
   const userId = profile?.uid;
   const canEdit = Boolean(knowledge?.companyId && (knowledge.ownerId === userId || profile?.role === "admin"));
+  const parentHref = params.productId || knowledge?.productId
+    ? `${basePath}/products/${params.productId ?? knowledge?.productId}`
+    : `${basePath}/categories/${params.categoryId ?? knowledge?.categoryId ?? "how-to"}`;
+  const parentLabel = params.productId || knowledge?.productId ? "商材に戻る" : "カテゴリに戻る";
+  const editHref = params.productId || knowledge?.productId
+    ? `${basePath}/products/${params.productId ?? knowledge?.productId}/knowledge/${params.knowledgeId}/edit`
+    : `${basePath}/categories/${params.categoryId ?? knowledge?.categoryId ?? "how-to"}/knowledge/${params.knowledgeId}/edit`;
 
   useEffect(() => {
     if (!params.knowledgeId) return;
@@ -44,7 +51,7 @@ export default function SalesKnowledgeDetailPage() {
 
     try {
       await deleteKnowledgeItem(knowledge.id);
-      router.replace(`${basePath}/categories/${params.categoryId}`);
+      router.replace(parentHref);
     } catch (nextError) {
       setError(nextError instanceof Error ? nextError.message : "ナレッジの削除に失敗しました。");
     } finally {
@@ -58,15 +65,15 @@ export default function SalesKnowledgeDetailPage() {
       <div className="mx-auto max-w-[900px]">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <Link
-            href={`${basePath}/categories/${params.categoryId}`}
+            href={parentHref}
             className="text-[14px] font-semibold text-[#5767c8]"
           >
-            ← カテゴリに戻る
+            ← {parentLabel}
           </Link>
           {knowledge && canEdit ? (
             <div className="flex flex-wrap items-center gap-2">
               <Link
-                href={`${basePath}/categories/${params.categoryId}/knowledge/${params.knowledgeId}/edit`}
+                href={editHref}
                 className="inline-flex h-10 items-center gap-2 rounded-[13px] border border-[#e6eaf0] bg-white px-4 text-[13px] font-bold text-[#343b48] shadow-[0_6px_16px_rgba(17,24,39,0.04)]"
               >
                 <PenIcon />

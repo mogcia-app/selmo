@@ -9,6 +9,7 @@ import { useAuth } from "@/features/auth/auth-provider";
 import { getKnowledgeBasePath } from "@/lib/knowledge-paths";
 import {
   addKnowledgeProductTab,
+  deleteKnowledgeProductTab,
   subscribeToKnowledgeItemsByProduct,
   subscribeToKnowledgeProducts,
   updateKnowledgeProduct,
@@ -37,6 +38,7 @@ export default function SalesKnowledgeProductPage() {
   const [productInfoOpen, setProductInfoOpen] = useState(false);
   const [newTabTitle, setNewTabTitle] = useState("");
   const [isAddingTab, setIsAddingTab] = useState(false);
+  const [deletingTabTitle, setDeletingTabTitle] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -72,6 +74,23 @@ export default function SalesKnowledgeProductPage() {
     () => (activeTab === "all" ? productSections : productSections.filter((section) => section.title === activeTab)),
     [activeTab, productSections],
   );
+  const latestDate = formatLatestDate(items);
+  const handleDeleteProductTab = async (title: string) => {
+    if (deletingTabTitle) return;
+
+    setDeletingTabTitle(title);
+    setError(null);
+    try {
+      await deleteKnowledgeProductTab({ productId, title });
+      if (activeTab === title) {
+        setActiveTab("all");
+      }
+    } catch (nextError) {
+      setError(nextError instanceof Error ? nextError.message : "タブの削除に失敗しました。");
+    } finally {
+      setDeletingTabTitle(null);
+    }
+  };
 
   return (
     <main className="overflow-x-hidden bg-transparent">
@@ -102,9 +121,6 @@ export default function SalesKnowledgeProductPage() {
                 <h1 className="mt-4 text-[34px] font-bold tracking-[-0.03em] text-[#171717]">
                   {product?.name ?? "商材"}
                 </h1>
-                <p className="mt-3 max-w-[640px] text-[15px] leading-7 text-[#596273]">
-                  この商材に紐づくナレッジ、メモ、Q&Aを確認できます。
-                </p>
               </div>
               <div className="flex flex-wrap gap-3">
                 <Link
@@ -124,12 +140,41 @@ export default function SalesKnowledgeProductPage() {
                 すべて
                 <span className="ml-2 text-[11px] text-[#8a909b]">{items.length + (productSections.length > 0 ? 1 : 0)}</span>
               </TabButton>
-              {tabs.map((tab) => (
-                <TabButton key={tab.title} active={activeTab === tab.title} onClick={() => setActiveTab(tab.title)}>
-                  {tab.title}
-                  <span className="ml-2 text-[11px] text-[#8a909b]">{tab.count}</span>
-                </TabButton>
-              ))}
+              {tabs.map((tab) => {
+                const canDeleteTab = Boolean(product?.tabs.includes(tab.title));
+                const isActive = activeTab === tab.title;
+
+                return (
+                  <span
+                    key={tab.title}
+                    className={`inline-flex h-10 items-center rounded-[13px] border transition ${
+                      isActive
+                        ? "border-[#f0c655] bg-[#fffdf7] text-[#171717]"
+                        : "border-[#e6eaf0] bg-white text-[#596273] hover:border-[#ead8a8]"
+                    }`}
+                  >
+                    <button
+                      type="button"
+                      onClick={() => setActiveTab(tab.title)}
+                      className="h-full min-w-0 px-4 text-[13px] font-bold"
+                    >
+                      {tab.title}
+                      <span className="ml-2 text-[11px] text-[#8a909b]">{tab.count}</span>
+                    </button>
+                    {canDeleteTab ? (
+                      <button
+                        type="button"
+                        onClick={() => void handleDeleteProductTab(tab.title)}
+                        disabled={deletingTabTitle === tab.title}
+                        className="mr-2 inline-flex h-5 w-5 items-center justify-center rounded-full text-[14px] leading-none text-[#b8a46b] transition hover:bg-[#fff0ed] hover:text-[#b4232a] disabled:opacity-50"
+                        aria-label={`${tab.title}を削除`}
+                      >
+                        ×
+                      </button>
+                    ) : null}
+                  </span>
+                );
+              })}
               <button
                 type="button"
                 onClick={() => setTabDialogOpen(true)}
@@ -145,11 +190,11 @@ export default function SalesKnowledgeProductPage() {
               <Pill>{`ナレッジ ${items.filter((item) => item.kind === "knowledge").length}件`}</Pill>
               <Pill>{`メモ ${items.filter((item) => item.kind === "memo").length}件`}</Pill>
               <Pill>{`Q&A ${items.filter((item) => item.kind === "qa").length}件`}</Pill>
-              <Pill>{`最終更新：${formatLatestDate(items)}`}</Pill>
+              {latestDate ? <Pill>{`最終更新：${latestDate}`}</Pill> : null}
             </div>
           </section>
 
-          <section className="mt-6">
+          <section className="mt-6 max-h-[560px] overflow-y-auto pr-1 pb-8 md:max-h-[calc(100vh-360px)]">
             {visibleProductSections.length > 0 || visibleItems.length > 0 ? (
               <div className="space-y-3">
                 {visibleProductSections.length > 0 && product ? (
@@ -204,14 +249,6 @@ export default function SalesKnowledgeProductPage() {
                 <p className="mx-auto mt-2 max-w-[420px] text-[14px] leading-7 text-[#7a808c]">
                   商材に紐づけて作成したナレッジやメモが、タブごとに表示されます。
                 </p>
-                <Link
-                  href={`${basePath}/new?kind=knowledge&scope=personal&productId=${encodeURIComponent(productId)}${
-                    activeTab !== "all" ? `&tabTitle=${encodeURIComponent(activeTab)}` : ""
-                  }`}
-                  className="mt-5 inline-flex h-11 items-center justify-center rounded-[14px] border border-[#f0c655] bg-white px-5 text-[14px] font-bold text-[#171717]"
-                >
-                  ナレッジを追加
-                </Link>
               </div>
             )}
           </section>
@@ -301,6 +338,10 @@ export default function SalesKnowledgeProductPage() {
 }
 
 function getKnowledgeDetailHref(item: KnowledgeItem, basePath: string) {
+  if (item.productId) {
+    return `${basePath}/products/${item.productId}/knowledge/${item.id}`;
+  }
+
   return `${basePath}/categories/${item.categoryId ?? "how-to"}/knowledge/${item.id}`;
 }
 
@@ -399,7 +440,7 @@ function formatLatestDate(items: KnowledgeItem[]) {
     return current;
   }, null);
 
-  return formatDate(latest);
+  return latest ? formatDate(latest) : null;
 }
 
 function formatDate(date: Date | null) {

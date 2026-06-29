@@ -3,7 +3,7 @@
 import { FirebaseError } from "firebase/app";
 import Image from "next/image";
 import { usePathname } from "next/navigation";
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 
 import { useAuth } from "@/features/auth/auth-provider";
 import {
@@ -97,6 +97,9 @@ export function SalesKnowledgeChatWidget() {
   const closeWidget = () => {
     setIsOpen(false);
     setSelection(null);
+    setQuery("");
+    setSubmittedQuery("");
+    setError(null);
   };
 
   if (isKnowledgePage) {
@@ -115,11 +118,9 @@ export function SalesKnowledgeChatWidget() {
         <Image src="/sechat.png" alt="" width={54} height={54} className="h-[54px] w-[54px] object-contain" />
       </button>
 
-      {isOpen ? (
+      {isOpen && !selection ? (
         <aside
-          className={`fixed bottom-24 z-40 flex max-h-[min(680px,calc(100vh-120px))] w-[min(390px,calc(100vw-32px))] flex-col overflow-hidden rounded-[24px] border border-[#e8ebf0] bg-white shadow-[0_24px_64px_rgba(17,24,39,0.2)] ${
-            selection ? "right-[min(470px,calc(100vw-420px))]" : "right-6"
-          } max-lg:right-4`}
+          className="fixed right-6 bottom-24 z-40 flex max-h-[min(680px,calc(100vh-120px))] w-[min(390px,calc(100vw-32px))] flex-col overflow-hidden rounded-[24px] border border-[#e8ebf0] bg-white shadow-[0_24px_64px_rgba(17,24,39,0.2)] max-lg:right-4"
         >
           <div className="border-b border-[#eef1f5] px-4 py-4">
             <div className="flex items-center justify-between gap-3">
@@ -243,6 +244,20 @@ function KnowledgeDetailDrawer({
 }) {
   const isProduct = selection.type === "product";
   const title = isProduct ? selection.product.name : selection.item.title;
+  const scrollContainerRef = useRef<HTMLDivElement | null>(null);
+  const searchKey = searchTerms.join("\u0001");
+
+  useEffect(() => {
+    const container = scrollContainerRef.current;
+    if (!container || searchTerms.length === 0) return;
+
+    const animationFrame = requestAnimationFrame(() => {
+      const firstMatch = container.querySelector<HTMLElement>("[data-knowledge-search-match='true']");
+      firstMatch?.scrollIntoView({ block: "center", behavior: "smooth" });
+    });
+
+    return () => cancelAnimationFrame(animationFrame);
+  }, [searchKey, searchTerms.length, selection]);
 
   return (
     <aside className="fixed bottom-6 right-6 top-24 z-50 flex w-[min(430px,calc(100vw-32px))] flex-col overflow-hidden rounded-[24px] border border-[#e8ebf0] bg-white shadow-[0_24px_64px_rgba(17,24,39,0.22)]">
@@ -263,7 +278,7 @@ function KnowledgeDetailDrawer({
         </div>
       </div>
 
-      <div className="min-h-0 flex-1 overflow-y-auto px-5 py-5">
+      <div ref={scrollContainerRef} className="min-h-0 flex-1 overflow-y-auto px-5 py-5">
         {isProduct ? (
           <ProductDetail product={selection.product} searchTerms={searchTerms} />
         ) : (
@@ -397,6 +412,7 @@ function HighlightedText({ value, searchTerms }: { value: string; searchTerms?: 
         return (
           <mark
             key={`${part}-${index}`}
+            data-knowledge-search-match="true"
             className="rounded-[4px] bg-[#fff1a8] px-0.5 py-[1px] font-black text-[#171717] underline decoration-[#ffc400] decoration-2 underline-offset-2"
           >
             {part}

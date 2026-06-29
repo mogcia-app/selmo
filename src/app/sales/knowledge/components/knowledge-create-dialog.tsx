@@ -5,13 +5,11 @@ import { FormEvent, useEffect, useMemo, useState } from "react";
 import type {
   CreateKnowledgeItemInput,
   KnowledgeItem,
-  KnowledgeCategory,
   KnowledgeProduct,
 } from "@/lib/firebase/knowledge";
 
 type KnowledgeCreateDialogProps = {
   open: boolean;
-  categories: KnowledgeCategory[];
   products: KnowledgeProduct[];
   ownerId: string | null | undefined;
   canCreateShared: boolean;
@@ -28,7 +26,6 @@ type KnowledgeCreateDialogProps = {
 
 export function KnowledgeCreateDialog({
   open,
-  categories,
   products,
   ownerId,
   canCreateShared,
@@ -45,7 +42,7 @@ export function KnowledgeCreateDialog({
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [body, setBody] = useState("");
-  const [categoryId, setCategoryId] = useState(defaultCategoryId ?? "");
+  const [categoryId, setCategoryId] = useState(defaultCategoryId ?? "how-to");
   const [productId, setProductId] = useState("");
   const [kind, setKind] = useState<CreateKnowledgeItemInput["kind"]>(defaultKind);
   const [scope, setScope] = useState<CreateKnowledgeItemInput["scope"]>(
@@ -71,15 +68,9 @@ export function KnowledgeCreateDialog({
   }, [canCreateShared, defaultCategoryId, defaultKind, defaultScope, initialItem, open]);
 
   const normalizedTags = useMemo(
-    () =>
-      tagsText
-        .split(/[\s　,、]+/)
-        .map((tag) => tag.trim())
-        .filter(Boolean)
-        .slice(0, 12),
-    [tagsText],
+    () => buildSearchTags({ manualText: tagsText, title, body, productName: products.find((product) => product.id === productId)?.name }),
+    [body, productId, products, tagsText, title],
   );
-  const categoryOptions = useMemo(() => buildCategoryOptions(categories), [categories]);
 
   if (!open) {
     return null;
@@ -93,20 +84,15 @@ export function KnowledgeCreateDialog({
       return;
     }
 
-    if (!title.trim()) {
-      setError("タイトルを入力してください。");
-      return;
-    }
-
     setIsSaving(true);
     setError(null);
 
     try {
       await onSubmit({
-        title: title.trim(),
+        title: buildKnowledgeTitle(title, body, kind),
         description: description.trim(),
         body: body.trim(),
-        categoryId: categoryId || null,
+        categoryId: categoryId || "how-to",
         productId: productId || null,
         ownerId,
         scope,
@@ -156,7 +142,7 @@ export function KnowledgeCreateDialog({
             <input
               value={title}
               onChange={(event) => setTitle(event.target.value)}
-              placeholder="例：価格が高いと言われた時の切り返し"
+              placeholder="未入力なら自動で名前を付けます"
               className="mt-2 h-12 w-full rounded-[14px] border border-[#e4e8ef] bg-white px-4 text-[14px] text-[#171717] outline-none transition focus:border-[#e0bd4b]"
               autoFocus
             />
@@ -184,22 +170,6 @@ export function KnowledgeCreateDialog({
             >
               <option value="personal">自分用</option>
               {canCreateShared ? <option value="shared">共有</option> : null}
-            </select>
-          </label>
-
-          <label>
-            <span className="text-[13px] font-bold text-[#343b48]">カテゴリ</span>
-            <select
-              value={categoryId}
-              onChange={(event) => setCategoryId(event.target.value)}
-              className="mt-2 h-12 w-full rounded-[14px] border border-[#e4e8ef] bg-white px-4 text-[14px] text-[#171717] outline-none transition focus:border-[#e0bd4b]"
-            >
-              <option value="">未設定</option>
-              {categoryOptions.map((category) => (
-                <option key={category.id} value={category.id}>
-                  {category.title}
-                </option>
-              ))}
             </select>
           </label>
 
@@ -239,27 +209,6 @@ export function KnowledgeCreateDialog({
             />
           </label>
 
-          <label className="md:col-span-2">
-            <span className="text-[13px] font-bold text-[#343b48]">検索キーワード（任意）</span>
-            <input
-              value={tagsText}
-              onChange={(event) => setTagsText(event.target.value)}
-              placeholder="例：料金 競合比較 初回商談"
-              className="mt-2 h-12 w-full rounded-[14px] border border-[#e4e8ef] bg-white px-4 text-[14px] text-[#171717] outline-none transition focus:border-[#e0bd4b]"
-            />
-            <p className="mt-2 text-[12px] leading-5 text-[#7a808c]">
-              あとで検索で見つけたい言葉を入れます。スペース・カンマ・読点で区切れます。
-            </p>
-            {normalizedTags.length > 0 ? (
-              <div className="mt-2 flex flex-wrap gap-1.5">
-                {normalizedTags.map((tag) => (
-                  <span key={tag} className="rounded-full bg-[#f1f2f5] px-2.5 py-1 text-[11px] font-bold text-[#596273]">
-                    {tag}
-                  </span>
-                ))}
-              </div>
-            ) : null}
-          </label>
         </div>
 
         <div className="mt-6 flex flex-wrap justify-end gap-3">
@@ -283,16 +232,36 @@ export function KnowledgeCreateDialog({
   );
 }
 
-function buildCategoryOptions(categories: KnowledgeCategory[]) {
-  const seen = new Set<string>();
-  return categories.filter((category) => {
-    const key = category.id === "how-to" || category.title === "使い方" ? "how-to" : `${category.id}:${category.title}`;
+function buildKnowledgeTitle(title: string, body: string, kind: CreateKnowledgeItemInput["kind"]) {
+  const normalizedTitle = title.trim();
+  if (normalizedTitle) return normalizedTitle;
 
-    if (seen.has(key)) {
-      return false;
-    }
+  const bodyTitle = body.trim().replace(/\s+/g, " ").slice(0, 32);
+  if (bodyTitle) return bodyTitle;
 
-    seen.add(key);
-    return true;
-  });
+  if (kind === "memo") return "無題のメモ";
+  if (kind === "qa") return "無題のQ&A";
+  return "無題のナレッジ";
+}
+
+function buildSearchTags(input: { manualText?: string; title?: string; body?: string; productName?: string }) {
+  const words = [
+    input.productName,
+    input.title,
+    ...extractKeywordCandidates(input.manualText ?? ""),
+    ...extractKeywordCandidates(input.body ?? ""),
+  ];
+
+  return Array.from(
+    new Set(words.map((word) => word?.trim()).filter((word): word is string => Boolean(word))),
+  ).slice(0, 12);
+}
+
+function extractKeywordCandidates(value: string) {
+  return value
+    .replace(/[。、！？!?「」『』（）()[\]【】]/g, " ")
+    .split(/[\s　,、]+/)
+    .map((word) => word.trim())
+    .filter((word) => word.length >= 2)
+    .slice(0, 8);
 }

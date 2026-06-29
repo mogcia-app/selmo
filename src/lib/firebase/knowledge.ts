@@ -491,6 +491,33 @@ export async function addKnowledgeProductTab(input: { productId: string; title: 
   });
 }
 
+export async function deleteKnowledgeProductTab(input: { productId: string; title: string }) {
+  const title = input.title.trim();
+
+  if (!title) {
+    return;
+  }
+
+  const { firestore } = assertFirebaseClient();
+  const productRef = doc(firestore, "knowledgeProducts", input.productId);
+
+  await runTransaction(firestore, async (transaction) => {
+    const snapshot = await transaction.get(productRef);
+
+    if (!snapshot.exists()) {
+      throw new Error("商材が見つかりませんでした。");
+    }
+
+    const product = mapKnowledgeProduct(snapshot);
+    const tabs = product.tabs.filter((tab) => tab !== title);
+
+    transaction.update(productRef, {
+      tabs,
+      updatedAt: serverTimestamp(),
+    });
+  });
+}
+
 export async function createKnowledgeItem(input: CreateKnowledgeItemInput) {
   const { firestore } = assertFirebaseClient();
   const itemRef = doc(collection(firestore, "knowledgeItems"));
