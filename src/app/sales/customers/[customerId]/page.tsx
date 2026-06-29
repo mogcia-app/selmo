@@ -69,6 +69,8 @@ const logTypeOptions: Array<{ value: CustomerLogType; label: string }> = [
   { value: "memo", label: "メモ" },
 ];
 
+const nextActionLogTitle = "次回アクション";
+
 type CustomerFormState = {
   companyName: string;
   contactName: string;
@@ -184,6 +186,8 @@ export default function SalesCustomerDetailPage() {
       .sort((left, right) => (right.recordedAt?.getTime() ?? 0) - (left.recordedAt?.getTime() ?? 0));
   }, [customer, linkedMeetingIds, meetings]);
 
+  const nextActionLogs = useMemo(() => logs.filter(isNextActionLog), [logs]);
+
   const linkCandidates = useMemo(() => {
     if (!customer) return [];
     return meetings
@@ -198,10 +202,24 @@ export default function SalesCustomerDetailPage() {
     setIsSaving(true);
     setErrorMessage(null);
     setSuccessMessage(null);
+    const nextActionChanged =
+      formState.nextActionTitle.trim() !== customer.nextActionTitle
+      || !isSameDate(readOptionalDate(formState.nextActionDate), customer.nextActionDate);
+    const shouldLogNextAction = nextActionChanged && Boolean(profile?.uid);
+
     try {
-      await updateCustomer(customer.id, buildCustomerInput(formState, products, customer));
+      const nextCustomerInput = buildCustomerInput(formState, products, customer);
+      await updateCustomer(customer.id, nextCustomerInput);
+      if (shouldLogNextAction && profile?.uid) {
+        await createNextActionLog({
+          customer,
+          createdBy: profile.uid,
+          title: nextCustomerInput.nextActionTitle,
+          date: nextCustomerInput.nextActionDate,
+        });
+      }
       setIsEditing(false);
-      setSuccessMessage("顧客カルテを更新しました。");
+      setSuccessMessage(shouldLogNextAction ? "顧客カルテを更新し、次回アクション履歴に追加しました。" : "顧客カルテを更新しました。");
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "顧客カルテの更新に失敗しました。");
     } finally {
@@ -242,16 +260,25 @@ export default function SalesCustomerDetailPage() {
 
   async function handleUpdateNextAction(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!customer) return;
+    if (!customer || !profile?.uid) return;
     setErrorMessage(null);
     setSuccessMessage(null);
+    const nextActionTitleValue = nextActionTitle.trim();
+    const nextActionDateValue = readOptionalDate(nextActionDate);
+
     try {
       await updateCustomerNextAction(customer.id, {
-        nextActionTitle: nextActionTitle.trim(),
-        nextActionDate: readOptionalDate(nextActionDate),
+        nextActionTitle: nextActionTitleValue,
+        nextActionDate: nextActionDateValue,
         lastContactDate: new Date(),
       });
-      setSuccessMessage("次回アクションを更新しました。");
+      await createNextActionLog({
+        customer,
+        createdBy: profile.uid,
+        title: nextActionTitleValue,
+        date: nextActionDateValue,
+      });
+      setSuccessMessage("次回アクションを更新し、履歴に追加しました。");
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "次回アクションの更新に失敗しました。");
     }
@@ -386,6 +413,10 @@ export default function SalesCustomerDetailPage() {
               </form>
             </Panel>
 
+            <Panel title="次回アクション履歴">
+              <NextActionHistory logs={nextActionLogs} />
+            </Panel>
+
             <Panel title="タイムライン">
               <Timeline logs={logs} />
             </Panel>
@@ -437,7 +468,7 @@ function CustomerForm({
         <TextField label="業種" value={formState.industry} onChange={(value) => setField("industry", value)} />
         <TextField label="従業員数" value={formState.employeeCount} onChange={(value) => setField("employeeCount", value)} type="number" />
       </div>
-      <ProductMultiSelect products={products} selectedIds={formState.productIds} onChange={(productIds) => setField("productIds", productIds)} />
+      <ProductSelect products={products} selectedIds={formState.productIds} onChange={(productIds) => setField("productIds", productIds)} />
       <div className="grid gap-4 md:grid-cols-4">
         <SelectField label="ステータス" value={formState.status} options={statusOptions} onChange={(value) => setField("status", value as CustomerStatus)} />
         <SelectField label="温度感" value={formState.temperature} options={temperatureOptions} onChange={(value) => setField("temperature", value as CustomerTemperature)} />
@@ -514,6 +545,29 @@ function Timeline({ logs }: { logs: CustomerLogRecord[] }) {
   );
 }
 
+function NextActionHistory({ logs }: { logs: CustomerLogRecord[] }) {
+  if (logs.length === 0) {
+    return <EmptyState title="次回アクション履歴はまだありません" body="次回アクションを更新すると、ここに過去分も残ります。" />;
+  }
+
+  return (
+    <div className="max-h-[360px] space-y-3 overflow-auto pr-1">
+      {logs.map((log) => (
+        <div key={log.id} className="rounded-[12px] border border-[#eef1f5] bg-[#fcfcfd] px-4 py-3">
+          <div className="flex flex-wrap items-start justify-between gap-2">
+            <div>
+              <div className="text-[13px] font-black text-[#171717]">{stripNextActionLogPrefix(log.title) || "未設定"}</div>
+              <div className="mt-1 text-[12px] font-bold text-[#8a909b]">予定日: {formatDate(log.actionDate)}</div>
+            </div>
+            <span className="rounded-full bg-[#fff3cf] px-3 py-1 text-[12px] font-black text-[#8a6500]">履歴</span>
+          </div>
+          {log.body ? <p className="mt-2 text-[12px] font-bold leading-6 text-[#596273]">{log.body}</p> : null}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function MeetingHistory({ meetings }: { meetings: MeetingRecord[] }) {
   if (meetings.length === 0) return <EmptyState title="紐付いた商談履歴はありません" body="同じ顧客名の商談、または手動で紐付けた商談がここに表示されます。" />;
   return (
@@ -573,7 +627,7 @@ function SelectField({ label, value, options, onChange }: { label: string; value
   );
 }
 
-function ProductMultiSelect({
+function ProductSelect({
   products,
   selectedIds,
   onChange,
@@ -582,41 +636,19 @@ function ProductMultiSelect({
   selectedIds: string[];
   onChange: (selectedIds: string[]) => void;
 }) {
-  const selectedProducts = products.filter((product) => selectedIds.includes(product.id));
-  const toggleProduct = (productId: string) => {
-    onChange(selectedIds.includes(productId) ? selectedIds.filter((id) => id !== productId) : [...selectedIds, productId]);
-  };
-
   return (
-    <div className="rounded-[12px] border border-[#dfe4ec] bg-[#fcfcfd] px-3 py-3">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <span className="text-[12px] font-black text-[#596273]">商材</span>
-        <span className="text-[11px] font-bold text-[#8a909b]">{selectedProducts.length > 0 ? `${selectedProducts.length}件選択中` : "複数選択可"}</span>
-      </div>
-      {products.length > 0 ? (
-        <div className="mt-3 flex flex-wrap gap-2">
-          {products.map((product) => {
-            const selected = selectedIds.includes(product.id);
-            return (
-              <button
-                key={product.id}
-                type="button"
-                onClick={() => toggleProduct(product.id)}
-                className={`rounded-full border px-3 py-1.5 text-[12px] font-black transition ${
-                  selected
-                    ? "border-[#f0c655] bg-[#ffd84d] text-[#171717]"
-                    : "border-[#e2e6ee] bg-white text-[#596273] hover:border-[#ead8a8]"
-                }`}
-              >
-                {product.name}
-              </button>
-            );
-          })}
-        </div>
-      ) : (
-        <p className="mt-2 text-[12px] font-bold text-[#8a909b]">商材管理に登録された商材がここに表示されます。</p>
-      )}
-    </div>
+    <label>
+      <span className="text-[12px] font-black text-[#596273]">商材</span>
+      <select
+        value={selectedIds[0] ?? ""}
+        onChange={(event) => onChange(event.target.value ? [event.target.value] : [])}
+        disabled={products.length === 0}
+        className="mt-1 h-11 w-full rounded-[10px] border border-[#dfe4ec] bg-white px-3 text-[13px] font-bold text-[#343b48] outline-none focus:border-[#d7aa1f] disabled:bg-[#f6f7f9] disabled:text-[#8a909b]"
+      >
+        <option value="">{products.length > 0 ? "商材を選択" : "商材が未登録です"}</option>
+        {products.map((product) => <option key={product.id} value={product.id}>{product.name}</option>)}
+      </select>
+    </label>
   );
 }
 
@@ -702,6 +734,29 @@ function buildCustomerInput(formState: CustomerFormState, products: KnowledgePro
   };
 }
 
+async function createNextActionLog({
+  customer,
+  createdBy,
+  title,
+  date,
+}: {
+  customer: CustomerRecord;
+  createdBy: string;
+  title: string;
+  date: Date | null;
+}) {
+  await createCustomerLog({
+    companyId: customer.companyId,
+    customerId: customer.id,
+    userId: customer.assignedUserId,
+    type: "follow",
+    title: `${nextActionLogTitle}: ${title || "未設定"}`,
+    body: `次回アクション予定日: ${formatDate(date)}`,
+    actionDate: date,
+    createdBy,
+  });
+}
+
 function calcMeetingAverageScore(meetings: MeetingRecord[]) {
   const scores = meetings.map(calcMeetingScore).filter((score): score is number => score !== null);
   return scores.length > 0 ? Math.round(scores.reduce((sum, score) => sum + score, 0) / scores.length) : null;
@@ -748,9 +803,25 @@ function readLogTypeLabel(type: CustomerLogType) {
   return logTypeOptions.find((option) => option.value === type)?.label ?? "メモ";
 }
 
+function isNextActionLog(log: CustomerLogRecord) {
+  return log.type === "follow" && log.title.startsWith(`${nextActionLogTitle}:`);
+}
+
+function stripNextActionLogPrefix(title: string) {
+  return title.startsWith(`${nextActionLogTitle}:`) ? title.slice(`${nextActionLogTitle}:`.length).trim() : title;
+}
+
 function formatDate(date: Date | null) {
   if (!date) return "未設定";
   return new Intl.DateTimeFormat("ja-JP", { year: "numeric", month: "2-digit", day: "2-digit" }).format(date);
+}
+
+function isSameDate(left: Date | null, right: Date | null) {
+  if (!left && !right) return true;
+  if (!left || !right) return false;
+  return left.getFullYear() === right.getFullYear()
+    && left.getMonth() === right.getMonth()
+    && left.getDate() === right.getDate();
 }
 
 function formatCurrency(value: number | null) {

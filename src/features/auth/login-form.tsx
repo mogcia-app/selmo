@@ -103,10 +103,10 @@ export function LoginForm({
           ログインがうまく進まない場合は、このページをリロードしてから再度お試しください。
           <button
             type="button"
-            onClick={() => window.location.replace(isAdmin ? "/admin/login" : "/login")}
+            onClick={() => router.replace(isAdmin ? "/admin/login" : "/login")}
             className="mt-2 block font-bold text-[#171717] underline underline-offset-4"
           >
-            リロードする
+            ログイン画面を開き直す
           </button>
         </div>
       ) : null}

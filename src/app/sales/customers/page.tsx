@@ -2,6 +2,7 @@
 
 import { FirebaseError } from "firebase/app";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 import { useEffect } from "react";
 
@@ -99,6 +100,7 @@ const initialFormState: CustomerFormState = {
 };
 
 export default function SalesCustomersPage() {
+  const router = useRouter();
   const { profile } = useAuth();
   const [customers, setCustomers] = useState<CustomerRecord[]>([]);
   const [products, setProducts] = useState<KnowledgeProduct[]>([]);
@@ -189,7 +191,7 @@ export default function SalesCustomersPage() {
       setFormState(initialFormState);
       setShowCreateForm(false);
       setSuccessMessage("顧客カルテを追加しました。");
-      window.location.href = `/sales/customers/${customerId}`;
+      router.push(`/sales/customers/${customerId}`);
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "顧客の追加に失敗しました。");
     } finally {
@@ -353,7 +355,7 @@ function CustomerForm({
         <TextField label="従業員数" value={formState.employeeCount} onChange={(value) => setField("employeeCount", value)} type="number" />
       </div>
 
-      <ProductMultiSelect
+      <ProductSelect
         products={products}
         selectedIds={formState.productIds}
         onChange={(productIds) => setField("productIds", productIds)}
@@ -433,7 +435,7 @@ function buildCustomerInput(formState: CustomerFormState, products: KnowledgePro
   };
 }
 
-function ProductMultiSelect({
+function ProductSelect({
   products,
   selectedIds,
   onChange,
@@ -442,41 +444,19 @@ function ProductMultiSelect({
   selectedIds: string[];
   onChange: (selectedIds: string[]) => void;
 }) {
-  const selectedProducts = products.filter((product) => selectedIds.includes(product.id));
-  const toggleProduct = (productId: string) => {
-    onChange(selectedIds.includes(productId) ? selectedIds.filter((id) => id !== productId) : [...selectedIds, productId]);
-  };
-
   return (
-    <div className="rounded-[12px] border border-[#dfe4ec] bg-[#fcfcfd] px-3 py-3">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <span className="text-[12px] font-black text-[#596273]">商材</span>
-        <span className="text-[11px] font-bold text-[#8a909b]">{selectedProducts.length > 0 ? `${selectedProducts.length}件選択中` : "複数選択可"}</span>
-      </div>
-      {products.length > 0 ? (
-        <div className="mt-3 flex flex-wrap gap-2">
-          {products.map((product) => {
-            const selected = selectedIds.includes(product.id);
-            return (
-              <button
-                key={product.id}
-                type="button"
-                onClick={() => toggleProduct(product.id)}
-                className={`rounded-full border px-3 py-1.5 text-[12px] font-black transition ${
-                  selected
-                    ? "border-[#f0c655] bg-[#ffd84d] text-[#171717]"
-                    : "border-[#e2e6ee] bg-white text-[#596273] hover:border-[#ead8a8]"
-                }`}
-              >
-                {product.name}
-              </button>
-            );
-          })}
-        </div>
-      ) : (
-        <p className="mt-2 text-[12px] font-bold text-[#8a909b]">商材管理に登録された商材がここに表示されます。</p>
-      )}
-    </div>
+    <label>
+      <span className="text-[12px] font-black text-[#596273]">商材</span>
+      <select
+        value={selectedIds[0] ?? ""}
+        onChange={(event) => onChange(event.target.value ? [event.target.value] : [])}
+        disabled={products.length === 0}
+        className="mt-1 h-11 w-full rounded-[10px] border border-[#dfe4ec] bg-white px-3 text-[13px] font-bold text-[#343b48] outline-none focus:border-[#d7aa1f] disabled:bg-[#f6f7f9] disabled:text-[#8a909b]"
+      >
+        <option value="">{products.length > 0 ? "商材を選択" : "商材が未登録です"}</option>
+        {products.map((product) => <option key={product.id} value={product.id}>{product.name}</option>)}
+      </select>
+    </label>
   );
 }
 
