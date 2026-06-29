@@ -238,19 +238,7 @@ export default function SalesKnowledgeProductPage() {
                   </Link>
                 ))}
               </div>
-            ) : (
-              <div className="rounded-[18px] border border-dashed border-[#f0c655] bg-[#fffdf7] px-6 py-14 text-center">
-                <div className="mx-auto inline-flex h-14 w-14 items-center justify-center rounded-[16px] bg-white text-[#9c7600] shadow-[0_8px_18px_rgba(17,24,39,0.05)]">
-                  <PlusIcon />
-                </div>
-                <h2 className="mt-4 text-[22px] font-bold text-[#171717]">
-                  {activeTab === "all" ? "この商材のナレッジはまだありません" : `${activeTab} のナレッジはまだありません`}
-                </h2>
-                <p className="mx-auto mt-2 max-w-[420px] text-[14px] leading-7 text-[#7a808c]">
-                  商材に紐づけて作成したナレッジやメモが、タブごとに表示されます。
-                </p>
-              </div>
-            )}
+            ) : null}
           </section>
         </div>
       </div>
