@@ -299,16 +299,27 @@ function ScenarioCreateDialog({
   const [productId, setProductId] = useState(scenario?.productId ?? "");
   const [scenarioCategory, setScenarioCategory] = useState<"新規" | "既存" | "">(scenario?.scenarioCategory ?? prefillCustomerType);
   const [targetSegment, setTargetSegment] = useState(scenario?.targetSegment ?? prefillTargetSegment);
+  const [weaknessFocus, setWeaknessFocus] = useState(readWeaknessFocus(scenario));
   const [customerRole, setCustomerRole] = useState(scenario?.customerRole ?? "");
   const [customerProfile, setCustomerProfile] = useState(scenario?.customerProfile ?? buildPrefillCustomerProfile({ prefillCustomerName, prefillPurpose, prefillIssues, prefillMemo }));
   const [goal, setGoal] = useState(scenario?.goal ?? (prefillPurpose ? `${prefillPurpose}の予定に向けて、顧客課題を確認し次回アクションまで進める。` : ""));
   const [objections, setObjections] = useState((scenario?.objections ?? (prefillIssues ? splitLines(prefillIssues) : [])).join("\n"));
   const [criteria, setCriteria] = useState((scenario?.evaluationCriteria ?? []).join("\n"));
-  const [customFields, setCustomFields] = useState<RoleplayScenarioCustomField[]>(scenario?.customFields ?? []);
+  const [customFields, setCustomFields] = useState<RoleplayScenarioCustomField[]>((scenario?.customFields ?? []).filter((field) => field.label !== "重点弱点"));
   const [difficulty, setDifficulty] = useState<RoleplayDifficulty>(scenario?.difficulty ?? "hard");
   const [isSaving, setIsSaving] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
   const selectedProduct = products.find((product) => product.id === productId);
+  const weaknessSuggestions = useMemo(
+    () => buildWeaknessSuggestions({
+      meetings,
+      productName: selectedProduct?.name ?? "",
+      category: scenarioCategory || "新規",
+      targetSegment,
+      roleplayType,
+    }),
+    [meetings, roleplayType, scenarioCategory, selectedProduct?.name, targetSegment],
+  );
 
   useEffect(() => {
     if (scenario || productId || !prefillProductName) return;
@@ -330,6 +341,7 @@ function ScenarioCreateDialog({
         product: selectedProduct,
         category: scenarioCategory,
         targetSegment,
+        weaknessFocus,
         roleplayType,
         meetingInsights: buildMeetingInsights({
           meetings,
@@ -365,6 +377,10 @@ function ScenarioCreateDialog({
     onError(null);
     try {
       const normalizedCustomFields = normalizeCustomFields(customFields);
+      const weaknessCustomFields = weaknessFocus.trim()
+        ? [{ id: "weakness-focus", label: "重点弱点", value: weaknessFocus.trim() }]
+        : [];
+      const customFieldsWithoutWeakness = normalizedCustomFields.filter((field) => field.label !== "重点弱点");
       if (hasInvalidCustomFields(customFields)) {
         onError("自由項目は項目名と中身を両方入力してください。");
         setIsSaving(false);
@@ -385,7 +401,7 @@ function ScenarioCreateDialog({
         goal: goal.trim(),
         objections: splitLines(objections),
         evaluationCriteria: splitLines(criteria),
-        customFields: normalizedCustomFields,
+        customFields: [...weaknessCustomFields, ...customFieldsWithoutWeakness],
         difficulty,
         visibility: scenario?.visibility ?? "draft",
         createdBy: userId,
@@ -434,6 +450,28 @@ function ScenarioCreateDialog({
           </Field>
           <Field label="ターゲット層">
             <input value={targetSegment} onChange={(event) => setTargetSegment(event.target.value)} className="h-12 w-full rounded-[14px] border border-[#e4e8ef] bg-white px-4 text-[14px] text-[#171717] outline-none transition focus:border-[#e0bd4b]" placeholder="空欄ならAIが選定" />
+          </Field>
+          <Field label={roleplayType === "teleapo" ? "今回つぶしたいテレアポの苦手" : "今回つぶしたい苦手"} className="md:col-span-2">
+            <textarea
+              value={weaknessFocus}
+              onChange={(event) => setWeaknessFocus(event.target.value)}
+              className="min-h-[88px] w-full resize-y rounded-[14px] border border-[#e4e8ef] bg-white px-4 py-3 text-[14px] leading-7 text-[#171717] outline-none transition focus:border-[#e0bd4b]"
+              placeholder={roleplayType === "teleapo" ? "例：冒頭10秒で切られる / 受付突破ができない / 資料送ってで終わる / アポ打診に進めない" : "例：価格反論を受けると説明が長くなる / 決裁者確認を聞き切れない / 次回アクションを曖昧に終えてしまう"}
+            />
+            {weaknessSuggestions.length > 0 ? (
+              <div className="mt-2 flex flex-wrap gap-2">
+                {weaknessSuggestions.map((suggestion) => (
+                  <button
+                    key={suggestion}
+                    type="button"
+                    onClick={() => setWeaknessFocus(suggestion)}
+                    className="rounded-full border border-[#ead8a8] bg-[#fffaf0] px-3 py-1.5 text-[12px] font-bold text-[#8a6500]"
+                  >
+                    {suggestion}
+                  </button>
+                ))}
+              </div>
+            ) : null}
           </Field>
           <div className="flex items-end">
             <button type="button" onClick={() => void handleGenerate()} disabled={isGenerating} className="h-12 w-full rounded-[14px] border border-[#171717] bg-[#171717] px-4 text-[13px] font-black text-white disabled:opacity-60">
@@ -572,6 +610,10 @@ function hasInvalidCustomFields(fields: RoleplayScenarioCustomField[]) {
   });
 }
 
+function readWeaknessFocus(scenario?: RoleplayScenario) {
+  return scenario?.customFields.find((field) => field.label === "重点弱点")?.value ?? "";
+}
+
 function RoleplayHeader({ activeStep, roleplayType }: { activeStep: "scenario" | "practice" | "results"; roleplayType: RoleplayType }) {
   return (
     <header className="flex flex-wrap items-center justify-between gap-4 rounded-[18px] border border-[#e2e6ee] bg-white px-5 py-4 shadow-[0_8px_24px_rgba(17,24,39,0.04)]">
@@ -661,6 +703,7 @@ async function generateRoleplayScenario(input: {
   product: KnowledgeProduct;
   category: "新規" | "既存";
   targetSegment: string;
+  weaknessFocus: string;
   roleplayType: RoleplayType;
   meetingInsights?: string[];
 }) {
@@ -672,6 +715,7 @@ async function generateRoleplayScenario(input: {
       product: input.product,
       category: input.category,
       targetSegment: input.targetSegment,
+      weaknessFocus: input.weaknessFocus,
       roleplayType: input.roleplayType,
       meetingInsights: input.meetingInsights ?? [],
     }),
@@ -751,6 +795,40 @@ function buildMeetingInsights(input: {
       ].filter(Boolean);
     })
     .slice(0, 16);
+}
+
+function buildWeaknessSuggestions(input: {
+  meetings: MeetingRecord[];
+  productName: string;
+  category: "新規" | "既存";
+  targetSegment: string;
+  roleplayType: RoleplayType;
+}) {
+  const teleapoSuggestions = [
+    "冒頭10秒で用件を伝え、切られずに話す許可を取る",
+    "受付で止められた時に担当者接続まで進める",
+    "「資料送ってください」で終わらせずアポ打診へつなげる",
+    "「忙しい」「結構です」に1回だけ自然に切り返す",
+    "長く説明せず、相手の業界課題を一言で刺す",
+  ];
+  const meetingSuggestions = [
+    "価格反論に対して確認質問と効果訴求で切り返す",
+    "決裁者・社内確認フローを聞き切る",
+    "予算感と費用対効果を確認する",
+    "導入時期と次回アクションを曖昧にせず合意する",
+  ];
+  return Array.from(
+    new Set(
+      [
+        ...(input.roleplayType === "teleapo" ? teleapoSuggestions : meetingSuggestions),
+        ...buildMeetingInsights(input)
+        .filter((item) => item.startsWith("弱点項目:") || item.startsWith("不足基準:") || item.startsWith("話し癖改善:"))
+        .map((item) => item.replace(/^弱点項目:|^不足基準:|^話し癖改善:/, "").trim())
+        .map((item) => item.replace(/\s*\d+点。.*$/, "").trim())
+        .filter(Boolean),
+      ],
+    ),
+  ).slice(0, 5);
 }
 
 function buildLowEvaluationInsights(meeting: MeetingRecord) {

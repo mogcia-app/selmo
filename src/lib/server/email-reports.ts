@@ -22,7 +22,7 @@ type UserRecord = {
   id: string;
   email: string | null;
   name: string;
-  role: "admin" | "sales" | "owner" | string;
+  role: "admin" | "sales" | string;
   status: string;
   companyId: string | null;
 };

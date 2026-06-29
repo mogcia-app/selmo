@@ -732,6 +732,9 @@ function formatElapsed(seconds: number) {
 }
 
 function evaluateRoleplay(scenario: RoleplayScenario, messages: RoleplayMessage[]) {
+  if (scenario.roleplayType === "teleapo") {
+    return evaluateTeleapoRoleplay(scenario, messages);
+  }
   const salesMessages = messages.filter((message) => message.role === "sales");
   const salesText = salesMessages.map((message) => message.content).join(" ");
   const criteriaHits = scenario.evaluationCriteria.filter((criterion) => {
@@ -820,6 +823,67 @@ function evaluateRoleplay(scenario: RoleplayScenario, messages: RoleplayMessage[
   };
 }
 
+function evaluateTeleapoRoleplay(scenario: RoleplayScenario, messages: RoleplayMessage[]) {
+  const salesMessages = messages.filter((message) => message.role === "sales");
+  const salesText = salesMessages.map((message) => message.content).join(" ");
+  const questionCount = (salesText.match(/？|\?/g) ?? []).length;
+  const hasOpening = includesAny(salesText, ["お世話", "突然", "失礼", "こんにちは", "お忙しい"]);
+  const hasPermission = includesAny(salesText, ["30秒", "少し", "今", "お時間", "よろしい", "大丈夫"]);
+  const hasShortValue = includesAny(salesText, ["課題", "改善", "削減", "効率", "集客", "売上", "採用", "事例"]);
+  const hasGatekeeper = includesAny(salesText, ["担当", "部署", "責任者", "どなた", "お繋ぎ", "ご担当"]);
+  const hasAppointment = includesAny(salesText, ["日程", "候補", "打ち合わせ", "15分", "30分", "来週", "明日", "アポ"]);
+  const hasOneTurnRebuttal = includesAny(salesText, ["資料", "忙しい", "結構", "必要ない", "間に合", "改め"]);
+  const fillerCount = (salesText.match(/えー|あの|まあ|まー|そのー|なんか|ちょっと/g) ?? []).length;
+  const maxSalesTurnLength = Math.max(0, ...salesMessages.map((message) => message.content.length));
+  const rawScore =
+    12 +
+    (hasOpening ? 10 : -8) +
+    (hasPermission ? 14 : -12) +
+    (hasShortValue ? 14 : -10) +
+    (hasGatekeeper ? 10 : -8) +
+    (hasOneTurnRebuttal ? 10 : -6) +
+    (hasAppointment ? 18 : -16) +
+    Math.min(questionCount, 3) * 3 -
+    Math.min(fillerCount, 8) * 2 -
+    (maxSalesTurnLength >= 260 ? 16 : maxSalesTurnLength >= 180 ? 8 : 0);
+  const missingCount = [hasPermission, hasShortValue, hasAppointment].filter((value) => !value).length;
+  const scoreCap = salesMessages.length < 2
+    ? 35
+    : missingCount >= 3
+      ? 42
+      : missingCount >= 2
+        ? 54
+        : maxSalesTurnLength >= 260
+          ? 62
+          : hasPermission && hasShortValue && hasAppointment
+            ? 82
+            : 66;
+  const score = Math.min(scoreCap, Math.max(5, Math.round(rawScore)));
+  const improvements = [
+    ...(!hasPermission ? ["冒頭で『30秒だけよろしいですか』のように、話す許可を取りましょう。"] : []),
+    ...(!hasShortValue ? ["長い商品説明ではなく、相手に関係する課題仮説やメリットを一言で伝えましょう。"] : []),
+    ...(!hasGatekeeper ? ["受付や代表番号では、担当部署・担当者につなぐ確認を入れましょう。"] : []),
+    ...(!hasOneTurnRebuttal ? ["『忙しい』『資料送って』などの断りに、粘りすぎず1回だけ自然に切り返しましょう。"] : []),
+    ...(!hasAppointment ? ["資料送付だけで終えず、短時間の打ち合わせ候補や次接点を提示しましょう。"] : []),
+    ...(maxSalesTurnLength >= 180 ? ["1回の発話が長くなっています。電話口では短く区切って相手の反応を待ちましょう。"] : []),
+    ...(fillerCount >= 3 ? ["えー、あの、まあ等を減らし、第一声を短く言い切る練習をしましょう。"] : []),
+  ];
+
+  return {
+    score,
+    summary: score >= 70
+      ? "テレアポロープレを完了しました。冒頭突破から次接点の提示まで進められています。"
+      : "テレアポロープレを完了しました。次回10分練習では、冒頭10秒・話す許可・アポ打診を重点的に反復しましょう。",
+    strengths: [
+      hasOpening ? "電話口の入り方は作れています。" : "最後まで会話を続けられています。",
+      hasShortValue ? "相手に関係する価値を伝えようとしています。" : "顧客の反応に合わせて返答できています。",
+    ],
+    improvements: improvements.length > 0 ? improvements : ["断り対応後のアポ打診をさらに短く自然にすると、次接点につながりやすくなります。"],
+    improvementPhrases: buildImprovementPhrases(scenario, salesText),
+    manualChecklistItems: [],
+  };
+}
+
 async function evaluateRoleplayWithAi(input: {
   companyId: string;
   userId: string;
@@ -870,6 +934,20 @@ function includesAny(text: string, keywords: string[]) {
 }
 
 function buildImprovementPhrases(scenario: RoleplayScenario, salesText: string) {
+  if (scenario.roleplayType === "teleapo") {
+    const phrases = [
+      "「突然失礼します。30秒だけ、御社の〇〇改善に関係する件で確認させてください。」",
+      "「資料だけでも可能ですが、見ていただく観点を15分だけ先にお伝えできます。」",
+      "「ご担当の方におつなぎいただく場合、〇〇の改善を担当されている部署で合っていますか？」",
+    ];
+
+    if (!includesAny(salesText, ["日程", "候補", "打ち合わせ", "15分", "30分"])) {
+      phrases.unshift("「来週の火曜か木曜で、15分だけ確認のお時間をいただけますか？」");
+    }
+
+    return phrases.slice(0, 3);
+  }
+
   const phrases = [
     `「${scenario.productName || "このご提案"}で、今いちばん解決したい課題はどこですか？」`,
     "「費用だけでなく、止まった時の損失や対応時間も含めて一緒に比較させてください。」",

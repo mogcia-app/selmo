@@ -246,6 +246,7 @@ function truncateMessageContent(value: string, maxLength: number) {
 }
 
 function buildSystemPrompt(scenario: RoleplayScenarioPayload) {
+  const isTeleapo = scenario.roleplayType === "teleapo";
   const strictness =
     scenario.difficulty === "hard"
       ? "かなり慎重で、曖昧な回答や質問への未回答には鋭く追加質問してください。納得できる根拠、具体例、条件確認が出るまで前向きにならないでください。"
@@ -259,17 +260,33 @@ function buildSystemPrompt(scenario: RoleplayScenarioPayload) {
     "返答の主語は顧客側です。「私は営業として」「弊社では提案します」のような営業側の発言は禁止です。",
     "営業担当者の練習になるように、顧客として自然に返答してください。",
     "一度に長く話しすぎず、1〜3文で返してください。",
+    ...(isTeleapo
+      ? [
+          "今回はテレアポ/テレマの顧客役です。通常商談ではなく、電話口の短いやり取りとして振る舞ってください。",
+          "返答は原則1文、長くても2文にしてください。電話中なので、冗長な説明や長い背景説明はしないでください。",
+          "最初の営業発話が長い、用件が曖昧、相手メリットがない、話す許可がない場合は『すみません、今忙しいので』『営業のお電話ですか？』のように切ろうとしてください。",
+          "受付役の場合、担当者名・部署・用件が明確でないと取り次がないでください。",
+          "担当者役の場合、興味喚起が弱いと『資料送ってください』『今は間に合っています』『結構です』で終わらせようとしてください。",
+          "営業が断りに対して粘りすぎた場合は、さらに強く断ってください。自然な1回の切り返しには、少しだけ会話を続けてください。",
+          "営業が30秒だけよいか等の許可を取り、業界課題を短く刺し、日程候補を出した場合のみ、前向きに反応してください。",
+          "テレアポでは売り込みの詳細説明より、話す許可、担当者接続、短い課題仮説、アポ打診を重視してください。",
+        ]
+      : []),
     "営業への採点や解説はせず、顧客役に徹してください。",
     "営業担当者から挨拶や切り出しが来たら、それに対する顧客の反応だけを返してください。",
     "営業担当者があなたの質問に答えていない場合は、別の話題に進まず「その点への回答がまだ聞けていません」と自然に指摘してください。",
-    "商材説明だけが長く、課題・予算・決裁・時期・次回アクションの確認が弱い場合は、前向きな相づちだけで終えず懸念を返してください。",
+    isTeleapo
+      ? "商品説明だけが長く、話す許可・担当者確認・アポ打診がない場合は、電話を終えようとしてください。"
+      : "商材説明だけが長く、課題・予算・決裁・時期・次回アクションの確認が弱い場合は、前向きな相づちだけで終えず懸念を返してください。",
     "根拠や事例がない効果説明には慎重に反応し、具体例・費用対効果・導入後の流れを確認してください。",
     "相手の説明が曖昧な時は、優しく受け止めすぎず、実際の顧客のように不安や違和感を短く返してください。",
     "営業の発話に「たぶん」「だと思います」「いけると思います」「いい感じ」「大丈夫です」など曖昧な表現がある場合は、根拠や条件を確認してください。",
     "質問に対して一般論や商品説明だけで返された場合は、「私のケースではどうなのか」を確認してください。",
     "営業が話しすぎて顧客確認を挟まない場合は、理解できたふりをせず、判断材料が足りない点を短く返してください。",
     "シナリオの練習ゴール・採点基準・過去分析からの改善テーマに関係する項目が営業発話に出ていない場合は、その弱点が露呈するように質問や懸念を返してください。",
-    "営業が課題深掘り、予算、決裁者、導入時期、次回アクションを確認しないまま提案を進めた場合は、顧客として不安を示し、判断材料が足りないと伝えてください。",
+    isTeleapo
+      ? "営業がアポ打診や次接点を出さず説明だけで終わる場合は、『で、どうすればいいですか？』『資料だけで大丈夫です』など、次に進まない反応をしてください。"
+      : "営業が課題深掘り、予算、決裁者、導入時期、次回アクションを確認しないまま提案を進めた場合は、顧客として不安を示し、判断材料が足りないと伝えてください。",
     "ただし営業に答えを教えたり、模範トークを提示したりせず、あくまで顧客として反応してください。",
     `シナリオ: ${scenario.title}`,
     `商材: ${scenario.productName ?? ""}`,
@@ -297,6 +314,9 @@ function readScenarioCustomFields(fields: RoleplayScenarioPayload["customFields"
 }
 
 function buildFallbackCustomerReply(scenario: RoleplayScenarioPayload, messages: RoleplayMessage[]) {
+  if (scenario.roleplayType === "teleapo") {
+    return buildTeleapoFallbackCustomerReply(scenario, messages);
+  }
   const salesTurns = messages.filter((message) => message.role === "sales").length;
   const objections = scenario.objections.length > 0 ? scenario.objections : ["費用対効果がまだ見えません。"];
 
@@ -313,6 +333,30 @@ function buildFallbackCustomerReply(scenario: RoleplayScenarioPayload, messages:
   }
 
   return "少しイメージはできましたが、まだ決め手には欠けます。他社と比べて一番違う点と、費用対効果を短く教えてください。";
+}
+
+function buildTeleapoFallbackCustomerReply(scenario: RoleplayScenarioPayload, messages: RoleplayMessage[]) {
+  const salesTurns = messages.filter((message) => message.role === "sales").length;
+  const latestSales = [...messages].reverse().find((message) => message.role === "sales")?.content ?? "";
+  const objections = scenario.objections.length > 0 ? scenario.objections : ["今忙しいです。"];
+
+  if (salesTurns <= 1) {
+    return "すみません、営業のお電話ですか？今あまり時間がないのですが、要件だけ短くお願いできますか。";
+  }
+
+  if (/資料|メール|送/.test(latestSales)) {
+    return "資料だけなら送っていただければ見ておきます。お打ち合わせまでは今のところ考えていません。";
+  }
+
+  if (/日程|候補|打ち合わせ|お時間|アポ|15分|30分/.test(latestSales)) {
+    return "内容は少し分かりました。短時間なら確認してもいいですが、具体的に何分くらいですか？";
+  }
+
+  if (salesTurns === 2) {
+    return `${objections[0]} 何の件かまだよく分からないので、先に要点だけ教えてください。`;
+  }
+
+  return "必要性がまだ分からないです。今すぐ話す理由があるなら一言で教えてください。";
 }
 
 function fetchWithTimeout(url: string, init: RequestInit, timeoutMs = 30000) {

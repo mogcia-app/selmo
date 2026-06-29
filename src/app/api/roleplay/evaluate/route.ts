@@ -268,8 +268,11 @@ export async function POST(request: NextRequest) {
 }
 
 function buildEvaluationSystemPrompt(roleplayType: "meeting" | "teleapo", hasManual: boolean) {
-  const domainLabel = roleplayType === "teleapo" ? "テレアポ" : "商談";
-  const finalAction = roleplayType === "teleapo" ? "アポ打診・日程提案" : "クロージング・次回アクション";
+  if (roleplayType === "teleapo") {
+    return buildTeleapoEvaluationSystemPrompt(hasManual);
+  }
+  const domainLabel = "商談";
+  const finalAction = "クロージング・次回アクション";
 
   return [
     `あなたは営業${domainLabel}ロープレの評価者です。`,
@@ -290,6 +293,30 @@ function buildEvaluationSystemPrompt(roleplayType: "meeting" | "teleapo", hasMan
     "improvements の先頭には、次回10分で集中的に練習するべき弱点テーマを1つ入れてください。",
     "improvementPhrases は次回そのまま使える自然な営業トークにしてください。特に弱点テーマの場面で使う言い換えを優先してください。",
     "根拠のない高得点は禁止です。会話が短い、質問に答えていない、マニュアル項目が未達なら厳しめに採点してください。",
+    "日本語で返してください。",
+  ].join("\n");
+}
+
+function buildTeleapoEvaluationSystemPrompt(hasManual: boolean) {
+  return [
+    "あなたはテレアポ/テレマの営業ロープレ評価者です。",
+    "このロープレは通常商談の短縮版ではありません。電話口での冒頭突破、話す許可、受付/担当者接続、短い興味喚起、断り対応、アポ打診を評価してください。",
+    "会話ログを時系列で読み、営業が相手の時間を奪わず、短く自然に会話を前に進めたかを重視してください。",
+    "評価軸は、冒頭10秒、話す許可、用件の明確さ、相手メリット、受付突破/担当者確認、断り文句への1回切り返し、アポ打診・日程候補提示、声の印象・テンポです。",
+    "長い商品説明、相手の断りを無視した粘りすぎ、資料送付だけで終わる、アポ打診がない、担当者確認がない場合は厳しく評価してください。",
+    "『営業電話ですか』『忙しいです』『資料送ってください』『結構です』『担当ではありません』への返し方を必ず評価してください。",
+    "良い返答は、相手の状況を受け止め、30秒だけよいか等の許可を取り、相手に関係ある課題を一言で示し、短い日程候補または次接点を出しています。",
+    "会社基準、商材情報、マニュアル、シナリオ採点基準、自由項目を全て分類軸として使ってください。",
+    hasManual
+      ? "マニュアルがあるため、manualChecklistItems には登録マニュアルの評価基準・必須ヒアリング・クロージング基準の全項目を1件ずつ入れてください。AIの判断で項目を増やしたり言い換えたりしてはいけません。"
+      : "マニュアルがない場合、manualChecklistItems は空配列にしてください。",
+    "manualChecklistItems の category は 評価基準 / 必須ヒアリング / クロージング基準 のいずれか、label は登録項目の文言そのまま、status は done または missing にしてください。",
+    "ロープレ会話上で実質的に確認・説明・合意できている場合だけ done にしてください。根拠が弱い、触れていない、曖昧な場合は missing です。",
+    "summary は、今回のテレアポで最優先に直す弱点テーマと、次回10分練習で意識する行動を含めてください。",
+    "strengths と improvements は、できるだけ会話中の具体的な場面に触れてください。",
+    "improvements の先頭には、次回10分で集中的に練習するべきテレアポ弱点を1つ入れてください。",
+    "improvementPhrases は次回そのまま電話口で使える短い営業トークにしてください。1フレーズは長くしすぎないでください。",
+    "根拠のない高得点は禁止です。会話が短い、許可取りがない、断りに対応できていない、アポ打診がない場合は厳しめに採点してください。",
     "日本語で返してください。",
   ].join("\n");
 }

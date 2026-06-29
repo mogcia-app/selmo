@@ -4,7 +4,7 @@ import type { NextRequest } from "next/server";
 import { getFirebaseAdminAuth, getFirebaseAdminDb } from "@/lib/firebase/admin";
 import { readEnabledSalesDomains, type EnabledSalesDomains, type SalesDomain } from "@/lib/sales-domains";
 
-export type ApiUserRole = "sales" | "admin" | "owner";
+export type ApiUserRole = "sales" | "admin";
 
 export type ApiUserContext = {
   uid: string;
@@ -83,7 +83,7 @@ export async function requireApiUser(request: Request | NextRequest): Promise<Ap
 }
 
 export function assertAdminUser(user: ApiUserContext) {
-  if (user.role !== "admin" && user.role !== "owner") {
+  if (user.role !== "admin") {
     throw new ApiAuthError(403, "admin_required", "管理者権限が必要です。");
   }
 }
@@ -95,7 +95,7 @@ export function assertSalesUser(user: ApiUserContext) {
 }
 
 export function assertSalesDomainAccess(user: ApiUserContext, domain: SalesDomain) {
-  if (user.role === "admin" || user.role === "owner") {
+  if (user.role === "admin") {
     return;
   }
 
@@ -117,7 +117,7 @@ export async function assertMeetingAccess(user: ApiUserContext, meetingId: strin
 
   const data = snapshot.data() ?? {};
   const companyId = readString(data.companyId);
-  const ownerId = readString(data.userId);
+  const meetingUserId = readString(data.userId);
   const salesDomain = data.salesDomain === "teleapo" ? "teleapo" : "meeting";
 
   if (companyId !== user.companyId) {
@@ -126,7 +126,7 @@ export async function assertMeetingAccess(user: ApiUserContext, meetingId: strin
 
   assertSalesDomainAccess(user, salesDomain);
 
-  if (user.role === "sales" && ownerId !== user.uid) {
+  if (user.role === "sales" && meetingUserId !== user.uid) {
     throw new ApiAuthError(403, "meeting_forbidden", "この商談を操作する権限がありません。");
   }
 
@@ -135,7 +135,7 @@ export async function assertMeetingAccess(user: ApiUserContext, meetingId: strin
     ref: snapshot.ref,
     data,
     companyId,
-    userId: ownerId,
+    userId: meetingUserId,
     salesDomain,
   };
 }
@@ -152,7 +152,7 @@ export function handleApiAuthError(error: unknown) {
 }
 
 function readRole(value: unknown): ApiUserRole | null {
-  if (value === "sales" || value === "admin" || value === "owner") return value;
+  if (value === "sales" || value === "admin") return value;
   return null;
 }
 

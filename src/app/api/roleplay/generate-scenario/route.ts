@@ -51,13 +51,16 @@ export async function POST(request: Request) {
     product?: ProductPayload;
     category?: unknown;
     targetSegment?: unknown;
+    weaknessFocus?: unknown;
     roleplayType?: unknown;
     meetingInsights?: unknown;
   } | null;
   const product = body?.product ?? {};
   const category = body?.category === "新規" || body?.category === "既存" ? body.category : null;
   const targetSegment = typeof body?.targetSegment === "string" ? body.targetSegment.trim() : "";
+  const weaknessFocus = typeof body?.weaknessFocus === "string" ? body.weaknessFocus.trim() : "";
   const roleplayType = body?.roleplayType === "teleapo" ? "teleapo" : "meeting";
+  const isTeleapo = roleplayType === "teleapo";
   const meetingInsights = readStringArray(body?.meetingInsights).slice(0, 16);
 
   if (!product.name || !category) {
@@ -82,7 +85,7 @@ export async function POST(request: Request) {
   const scoringRuleInsights = buildScoringRuleInsights(analysisContext);
 
   if (!process.env.OPENAI_API_KEY) {
-    return NextResponse.json({ scenario: buildFallbackScenario(product, category, targetSegment, [...scoringRuleInsights, ...meetingInsights]) });
+    return NextResponse.json({ scenario: buildFallbackScenario(product, category, targetSegment, [...(weaknessFocus ? [`重点弱点: ${weaknessFocus}`] : []), ...scoringRuleInsights, ...meetingInsights], roleplayType) });
   }
 
   try {
@@ -133,12 +136,26 @@ export async function POST(request: Request) {
             content: [
               "あなたは営業ロープレ教材を作る営業教育設計者です。",
               "このロープレは長時間の模擬商談ではなく、10分以内で苦手テーマを集中的に反復する練習です。",
-              "商材情報、カテゴリー、ターゲット層、過去のアップロード分析に合わせて、営業担当者の弱点を1つから2つに絞ったAI顧客シナリオを日本語で作成してください。",
+              isTeleapo
+                ? "今回はテレアポ/テレマの練習です。通常商談の短縮版ではなく、冒頭突破、話す許可取り、受付/担当者接続、短い興味喚起、断り文句への1回切り返し、アポ打診に特化したAI顧客シナリオを日本語で作成してください。"
+                : "商材情報、カテゴリー、ターゲット層、過去のアップロード分析に合わせて、営業担当者の弱点を1つから2つに絞ったAI顧客シナリオを日本語で作成してください。",
               "ターゲット層が空の場合は、商材のターゲット顧客・顧客課題・過去分析から最も練習価値が高いターゲット層を1つ選び、targetSegmentに入れてください。",
               "マニュアルのスコアルールがある場合は、ロープレの採点基準に自然に反映してください。加点条件はできた行動、減点条件は避ける行動として表現してください。",
               "過去分析に改善点や不足基準がある場合、その改善練習になる反論・顧客プロフィール・採点基準を必ず含めてください。",
               "過去分析に「話し癖改善」「口癖」「フィラー語」の指摘がある場合、えー、あの、まあ等を減らす練習ゴールと採点基準を必ず含めてください。",
               "過去分析がある場合は、営業担当者の弱点を補うためのロープレにしてください。顧客は苦手テーマが出るように反論し、未確認項目があると前向きにならない設定にしてください。",
+              "ユーザーが重点弱点を指定している場合は、その弱点を最優先してください。タイトル、description、goal、最初の反論、evaluationCriteriaの最初の3項目に必ず反映してください。",
+              "重点弱点が、決裁者確認・予算確認・導入時期確認・次回アクション確定のような確認漏れの場合、顧客は営業が明確に聞くまで情報を出さない設定にしてください。",
+              "重点弱点が、価格反論・競合比較・効果訴求のような切り返しの場合、顧客は最初に強めの反論を出し、営業が確認質問と価値接続をできるかを試す設定にしてください。",
+              ...(isTeleapo
+                ? [
+                    "テレアポの場合、顧客プロフィールには受付担当/現場担当/決裁者のどの相手かを明記してください。",
+                    "テレアポの場合、objections の先頭には必ず『今忙しいです』『資料を送ってください』『営業電話は結構です』『担当ではありません』のような短い断りを入れてください。",
+                    "テレアポの場合、goal は『売り込む』ではなく、話す許可、担当者接続、日程候補提示、次接点確定のいずれかにしてください。",
+                    "テレアポの場合、evaluationCriteria の最初の5項目は、冒頭10秒、話す許可、短い課題仮説、断りへの1回切り返し、アポ打診/次接点確定にしてください。",
+                    "テレアポの場合、長い商品説明、粘りすぎ、相手の時間を奪う会話は減点条件として採点基準に入れてください。",
+                  ]
+                : []),
               "title にはできるだけ苦手テーマが分かる言葉を入れてください。例: 価格反論を効果訴求に切り返す10分練習、決裁者確認の抜け漏れ克服。",
               "description には、どの弱点を何分程度で練習する課題かを明記してください。",
               "goal には、10分以内に達成する行動を1文で具体的に書いてください。例: 価格反論に対して確認質問を返し、効果・事例・次回アクションまでつなげる。",
@@ -154,6 +171,7 @@ export async function POST(request: Request) {
               `商材名: ${product.name}`,
               `カテゴリー: ${category}`,
               `ターゲット層: ${targetSegment || "AIで選定"}`,
+              `重点弱点: ${weaknessFocus || "過去分析からAIで選定"}`,
               `概要: ${product.description ?? ""}`,
               `ターゲット顧客: ${product.targetCustomer ?? ""}`,
               `顧客課題: ${(product.painPoints ?? []).join(" / ")}`,
@@ -173,24 +191,27 @@ export async function POST(request: Request) {
     });
 
     if (!response.ok) {
-      return NextResponse.json({ scenario: buildFallbackScenario(product, category, targetSegment, [...scoringRuleInsights, ...meetingInsights]) });
+      return NextResponse.json({ scenario: buildFallbackScenario(product, category, targetSegment, [...(weaknessFocus ? [`重点弱点: ${weaknessFocus}`] : []), ...scoringRuleInsights, ...meetingInsights], roleplayType) });
     }
 
     const payload = (await response.json()) as { choices?: Array<{ message?: { content?: string } }> };
     const content = payload.choices?.[0]?.message?.content;
     if (!content) {
-      return NextResponse.json({ scenario: buildFallbackScenario(product, category, targetSegment, [...scoringRuleInsights, ...meetingInsights]) });
+      return NextResponse.json({ scenario: buildFallbackScenario(product, category, targetSegment, [...(weaknessFocus ? [`重点弱点: ${weaknessFocus}`] : []), ...scoringRuleInsights, ...meetingInsights], roleplayType) });
     }
 
     return NextResponse.json({ scenario: normalizeScenario(JSON.parse(content) as GeneratedScenario) });
   } catch {
-    return NextResponse.json({ scenario: buildFallbackScenario(product, category, targetSegment, [...scoringRuleInsights, ...meetingInsights]) });
+    return NextResponse.json({ scenario: buildFallbackScenario(product, category, targetSegment, [...(weaknessFocus ? [`重点弱点: ${weaknessFocus}`] : []), ...scoringRuleInsights, ...meetingInsights], roleplayType) });
   }
 }
 
-function buildFallbackScenario(product: ProductPayload, category: ScenarioCategory, targetSegment: string, meetingInsights: string[] = []): GeneratedScenario {
+function buildFallbackScenario(product: ProductPayload, category: ScenarioCategory, targetSegment: string, meetingInsights: string[] = [], roleplayType: "meeting" | "teleapo" = "meeting"): GeneratedScenario {
+  if (roleplayType === "teleapo") {
+    return buildTeleapoFallbackScenario(product, category, targetSegment, meetingInsights);
+  }
   const resolvedTargetSegment = resolveTargetSegment(product, targetSegment);
-  const improvementFocus = meetingInsights[0] ?? "顧客課題を深掘りし、導入効果を具体的に示す";
+  const improvementFocus = normalizeInsightFocus(meetingInsights[0] ?? "顧客課題を深掘りし、導入効果を具体的に示す");
   const fillerFocus = meetingInsights.find((item) => item.includes("話し癖改善") || item.includes("口癖") || item.includes("フィラー"));
   return {
     title: `${product.name} ${category} ${resolvedTargetSegment} 弱点克服10分練習`,
@@ -217,6 +238,35 @@ function buildFallbackScenario(product: ProductPayload, category: ScenarioCatego
     ],
     difficulty: meetingInsights.length > 0 ? "hard" : "normal",
   };
+}
+
+function buildTeleapoFallbackScenario(product: ProductPayload, category: ScenarioCategory, targetSegment: string, meetingInsights: string[] = []): GeneratedScenario {
+  const resolvedTargetSegment = resolveTargetSegment(product, targetSegment);
+  const improvementFocus = normalizeInsightFocus(meetingInsights[0] ?? "冒頭10秒で用件を伝え、話す許可を取る");
+  return {
+    title: `${product.name} ${resolvedTargetSegment} テレアポ弱点克服`,
+    description: `${resolvedTargetSegment}の${category}顧客に対して、${improvementFocus}を10分以内で反復するテレアポ専用シナリオです。`,
+    targetSegment: resolvedTargetSegment,
+    customerRole: "受付または担当者",
+    customerProfile: `${resolvedTargetSegment}領域の電話対応者。忙しく、営業電話には警戒している。短く要件が伝わらない場合は会話を切ろうとする。`,
+    goal: `冒頭10秒で用件と相手メリットを伝え、話す許可を取り、断りに1回だけ切り返してアポ打診または次接点を確定する。重点弱点は「${improvementFocus}」。`,
+    objections: ["今忙しいです", "資料を送ってください", "営業電話は結構です", "担当ではありません"],
+    evaluationCriteria: [
+      "冒頭10秒で会社名・用件・相手メリットを短く伝えている",
+      "いきなり説明せず、30秒だけよいかなど話す許可を取っている",
+      `重点弱点「${improvementFocus}」に対して、短く具体的な改善行動ができている`,
+      "断り文句に対して、粘りすぎず1回だけ自然に切り返している",
+      "受付または担当者に合わせて、担当者接続・確認質問・日程打診を切り替えている",
+      "長い商品説明ではなく、業界課題や相手メリットを一言で伝えている",
+      "資料送付だけで終わらせず、送付後の確認日程または短時間の打ち合わせ候補を提示している",
+      "相手の時間を奪わず、テンポよく会話を進めている",
+    ],
+    difficulty: "hard",
+  };
+}
+
+function normalizeInsightFocus(value: string) {
+  return value.replace(/^重点弱点:|^弱点項目:|^不足基準:|^話し癖改善:/, "").trim();
 }
 
 function normalizeScenario(value: GeneratedScenario): GeneratedScenario {

@@ -18,24 +18,28 @@ service cloud.firestore {
       return currentUser().companyId;
     }
 
+    function isActiveCurrentUser() {
+      return isSignedIn()
+        && (
+          !("status" in currentUser())
+          || currentUser().status == "active"
+        );
+    }
+
     function isOwnerRole() {
-      return isSignedIn() && currentRole() == "owner";
+      return false;
     }
 
     function isAdminRole() {
-      return isSignedIn() && currentRole() == "admin";
+      return isActiveCurrentUser() && currentRole() == "admin";
     }
 
     function isSalesRole() {
-      return isSignedIn() && currentRole() == "sales";
+      return isActiveCurrentUser() && currentRole() == "sales";
     }
 
     function isSelf(userId) {
       return isSignedIn() && request.auth.uid == userId;
-    }
-
-    function isValidRole(role) {
-      return role == "owner" || role == "admin" || role == "sales";
     }
 
     function isValidUserStatus(status) {
@@ -67,11 +71,11 @@ service cloud.firestore {
     }
 
     function canReadCompanyData(companyId) {
-      return isOwnerRole() || sameCompany(companyId);
+      return sameCompany(companyId);
     }
 
     function canAdminCompanyData(companyId) {
-      return isOwnerRole() || (isAdminRole() && sameCompany(companyId));
+      return isAdminRole() && sameCompany(companyId);
     }
 
     function isCustomerMember(data) {
@@ -81,12 +85,12 @@ service cloud.firestore {
           || (
             "memberUserIds" in data
             && data.memberUserIds is list
-            && request.auth.uid in data.memberUserIds
+            && data.memberUserIds.hasAny([request.auth.uid])
           )
           || (
             "collaboratorUserIds" in data
             && data.collaboratorUserIds is list
-            && request.auth.uid in data.collaboratorUserIds
+            && data.collaboratorUserIds.hasAny([request.auth.uid])
           )
         );
     }
@@ -237,7 +241,7 @@ service cloud.firestore {
           && request.resource.data.uid == request.auth.uid
           && request.resource.data.email == request.auth.token.email
           && request.resource.data.companyId is string
-          && isValidRole(request.resource.data.role)
+          && (request.resource.data.role == "admin" || request.resource.data.role == "sales")
           && isValidUserStatus(request.resource.data.status)
         )
         || (
@@ -337,6 +341,7 @@ service cloud.firestore {
           canReadCompanyData(resource.data.companyId)
           && (
             isAdminRole()
+            || isSalesRole()
             || resource.data.userId == request.auth.uid
             || resource.data.createdBy == request.auth.uid
             || isCustomerMember(get(/databases/$(database)/documents/customers/$(resource.data.customerId)).data)

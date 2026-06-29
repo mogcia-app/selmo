@@ -177,7 +177,13 @@ export function subscribeToCustomers(
         snapshotsByIndex.forEach((records) => records.forEach((record) => recordsById.set(record.id, record)));
         callback(Array.from(recordsById.values()).sort((left, right) => (right.updatedAt?.getTime() ?? 0) - (left.updatedAt?.getTime() ?? 0)));
       },
-      onError,
+      (error) => {
+        if (!input.isAdmin && index > 0 && error.code === "permission-denied") {
+          snapshotsByIndex.set(index, []);
+          return;
+        }
+        onError?.(error);
+      },
     ),
   );
 
