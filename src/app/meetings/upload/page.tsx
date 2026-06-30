@@ -371,7 +371,13 @@ export default function MeetingUploadPage() {
 
           {inputMode === "audio" ? (
             <>
-              <div className="rounded-[22px] border border-dashed border-[#dfe3ea] bg-[#fafafa] px-6 py-9 text-center">
+              <div
+                className={`rounded-[22px] border border-dashed px-6 py-9 text-center transition ${
+                  selectedFile
+                    ? "border-[#b8e6c6] bg-[#f6fbf7]"
+                    : "border-[#dfe3ea] bg-[#fafafa]"
+                }`}
+              >
                 <Image
                   src="/uplod.png"
                   alt="selmo"
@@ -385,13 +391,35 @@ export default function MeetingUploadPage() {
                 <div className="mt-2 text-[14px] leading-7 text-[#7a808c]">
                   mp3 / m4a / wav に対応しています。wavは保存時にmp3へ自動変換されます。
                 </div>
+                {selectedFile ? (
+                  <div className="mx-auto mt-5 flex max-w-full items-center justify-center gap-2 rounded-[14px] border border-[#d6f2df] bg-white px-4 py-3 text-left shadow-[0_8px_18px_rgba(47,143,86,0.08)] sm:max-w-[420px]">
+                    <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[#e8f8ee] text-[#2f8f56]">
+                      <CheckIcon />
+                    </span>
+                    <div className="min-w-0">
+                      <div className="text-[12px] font-bold text-[#2f8f56]">選択済み</div>
+                      <div className="mt-0.5 truncate text-[14px] font-semibold text-[#171717]">
+                        {selectedFile.name}
+                      </div>
+                    </div>
+                  </div>
+                ) : null}
                 <button
                   type="button"
                   onClick={() => fileInputRef.current?.click()}
-                  className="mt-6 rounded-[14px] bg-[#171717] px-5 py-3 text-[14px] font-medium text-white transition hover:bg-[#2a2d33]"
+                  className={`mt-6 rounded-[14px] px-5 py-3 text-[14px] font-medium transition ${
+                    selectedFile
+                      ? "bg-[#2f8f56] text-white hover:bg-[#277948]"
+                      : "bg-[#171717] text-white hover:bg-[#2a2d33]"
+                  }`}
                 >
-                  ファイルを選択
+                  {selectedFile ? "別のファイルを選択" : "ファイルを選択"}
                 </button>
+                <div className="mt-3 text-[12px] font-semibold text-[#7a808c]">
+                  {selectedFile
+                    ? "このファイルで保存できます。下の詳細も確認できます。"
+                    : "選択するとファイル名と再生時間がここに表示されます。"}
+                </div>
                 <input
                   ref={fileInputRef}
                   type="file"
@@ -413,6 +441,7 @@ export default function MeetingUploadPage() {
                       setErrorMessage(
                         "対応している形式は mp3 / wav / m4a です。別形式の場合は変換してから再度お試しください。",
                       );
+                      event.target.value = "";
                       return;
                     }
 
@@ -425,6 +454,8 @@ export default function MeetingUploadPage() {
                         setErrorMessage(buildUploadDurationLimitMessage(uploadDurationLimitMinutes));
                       }
                     } catch {
+                      setSelectedFile(null);
+                      event.target.value = "";
                       setErrorMessage(
                         "音声時間を取得できないファイルはアップロードできません。mp3 / m4a に変換してから再度お試しください。",
                       );
@@ -530,7 +561,7 @@ export default function MeetingUploadPage() {
 
           {inputMode === "audio" && selectedFile && selectedFile.size > maxOpenAiTranscriptionFileSizeBytes ? (
             <AlertBox>
-              この音声は 25MB を超えています。文字起こしテストでは自動で軽量 mp3 に分割して投入します。
+              この音声は25MBを超えています。文字起こし時に自動で軽量mp3へ分割して処理します。通常より少し時間がかかる場合があります。
             </AlertBox>
           ) : null}
 
@@ -818,6 +849,14 @@ function UploadGlyph() {
       <path d="M12 16V6" />
       <path d="m8 10 4-4 4 4" />
       <path d="M5 19h14" />
+    </svg>
+  );
+}
+
+function CheckIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true" className="h-4 w-4 fill-none stroke-current stroke-[2.4]">
+      <path d="m6 12 4 4 8-8" />
     </svg>
   );
 }

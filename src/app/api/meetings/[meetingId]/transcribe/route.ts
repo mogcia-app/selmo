@@ -4,8 +4,10 @@ import { tmpdir } from "node:os";
 import { extname, join } from "node:path";
 import { promisify } from "node:util";
 
+import { FieldValue } from "firebase-admin/firestore";
 import { NextResponse } from "next/server";
 
+import { getFirebaseAdminDb } from "@/lib/firebase/admin";
 import {
   assertMonthlyAiUsageAvailable,
   estimateTranscriptionCostUsd,
@@ -28,6 +30,15 @@ const maxOpenAiRetries = 2;
 const remoteFetchTimeoutMs = 10 * 60 * 1000;
 const transcriptionModel = "gpt-4o-mini-transcribe";
 const execFileAsync = promisify(execFile);
+const cloudRunUrl = process.env.AUDIO_CONVERTER_CLOUD_RUN_URL;
+const cloudRunToken = process.env.AUDIO_CONVERTER_TOKEN;
+const cloudRunDispatchTimeoutMs = 12_000;
+const ffmpegCandidates = [
+  process.env.FFMPEG_PATH,
+  "/opt/homebrew/bin/ffmpeg",
+  "/usr/bin/ffmpeg",
+  "ffmpeg",
+].filter(Boolean) as string[];
 
 type TranscriptionSegment = {
   startSec: number;
@@ -45,6 +56,16 @@ type RequestBody = {
   language?: string;
   model?: string;
 };
+
+class RouteError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+    readonly kind: "OpenAI" | "Storage" | "API" = "API",
+  ) {
+    super(message);
+  }
+}
 
 export async function POST(
   request: Request,
@@ -96,6 +117,52 @@ export async function POST(
           limit: usageAvailability.limit,
         },
         { status: 429 },
+      );
+    }
+
+    if (cloudRunUrl && cloudRunToken) {
+      const db = getFirebaseAdminDb();
+      if (!db) {
+        return NextResponse.json({ error: "Firebase Admin が設定されていません。" }, { status: 500 });
+      }
+
+      await meeting.ref.set(
+        {
+          transcriptionProbeStatus: "running",
+          transcriptionProbeModel: selectedModel,
+          transcriptionProbeError: null,
+          conversationLogStatus: "running",
+          conversationLogModel: selectedModel,
+          conversationLogError: null,
+          processingStatus: "transcribing",
+          updatedAt: FieldValue.serverTimestamp(),
+        },
+        { merge: true },
+      );
+      await db.collection("audioProcessingJobs").doc(meetingId).set(
+        {
+          companyId: meeting.companyId,
+          userId: meeting.userId,
+          meetingId,
+          fileName: readString(meeting.data.audioFileName) || body.audioFileName || `${meetingId}.mp3`,
+          audioDurationSec: body.audioDurationSec ?? readNumber(meeting.data.audioDurationSec) ?? 0,
+          status: "transcription_queued",
+          transcriptionRequestedAt: FieldValue.serverTimestamp(),
+          errorMessage: null,
+          updatedAt: FieldValue.serverTimestamp(),
+        },
+        { merge: true },
+      );
+      await dispatchTranscription(meetingId);
+
+      return NextResponse.json(
+        {
+          queued: true,
+          dispatched: true,
+          meetingId,
+          model: selectedModel,
+        },
+        { status: 202 },
       );
     }
 
@@ -207,6 +274,8 @@ export async function POST(
 
     const message =
       error instanceof Error ? error.message : "文字起こし処理に失敗しました。";
+    const status = error instanceof RouteError ? error.status : 500;
+    const kind = error instanceof RouteError ? error.kind : message.includes("Storage") ? "Storage" : "OpenAI";
     await saveAiUsageLog({
       companyId: apiUser?.companyId,
       userId: apiUser?.uid,
@@ -223,9 +292,9 @@ export async function POST(
     await saveSystemErrorLog({
       companyId: apiUser?.companyId,
       userId: apiUser?.uid,
-      kind: message.includes("Storage") ? "Storage" : "OpenAI",
+      kind,
       message,
-      severity: "critical",
+      severity: status >= 500 ? "critical" : "warning",
       source: "api/meetings/transcribe",
     });
 
@@ -234,8 +303,31 @@ export async function POST(
         error: "文字起こし処理に失敗しました。",
         detail: message,
       },
-      { status: 500 },
+      { status },
     );
+  }
+}
+
+async function dispatchTranscription(meetingId: string) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), cloudRunDispatchTimeoutMs);
+
+  try {
+    const response = await fetch(`${cloudRunUrl?.replace(/\/$/, "")}/kick-transcription`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${cloudRunToken}`,
+      },
+      body: JSON.stringify({ meetingId }),
+      signal: controller.signal,
+    });
+
+    if (!response.ok) {
+      throw new Error(`Cloud Run transcription worker returned ${response.status}`);
+    }
+  } finally {
+    clearTimeout(timeout);
   }
 }
 
@@ -337,13 +429,21 @@ async function splitOversizedAudio({
   const inputPath = join(tempDir, `input${inputExtension}`);
   const outputPattern = join(tempDir, "chunk-%03d.mp3");
   await writeFile(inputPath, fileBuffer);
+  const ffmpegPath = await resolveFfmpegPath();
+  if (!ffmpegPath) {
+    throw new RouteError(
+      "25MBを超える音声をサーバー側で分割できませんでした。音声を25MB未満のmp3/m4aに圧縮するか、短いファイルに分けて再度アップロードしてください。",
+      413,
+      "API",
+    );
+  }
 
   const segmentDurationSec = estimateSegmentDurationSec({
     fileSizeBytes: fileBuffer.byteLength,
     audioDurationSec,
   });
 
-  await execFileAsync("/opt/homebrew/bin/ffmpeg", [
+  await execFileAsync(ffmpegPath, [
     "-y",
     "-i",
     inputPath,
@@ -388,6 +488,19 @@ async function splitOversizedAudio({
   }
 
   return chunks;
+}
+
+async function resolveFfmpegPath() {
+  for (const candidate of ffmpegCandidates) {
+    try {
+      await execFileAsync(candidate, ["-version"]);
+      return candidate;
+    } catch {
+      // Try the next candidate.
+    }
+  }
+
+  return null;
 }
 
 function estimateSegmentDurationSec({

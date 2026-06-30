@@ -27,6 +27,12 @@ const remoteFetchTimeoutMs = 10 * 60 * 1000;
 const defaultChunkDurationSec = 75;
 const defaultOverlapSec = 6;
 const transcriptionModel = "gpt-4o-mini-transcribe";
+const ffmpegCandidates = [
+  process.env.FFMPEG_PATH,
+  "/opt/homebrew/bin/ffmpeg",
+  "/usr/bin/ffmpeg",
+  "ffmpeg",
+].filter(Boolean) as string[];
 
 type RequestBody = {
   audioDownloadUrl?: string;
@@ -47,6 +53,16 @@ type TranscriptBlock = {
   alignmentSource: "chunk";
   confidence: "estimated";
 };
+
+class RouteError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+    readonly kind: "OpenAI" | "Storage" | "API" = "API",
+  ) {
+    super(message);
+  }
+}
 
 export async function POST(
   request: Request,
@@ -198,6 +214,8 @@ export async function POST(
 
     const message =
       error instanceof Error ? error.message : "本文ブロック生成に失敗しました。";
+    const status = error instanceof RouteError ? error.status : 500;
+    const kind = error instanceof RouteError ? error.kind : message.includes("Storage") ? "Storage" : "OpenAI";
     await saveAiUsageLog({
       companyId: apiUser?.companyId,
       userId: apiUser?.uid,
@@ -214,9 +232,9 @@ export async function POST(
     await saveSystemErrorLog({
       companyId: apiUser?.companyId,
       userId: apiUser?.uid,
-      kind: message.includes("Storage") ? "Storage" : "OpenAI",
+      kind,
       message,
-      severity: "warning",
+      severity: status >= 500 ? "critical" : "warning",
       source: "api/meetings/transcript-blocks",
     });
 
@@ -225,7 +243,7 @@ export async function POST(
         error: "本文ブロック生成に失敗しました。",
         detail: message,
       },
-      { status: 500 },
+      { status },
     );
   }
 }
@@ -299,6 +317,14 @@ async function splitAudioIntoTimedChunks({
   const inputExtension = extname(fileName) || ".mp3";
   const inputPath = join(tempDir, `input${inputExtension}`);
   await writeFile(inputPath, fileBuffer);
+  const ffmpegPath = await resolveFfmpegPath();
+  if (!ffmpegPath) {
+    throw new RouteError(
+      "長い音声をサーバー側で分割できませんでした。音声を短いファイルに分けるか、軽量なmp3/m4aにして再度アップロードしてください。",
+      413,
+      "API",
+    );
+  }
 
   const chunks = [];
   let startSec = 0;
@@ -309,7 +335,7 @@ async function splitAudioIntoTimedChunks({
     const outputName = `chunk-${String(index + 1).padStart(3, "0")}.mp3`;
     const outputPath = join(tempDir, outputName);
 
-    await execFileAsync("/opt/homebrew/bin/ffmpeg", [
+    await execFileAsync(ffmpegPath, [
       "-y",
       "-ss",
       String(startSec),
@@ -344,6 +370,19 @@ async function splitAudioIntoTimedChunks({
   }
 
   return chunks;
+}
+
+async function resolveFfmpegPath() {
+  for (const candidate of ffmpegCandidates) {
+    try {
+      await execFileAsync(candidate, ["-version"]);
+      return candidate;
+    } catch {
+      // Try the next candidate.
+    }
+  }
+
+  return null;
 }
 
 function mergeChunkTexts(blocks: TranscriptBlock[]) {

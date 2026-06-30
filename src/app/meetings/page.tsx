@@ -562,7 +562,7 @@ function ProcessingBadge({ meeting }: { meeting: MeetingRecord }) {
   const status = readMeetingListStatus(meeting);
   const label =
     status === "uploaded"
-      ? "文字起こし待ち"
+      ? "文字起こし開始待ち"
       : status === "processing"
         ? "処理中"
         : status === "completed"

@@ -20,7 +20,7 @@ import { updateAudioProcessingJob } from "@/lib/firebase/operations";
 import { canUseSalesDomain } from "@/lib/sales-domains";
 
 const transcriptionRequestTimeoutMs = 10 * 60 * 1000;
-const transientBannerDurationMs = 5 * 1000;
+const transientBannerDurationMs = 15 * 1000;
 const monthlyLimitMessage = MONTHLY_AI_LIMIT_MESSAGE;
 type ConversationSpeaker = "sales" | "customer" | "participant" | "unknown";
 
@@ -294,6 +294,7 @@ export function MeetingDetailScreen({
 
     setErrorMessage(null);
     setIsTranscribing(true);
+    let keepTranscribingAfterRequest = false;
     try {
       await saveMeetingTranscriptionProbe(meetingId, {
         status: "running",
@@ -339,6 +340,8 @@ export function MeetingDetailScreen({
         durationSec?: number | null;
         chunkCount?: number | null;
         wasChunked?: boolean;
+        queued?: boolean;
+        dispatched?: boolean;
       };
 
       if (!response.ok) {
@@ -347,9 +350,15 @@ export function MeetingDetailScreen({
         }
 
         throw new Error(
-          [payload.error, payload.detail].filter(Boolean).join(" / ") ||
+          [payload.detail, payload.error].filter(Boolean).join(" / ") ||
             "文字起こしテストに失敗しました。",
         );
+      }
+
+      if (payload.queued) {
+        keepTranscribingAfterRequest = true;
+        setTranscriptionVisualProgress((current) => Math.max(current, 18));
+        return;
       }
 
       await saveMeetingTranscriptionProbe(meetingId, {
@@ -408,7 +417,9 @@ export function MeetingDetailScreen({
 
       setErrorMessage(message);
     } finally {
-      setIsTranscribing(false);
+      if (!keepTranscribingAfterRequest) {
+        setIsTranscribing(false);
+      }
     }
   }
 
@@ -455,10 +466,15 @@ export function MeetingDetailScreen({
   );
   const transcriptMetrics = useMemo(() => buildTranscriptMetrics(editableLogs), [editableLogs]);
   const isManualTranscript = meeting?.transcriptionProbeModel === "manual-paste";
+  const hasAttemptedTranscription =
+    meeting?.transcriptionProbeStatus === "failed" ||
+    meeting?.transcriptionProbeStatus === "completed" ||
+    meeting?.transcriptionProbeStatus === "running";
   const shouldShowTranscriptionRetry =
     !isManualTranscript &&
     Boolean(meeting?.audioDownloadUrl) &&
     (meeting?.transcriptionProbeStatus === "failed" || editableLogs.length === 0);
+  const transcriptionActionLabel = hasAttemptedTranscription ? "文字起こしを再実行" : "文字起こしを開始";
   const analysisPanels = useMemo(
     () => buildAnalysisPanels(aiSummary, editableLogs),
     [aiSummary, editableLogs],
@@ -969,7 +985,7 @@ export function MeetingDetailScreen({
               {shouldShowTranscriptionRetry ? (
                 <HeaderActionButton
                   icon={<SparkGlyph />}
-                  label={isTranscribing ? "文字起こし中..." : "文字起こしを再実行"}
+                  label={isTranscribing ? "文字起こし中..." : transcriptionActionLabel}
                   onClick={() => {
                     void handleRunTranscription();
                   }}
@@ -1287,8 +1303,26 @@ export function MeetingDetailScreen({
                     </div>
                   </>
                 ) : (
-                  <div className="px-4 py-16 text-[16px] leading-8 text-[#7a808c]">
-                    まだ表示できる文字起こし本文がありません。まずは `本文を生成` を実行してください。
+                  <div className="flex h-full flex-col items-center justify-center rounded-[22px] border border-dashed border-[#d9dee7] bg-[#fcfcfd] px-6 py-16 text-center">
+                    <div className="text-[16px] font-bold text-[#171717]">
+                      まだ表示できる文字起こし本文がありません
+                    </div>
+                    <p className="mt-3 max-w-[520px] text-[14px] leading-7 text-[#7a808c]">
+                      音声ファイルの保存は完了しています。文字起こしを開始すると、本文とAI分析の準備が進みます。
+                    </p>
+                    {shouldShowTranscriptionRetry ? (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          void handleRunTranscription();
+                        }}
+                        disabled={isTranscribing}
+                        className="mt-6 inline-flex h-11 items-center gap-2 rounded-[14px] bg-[#ffc400] px-5 text-[14px] font-black text-[#171717] shadow-[0_10px_20px_rgba(255,196,0,0.22)] transition hover:bg-[#f5bd07] disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        <SparkGlyph />
+                        {transcriptionActionLabel}
+                      </button>
+                    ) : null}
                   </div>
                 )}
               </div>

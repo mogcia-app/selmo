@@ -85,11 +85,29 @@ export async function POST(
       });
     }
 
-    await dispatchConversion({
-      meetingId,
-      companyId,
-      requestedBy: apiUser.uid,
-    });
+    try {
+      await dispatchConversion({
+        meetingId,
+        companyId,
+        requestedBy: apiUser.uid,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Cloud Run audio converter dispatch failed.";
+      await saveSystemErrorLog({
+        companyId,
+        userId,
+        kind: "Cloud Run",
+        message,
+        severity: "warning",
+        source: "convert-audio-dispatch",
+      }).catch(() => undefined);
+
+      return NextResponse.json({
+        queued: true,
+        dispatched: false,
+        reason: "dispatch_failed",
+      });
+    }
 
     return NextResponse.json({
       queued: true,
