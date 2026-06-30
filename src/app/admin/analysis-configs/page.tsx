@@ -57,8 +57,8 @@ export default function AdminAnalysisConfigsPage() {
       <div className="mx-auto max-w-[1480px]">
         <PageHeader
           eyebrow="ANALYSIS SETTINGS"
-          title="AI分析設定"
-          description="商材ごとに、商談・テレアポ・ロープレ分析でAIに見てほしい評価軸を管理します。"
+          title="AI分析設定 β"
+          description="商材ごとに、商談・テレアポ・ロープレ分析でAIに見てほしい評価軸を試験運用できます。"
         />
 
         {message ? (
