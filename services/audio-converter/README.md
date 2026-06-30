@@ -5,7 +5,7 @@ Cloud Run worker for converting uploaded WAV audio to mp3 and running long trans
 ## Environment
 
 - `AUDIO_CONVERTER_TOKEN`: shared bearer token. Must match the Next.js env var.
-- `FIREBASE_STORAGE_BUCKET`: Firebase Storage bucket name. Example: `selmo-8397c.appspot.com`.
+- `FIREBASE_STORAGE_BUCKET`: Firebase Storage bucket name. Example: `selmo-8397c.firebasestorage.app`.
 - `OPENAI_API_KEY`: OpenAI API key used for transcription jobs.
 - `GOOGLE_CLOUD_PROJECT`: set by Cloud Run.
 
@@ -40,7 +40,7 @@ gcloud run deploy selmo-audio-converter \
   --allow-unauthenticated \
   --set-env-vars AUDIO_CONVERTER_TOKEN=... \
   --set-env-vars OPENAI_API_KEY=... \
-  --set-env-vars FIREBASE_STORAGE_BUCKET=selmo-8397c.appspot.com \
+  --set-env-vars FIREBASE_STORAGE_BUCKET=selmo-8397c.firebasestorage.app \
   --memory 1Gi \
   --cpu 1 \
   --timeout 3600 \
