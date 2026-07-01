@@ -10,10 +10,12 @@ import {
   type ApiUserContext,
 } from "@/lib/server/auth/require-api-user";
 import {
+  assertMonthlyAiUsageAvailable,
   estimateChatCostUsd,
   saveAiUsageLog,
   saveSystemErrorLog,
 } from "@/lib/server/operational-logs";
+import { MONTHLY_AI_LIMIT_MESSAGE } from "@/lib/ai-usage-limit";
 
 export const runtime = "nodejs";
 
@@ -58,6 +60,20 @@ export async function POST(request: NextRequest) {
     apiUser = await requireApiUser(request);
     assertSalesUser(apiUser);
     assertSalesDomainAccess(apiUser, salesDomain);
+    const usageAvailability = await assertMonthlyAiUsageAvailable({
+      userId: apiUser.uid,
+      feature: "total",
+    });
+    if (!usageAvailability.allowed) {
+      return NextResponse.json(
+        {
+          error: MONTHLY_AI_LIMIT_MESSAGE,
+          used: usageAvailability.used,
+          limit: usageAvailability.limit,
+        },
+        { status: 429 },
+      );
+    }
 
     const dateKey = getJapanDateKey();
     const insightRef = db.collection("salesDashboardActionInsights").doc(`${apiUser.uid}_${salesDomain}_${dateKey}`);

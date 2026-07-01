@@ -41,6 +41,7 @@ export default function SalesRoleplayScenariosPage() {
     ],
     [profile],
   );
+  const isRoleplayQuotaUnavailable = profile?.monthlyRoleplayQuota !== null && profile?.monthlyRoleplayQuota !== undefined && profile.monthlyRoleplayQuota <= 0;
   const canAccessRoleplay = !profile || canUseSalesDomain(profile, roleplayType);
   const activeAssignmentScenarioIds = useMemo(
     () => new Set(assignments.filter((assignment) => assignment.status === "assigned").map((assignment) => assignment.scenarioId)),
@@ -114,7 +115,25 @@ export default function SalesRoleplayScenariosPage() {
             {error}
           </div>
         ) : null}
+        {canAccessRoleplay && isRoleplayQuotaUnavailable ? (
+          <div className="mt-4 rounded-[16px] border border-[#f4d4d4] bg-[#fff8f8] px-4 py-3 text-[13px] font-medium text-[#b4232a]">
+            この会社の今月のロープレ回数が0回に設定されているため、閲覧のみ可能です。新規作成やAI生成はできません。
+          </div>
+        ) : null}
 
+        {!canAccessRoleplay ? (
+          <section className="mt-3 rounded-[24px] border border-[#f2d6d6] bg-white px-6 py-10 text-center shadow-[0_8px_24px_rgba(17,24,39,0.04)] md:px-10 md:py-12">
+            <h1 className="text-[28px] font-black tracking-[-0.04em] text-[#171717]">この機能は利用できません</h1>
+            <p className="mx-auto mt-3 max-w-[560px] text-[15px] leading-7 text-[#596273]">
+              {isRoleplayQuotaUnavailable
+                ? "この会社の今月のロープレ回数が0回に設定されているため、AIロープレは利用できません。"
+                : "この機能の利用権限がありません。必要な場合は管理者に依頼してください。"}
+            </p>
+            <Link href="/sales/dashboard" className="mt-7 inline-flex h-12 items-center justify-center rounded-[14px] bg-[#ffd12f] px-7 text-[14px] font-black text-[#171717] shadow-[0_10px_22px_rgba(245,189,7,0.22)]">
+              ダッシュボードへ戻る
+            </Link>
+          </section>
+        ) : (
         <section className="mt-3 grid gap-4 xl:grid-cols-[minmax(0,1fr)_380px]">
           <article className="rounded-[24px] border border-[#e2e6ee] bg-white px-6 py-6 shadow-[0_8px_24px_rgba(17,24,39,0.04)]">
             <div className="flex flex-wrap items-end justify-between gap-4">
@@ -128,7 +147,8 @@ export default function SalesRoleplayScenariosPage() {
               <button
                 type="button"
                 onClick={() => setDialogOpen(true)}
-                className="inline-flex h-11 items-center gap-2 rounded-[14px] border border-[#f0c655] bg-[#ffd84d] px-5 text-[13px] font-black text-[#171717]"
+                disabled={isRoleplayQuotaUnavailable}
+                className="inline-flex h-11 items-center gap-2 rounded-[14px] border border-[#f0c655] bg-[#ffd84d] px-5 text-[13px] font-black text-[#171717] disabled:cursor-not-allowed disabled:border-[#d1d5db] disabled:bg-[#e5e7eb] disabled:text-[#6b7280]"
               >
                 <PlusIcon />
                 弱点課題を作成
@@ -234,9 +254,10 @@ export default function SalesRoleplayScenariosPage() {
             )}
           </aside>
         </section>
+        )}
       </div>
 
-      {dialogOpen && userId && profile?.companyId ? (
+      {canAccessRoleplay && !isRoleplayQuotaUnavailable && dialogOpen && userId && profile?.companyId ? (
         <ScenarioCreateDialog
           products={products}
           meetings={meetings}
@@ -248,7 +269,7 @@ export default function SalesRoleplayScenariosPage() {
           onError={setError}
         />
       ) : null}
-      {editingScenario && userId && profile?.companyId ? (
+      {canAccessRoleplay && !isRoleplayQuotaUnavailable && editingScenario && userId && profile?.companyId ? (
         <ScenarioCreateDialog
           products={products}
           meetings={meetings}

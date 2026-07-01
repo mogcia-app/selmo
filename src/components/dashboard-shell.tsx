@@ -16,6 +16,7 @@ import {
 } from "firebase/firestore";
 
 import { useAuth } from "@/features/auth/auth-provider";
+import { resolveSharedMonthlyAiQuota } from "@/lib/ai-usage-limit";
 import type { AppUserProfile } from "@/lib/firebase/auth";
 import { assertFirebaseClient } from "@/lib/firebase/client";
 import {
@@ -717,9 +718,10 @@ function AiUsageGauge({ profile, usage }: { profile: AppUserProfile | null; usag
   }
 
   const quota = resolveMonthlyAiQuota(profile);
+  const isUnavailable = quota !== null && quota <= 0;
   const percent = quota && quota > 0 ? Math.min(100, Math.round((usage.used / quota) * 100)) : 0;
-  const barColor = percent >= 100 ? "bg-[#ef4444]" : percent >= 80 ? "bg-[#f59e0b]" : "bg-[#ffc400]";
-  const label = quota ? `${usage.used} / ${quota}回` : `${usage.used}回 / 無制限`;
+  const barColor = isUnavailable ? "bg-[#ef4444]" : percent >= 100 ? "bg-[#ef4444]" : percent >= 80 ? "bg-[#f59e0b]" : "bg-[#ffc400]";
+  const label = isUnavailable ? "利用不可" : quota !== null ? `${usage.used} / ${quota}回` : `${usage.used}回 / 無制限`;
 
   return (
     <div
@@ -735,7 +737,7 @@ function AiUsageGauge({ profile, usage }: { profile: AppUserProfile | null; usag
       <div className="mt-2 h-2 overflow-hidden rounded-full bg-white">
         <div
           className={`h-full rounded-full transition-all ${barColor}`}
-          style={{ width: usage.isLoading ? "28%" : quota ? `${percent}%` : "100%" }}
+          style={{ width: usage.isLoading ? "28%" : isUnavailable ? "100%" : quota ? `${percent}%` : "100%" }}
         />
       </div>
     </div>
@@ -744,8 +746,7 @@ function AiUsageGauge({ profile, usage }: { profile: AppUserProfile | null; usag
 
 function resolveMonthlyAiQuota(profile: AppUserProfile) {
   if (profile.role !== "sales") return null;
-  if (profile.monthlyTranscriptionQuota === null || profile.monthlyRoleplayQuota === null) return null;
-  return profile.monthlyTranscriptionQuota + profile.monthlyRoleplayQuota;
+  return resolveSharedMonthlyAiQuota(profile.monthlyTranscriptionQuota, profile.monthlyRoleplayQuota);
 }
 
 function mapAiUsageLog(snapshot: QueryDocumentSnapshot<DocumentData>): AiUsageLog {

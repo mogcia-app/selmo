@@ -63,6 +63,7 @@ export default function SalesRoleplayPage() {
   const streamRef = useRef<MediaStream | null>(null);
   const scenarioId = searchParams.get("scenarioId") ?? "";
   const roleplayType = readRoleplayType(searchParams.get("category"));
+  const isRoleplayQuotaUnavailable = profile?.monthlyRoleplayQuota !== null && profile?.monthlyRoleplayQuota !== undefined && profile.monthlyRoleplayQuota <= 0;
   const canAccessRoleplay = !profile || canUseSalesDomain(profile, roleplayType);
   const activeAssignmentScenarioIds = useMemo(
     () => new Set(assignments.filter((assignment) => assignment.status === "assigned").map((assignment) => assignment.scenarioId)),
@@ -383,7 +384,18 @@ export default function SalesRoleplayPage() {
           </div>
         ) : null}
 
-        {scenario ? (
+        {!canAccessRoleplay ? (
+          <section className="mt-3 rounded-[24px] border border-[#f2d6d6] bg-white px-6 py-10 text-center shadow-[0_8px_24px_rgba(17,24,39,0.04)] md:px-10 md:py-12">
+            <Image src="/mojiokoshi.png" alt="AIロープレ" width={180} height={180} priority className="mx-auto h-[140px] w-[140px] object-contain" />
+            <h1 className="mt-5 text-[28px] font-black tracking-[-0.04em] text-[#171717]">この機能は利用できません</h1>
+            <p className="mx-auto mt-3 max-w-[560px] text-[15px] leading-7 text-[#596273]">
+              この機能の利用権限がありません。必要な場合は管理者に依頼してください。
+            </p>
+            <Link href="/sales/dashboard" className="mt-7 inline-flex h-12 items-center justify-center rounded-[14px] bg-[#ffd12f] px-7 text-[14px] font-black text-[#171717] shadow-[0_10px_22px_rgba(245,189,7,0.22)]">
+              ダッシュボードへ戻る
+            </Link>
+          </section>
+        ) : scenario ? (
           <section className="mt-3">
             <article className="flex flex-col rounded-[24px] border border-[#e2e6ee] bg-white shadow-[0_8px_24px_rgba(17,24,39,0.04)]">
               <div className="border-b border-[#eef1f5] px-5 py-4">
@@ -410,6 +422,11 @@ export default function SalesRoleplayPage() {
               </div>
 
               <div className="space-y-4 px-4 py-5 sm:px-5">
+                {isRoleplayQuotaUnavailable ? (
+                  <div className="rounded-[16px] border border-[#f4d4d4] bg-[#fff8f8] px-4 py-3 text-[13px] font-medium text-[#b4232a]">
+                    この会社の今月のロープレ回数が0回に設定されているため、閲覧のみ可能です。録音・AI応答・採点はできません。
+                  </div>
+                ) : null}
                 {messages.length > 0 ? (
                   messages.map((message, index) => (
                     <MessageBubble key={`${message.createdAt}-${index}`} message={message} />
@@ -446,7 +463,7 @@ export default function SalesRoleplayPage() {
                     <button
                       type="button"
                       onClick={isRecording ? handleStopRecording : () => void handleStartRecording()}
-                      disabled={isThinking || isTranscribing}
+                      disabled={isThinking || isTranscribing || isRoleplayQuotaUnavailable}
                       className={`inline-flex h-12 min-w-0 items-center justify-center gap-2 rounded-[16px] px-4 text-[13px] font-black transition disabled:cursor-not-allowed disabled:opacity-50 sm:h-14 ${
                         isRecording ? "bg-[#d92d20] text-white shadow-[0_10px_24px_rgba(217,45,32,0.22)]" : "bg-[#171717] text-white shadow-[0_10px_24px_rgba(17,24,39,0.16)]"
                       }`}
@@ -457,7 +474,7 @@ export default function SalesRoleplayPage() {
                     <button
                       type="button"
                       onClick={() => void handleFinish()}
-                      disabled={messages.filter((message) => message.role === "sales").length < 2 || isSaving || isRecording || isTranscribing || isThinking}
+                      disabled={messages.filter((message) => message.role === "sales").length < 2 || isSaving || isRecording || isTranscribing || isThinking || isRoleplayQuotaUnavailable}
                       className="inline-flex h-12 min-w-0 items-center justify-center rounded-[16px] border border-[#f0c655] bg-[#ffd84d] px-4 text-[13px] font-black text-[#171717] shadow-[0_10px_22px_rgba(245,189,7,0.18)] disabled:cursor-not-allowed disabled:opacity-50 sm:h-14"
                     >
                       {isSaving ? "保存中" : "終了して採点"}

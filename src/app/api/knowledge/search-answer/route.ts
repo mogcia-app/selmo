@@ -1,10 +1,12 @@
 import { NextResponse } from "next/server";
 
 import {
+  assertMonthlyAiUsageAvailable,
   estimateChatCostUsd,
   saveAiUsageLog,
   saveSystemErrorLog,
 } from "@/lib/server/operational-logs";
+import { MONTHLY_AI_LIMIT_MESSAGE } from "@/lib/ai-usage-limit";
 import { getFirebaseAdminDb } from "@/lib/firebase/admin";
 import { hashRoleplayPayload } from "@/lib/server/roleplay-cost-control";
 import {
@@ -46,6 +48,20 @@ export async function POST(request: Request) {
   try {
     apiUser = await requireApiUser(request);
     assertSalesDomainAccess(apiUser, "meeting");
+    const usageAvailability = await assertMonthlyAiUsageAvailable({
+      userId: apiUser.uid,
+      feature: "total",
+    });
+    if (!usageAvailability.allowed) {
+      return NextResponse.json(
+        {
+          error: MONTHLY_AI_LIMIT_MESSAGE,
+          used: usageAvailability.used,
+          limit: usageAvailability.limit,
+        },
+        { status: 429 },
+      );
+    }
 
     if (!process.env.OPENAI_API_KEY) {
       return NextResponse.json(

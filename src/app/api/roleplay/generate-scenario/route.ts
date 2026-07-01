@@ -6,6 +6,8 @@ import {
   handleApiAuthError,
   requireApiUser,
 } from "@/lib/server/auth/require-api-user";
+import { MONTHLY_AI_LIMIT_MESSAGE } from "@/lib/ai-usage-limit";
+import { assertMonthlyAiUsageAvailable } from "@/lib/server/operational-logs";
 
 export const runtime = "nodejs";
 
@@ -69,6 +71,20 @@ export async function POST(request: Request) {
 
   try {
     assertSalesDomainAccess(apiUser, roleplayType);
+    const usageAvailability = await assertMonthlyAiUsageAvailable({
+      userId: apiUser.uid,
+      feature: "roleplay",
+    });
+    if (!usageAvailability.allowed) {
+      return NextResponse.json(
+        {
+          error: MONTHLY_AI_LIMIT_MESSAGE,
+          used: usageAvailability.used,
+          limit: usageAvailability.limit,
+        },
+        { status: 429 },
+      );
+    }
   } catch (error) {
     const authError = handleApiAuthError(error);
     if (authError) return NextResponse.json(authError.body, { status: authError.status });

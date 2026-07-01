@@ -168,6 +168,7 @@ export default function MeetingUploadPage() {
     [meetings],
   );
   const monthlyUploadQuota = profile ? profile.monthlyTranscriptionQuota : 10;
+  const isUploadQuotaUnavailable = monthlyUploadQuota !== null && monthlyUploadQuota <= 0;
 
   const applyCalendarEventToForm = useCallback(
     (calendarEvent: CalendarEvent) => {
@@ -436,7 +437,8 @@ export default function MeetingUploadPage() {
                 <button
                   type="button"
                   onClick={() => fileInputRef.current?.click()}
-                  className={`mt-6 rounded-[14px] px-5 py-3 text-[14px] font-medium transition ${
+                  disabled={isUploadQuotaUnavailable}
+                  className={`mt-6 rounded-[14px] px-5 py-3 text-[14px] font-medium transition disabled:cursor-not-allowed disabled:bg-[#9ca3af] disabled:text-white ${
                     selectedFile
                       ? "bg-[#ffd12f] text-[#171717] hover:bg-[#f5bd07]"
                       : "bg-[#171717] text-white hover:bg-[#2a2d33]"
@@ -604,6 +606,9 @@ export default function MeetingUploadPage() {
           <form onSubmit={handleSubmit} className="space-y-5">
             {errorMessage ? <ErrorBox>{errorMessage}</ErrorBox> : null}
             {successMessage ? <SuccessBox>{successMessage}</SuccessBox> : null}
+            {isUploadQuotaUnavailable ? (
+              <ErrorBox>この会社の今月の商談・テレアポ分析回数が0回に設定されているため、閲覧のみ可能です。アップロードや保存はできません。</ErrorBox>
+            ) : null}
 
             <Field label="予定から反映">
               <select
@@ -745,7 +750,7 @@ export default function MeetingUploadPage() {
               </button>
               <button
                 type="submit"
-                disabled={isSubmitting || isLoading}
+                disabled={isSubmitting || isLoading || isUploadQuotaUnavailable}
                 className="rounded-[14px] bg-[#171717] px-5 py-3 text-[14px] font-medium text-white transition hover:bg-[#2a2d33] disabled:cursor-not-allowed disabled:bg-[#9ca3af]"
               >
                 {isSubmitting
