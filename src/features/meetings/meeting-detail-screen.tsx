@@ -23,6 +23,10 @@ const transcriptionRequestTimeoutMs = 10 * 60 * 1000;
 const transientBannerDurationMs = 15 * 1000;
 const monthlyLimitMessage = MONTHLY_AI_LIMIT_MESSAGE;
 type ConversationSpeaker = "sales" | "customer" | "participant" | "unknown";
+type SpeakerPreset = {
+  speaker1: ConversationSpeaker;
+  speaker2: ConversationSpeaker;
+};
 
 type DisplayLog = {
   id: string;
@@ -607,6 +611,37 @@ export function MeetingDetailScreen({
           : log,
       ),
     );
+  }
+
+  function handleApplySpeakerPreset(preset: SpeakerPreset) {
+    const nextNames: Record<ConversationSpeaker, string> = {
+      sales: defaultSpeakerName("sales"),
+      customer: defaultSpeakerName("customer"),
+      participant: speakerNames.participant || defaultSpeakerName("participant"),
+      unknown: speakerNames.unknown || defaultSpeakerName("unknown"),
+    };
+
+    setSpeakerNames(nextNames);
+    setEditableLogs((current) =>
+      current.map((log) => {
+        const speakerSlot = detectSpeakerSlot(log);
+        const nextSpeaker =
+          speakerSlot === "speaker_1"
+            ? preset.speaker1
+            : speakerSlot === "speaker_2"
+              ? preset.speaker2
+              : log.speaker;
+
+        return {
+          ...log,
+          speaker: nextSpeaker,
+          label: nextNames[nextSpeaker],
+          kind: nextSpeaker === "unknown" ? "unknown" : "speech",
+          confidence: "estimated",
+        };
+      }),
+    );
+    setErrorMessage("話者1/2を営業/顧客に一括変換しました。保存すると反映されます。");
   }
 
   function handleSplitLogAtIndex(logId: string, splitIndex: number) {
@@ -1358,6 +1393,7 @@ export function MeetingDetailScreen({
               <SpeakerManagementPanel
                 logs={editableLogs}
                 speakerNames={speakerNames}
+                onApplySpeakerPreset={handleApplySpeakerPreset}
                 onChangeSpeakerName={(speaker, name) => {
                   const nextName = name.trim() || defaultSpeakerName(speaker);
                   setSpeakerNames((current) => ({ ...current, [speaker]: nextName }));
@@ -1414,10 +1450,12 @@ const conversationSpeakerOptions: Array<{ value: ConversationSpeaker; label: str
 function SpeakerManagementPanel({
   logs,
   speakerNames,
+  onApplySpeakerPreset,
   onChangeSpeakerName,
 }: {
   logs: DisplayLog[];
   speakerNames: Record<ConversationSpeaker, string>;
+  onApplySpeakerPreset: (preset: SpeakerPreset) => void;
   onChangeSpeakerName: (speaker: ConversationSpeaker, name: string) => void;
 }) {
   return (
@@ -1425,6 +1463,26 @@ function SpeakerManagementPanel({
       <div className="flex items-center justify-between gap-3">
         <h3 className="text-[14px] font-black text-[#171717]">話者管理</h3>
         <span className="rounded-full bg-[#fff3cf] px-3 py-1 text-[11px] font-black text-[#8a6500]">{logs.length}ブロック</span>
+      </div>
+      <div className="mt-3 rounded-[14px] border border-[#f4e2a4] bg-[#fffaf0] px-3 py-3">
+        <div className="text-[12px] font-black text-[#7a5a00]">話者1/2を一括変換</div>
+        <div className="mt-2 grid gap-2">
+          <button
+            type="button"
+            onClick={() => onApplySpeakerPreset({ speaker1: "sales", speaker2: "customer" })}
+            className="rounded-[10px] border border-[#ead8a8] bg-white px-3 py-2 text-left text-[12px] font-black text-[#5f4700] transition hover:border-[#e0bd4b] hover:bg-[#fff4d6]"
+          >
+            話者1 = 営業 / 話者2 = 顧客
+          </button>
+          <button
+            type="button"
+            onClick={() => onApplySpeakerPreset({ speaker1: "customer", speaker2: "sales" })}
+            className="rounded-[10px] border border-[#ead8a8] bg-white px-3 py-2 text-left text-[12px] font-black text-[#5f4700] transition hover:border-[#e0bd4b] hover:bg-[#fff4d6]"
+          >
+            話者1 = 顧客 / 話者2 = 営業
+          </button>
+        </div>
+        <p className="mt-2 text-[11px] font-bold leading-5 text-[#9a7a1f]">変換後、保存するとAI分析にも反映されます。</p>
       </div>
       <div className="mt-3 space-y-3">
         {conversationSpeakerOptions.map((option) => {
@@ -1536,6 +1594,19 @@ function normalizeEditableSpeaker(value: unknown): ConversationSpeaker {
   if (value === "customer" || value === "speaker_2") return "customer";
   if (value === "participant") return "participant";
   return "unknown";
+}
+
+function detectSpeakerSlot(log: DisplayLog): "speaker_1" | "speaker_2" | null {
+  const normalizedLabel = normalizeSpeakerSlotText(log.label);
+  if (normalizedLabel === "speaker1" || normalizedLabel === "話者1") return "speaker_1";
+  if (normalizedLabel === "speaker2" || normalizedLabel === "話者2") return "speaker_2";
+  if (log.speaker === "sales") return "speaker_1";
+  if (log.speaker === "customer") return "speaker_2";
+  return null;
+}
+
+function normalizeSpeakerSlotText(value: string) {
+  return value.trim().toLowerCase().replace(/[\s＿_\-ー:：]/g, "");
 }
 
 function defaultSpeakerName(speaker: ConversationSpeaker) {
