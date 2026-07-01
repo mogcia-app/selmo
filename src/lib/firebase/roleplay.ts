@@ -271,7 +271,7 @@ export function subscribeToRoleplayAssignments(
 }
 
 export function subscribeToRoleplayResultComments(
-  input: { companyId?: string | null; resultId?: string | null },
+  input: { companyId?: string | null; resultId?: string | null; userId?: string | null },
   callback: (comments: RoleplayResultComment[]) => void,
   onError?: (error: FirestoreError) => void,
 ): Unsubscribe {
@@ -284,6 +284,7 @@ export function subscribeToRoleplayResultComments(
     collection(firestore, "roleplayResultComments"),
     where("companyId", "==", input.companyId),
     where("resultId", "==", input.resultId),
+    ...(input.userId ? [where("userId", "==", input.userId)] : []),
   );
 
   return onSnapshot(

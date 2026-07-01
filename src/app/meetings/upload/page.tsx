@@ -560,21 +560,6 @@ export default function MeetingUploadPage() {
             </div>
           ) : null}
 
-          <div className="mt-5 rounded-[18px] border border-[#eceef4] bg-white px-5 py-4">
-            <div className="text-[13px] font-semibold text-[#505866]">処理ステータス</div>
-            <div className="mt-2 text-[14px] leading-6 text-[#7a808c]">
-              {isSubmitting
-                ? inputMode === "audio"
-                  ? "音声をアップロード中です。完了後、ツール内通知でお知らせします。"
-                  : "文字起こしテキストを保存し、AIで要約と分析を作成しています。"
-                : inputMode === "audio"
-                  ? selectedFile
-                    ? "アップロード前です。保存すると処理待ちとして一覧に表示されます。"
-                    : "音声ファイルを選択してください。"
-                  : "保存すると、貼り付けた文字起こしからAI要約と分析を作成します。"}
-            </div>
-          </div>
-
           {inputMode === "audio" && detectedDurationSec !== null && detectedDurationSec > effectiveUploadDurationLimitSec ? (
             <AlertBox>
               {buildUploadDurationLimitMessage(uploadDurationLimitMinutes)}

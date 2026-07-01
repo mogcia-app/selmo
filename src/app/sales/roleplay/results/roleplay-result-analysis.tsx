@@ -66,7 +66,7 @@ export function RoleplayResultDetailPanel({ result }: { result: RoleplayResult }
         <ManualChecklistBlock items={result.manualChecklistItems} score={result.score} />
       ) : null}
       <TalkAnalysisBlock analysis={analysis} />
-      <AdminCommentBlock companyId={profile?.companyId ?? result.companyId} resultId={result.id} />
+      <AdminCommentBlock companyId={profile?.companyId ?? result.companyId} resultId={result.id} userId={result.userId} />
       <ConversationBlock messages={result.messages} />
     </article>
   );
@@ -236,13 +236,13 @@ function formatScoreImpact(value: number | null | undefined) {
   return value > 0 ? `+${value}` : `${value}`;
 }
 
-function AdminCommentBlock({ companyId, resultId }: { companyId?: string | null; resultId: string }) {
+function AdminCommentBlock({ companyId, resultId, userId }: { companyId?: string | null; resultId: string; userId?: string | null }) {
   const [comments, setComments] = useState<RoleplayResultComment[]>([]);
 
   useEffect(() => {
     if (!companyId || !resultId) return;
-    return subscribeToRoleplayResultComments({ companyId, resultId }, setComments, () => setComments([]));
-  }, [companyId, resultId]);
+    return subscribeToRoleplayResultComments({ companyId, resultId, userId }, setComments, () => setComments([]));
+  }, [companyId, resultId, userId]);
 
   if (comments.length === 0) return null;
 

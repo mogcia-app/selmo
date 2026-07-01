@@ -2,7 +2,7 @@
 
 import { FirebaseError } from "firebase/app";
 import Link from "next/link";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
 import {
@@ -11,14 +11,18 @@ import {
   Panel,
 } from "@/app/admin/_components/admin-insights";
 import {
+  deleteKnowledgeItem,
   subscribeToKnowledgeItem,
   type KnowledgeItem,
 } from "@/lib/firebase/knowledge";
 
 export default function AdminKnowledgeDetailPage() {
+  const router = useRouter();
   const params = useParams<{ knowledgeId: string }>();
   const [knowledge, setKnowledge] = useState<KnowledgeItem | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   useEffect(() => {
     if (!params.knowledgeId) return;
@@ -30,6 +34,23 @@ export default function AdminKnowledgeDetailPage() {
     );
   }, [params.knowledgeId]);
 
+  const handleDeleteKnowledge = async () => {
+    if (!knowledge) return;
+
+    setIsDeleting(true);
+    setError(null);
+
+    try {
+      await deleteKnowledgeItem(knowledge.id);
+      router.replace("/admin/knowledge");
+    } catch (nextError) {
+      setError(nextError instanceof Error ? nextError.message : "ナレッジの削除に失敗しました。");
+    } finally {
+      setIsDeleting(false);
+      setDeleteConfirmOpen(false);
+    }
+  };
+
   return (
     <PageShell>
       <div className="mx-auto max-w-[1120px]">
@@ -38,9 +59,20 @@ export default function AdminKnowledgeDetailPage() {
           title={knowledge?.title ?? "ナレッジ詳細"}
           description="営業メンバーに共有される公式ナレッジの内容を確認します。"
           action={
-            <Link href="/admin/knowledge" className="rounded-[14px] border border-[#e6eaf0] bg-white px-5 py-3 text-[13px] font-black text-[#343b48]">
-              一覧へ戻る
-            </Link>
+            <div className="flex flex-wrap items-center gap-2">
+              {knowledge ? (
+                <button
+                  type="button"
+                  onClick={() => setDeleteConfirmOpen(true)}
+                  className="rounded-[14px] border border-[#f3cccc] bg-[#fff8f8] px-5 py-3 text-[13px] font-black text-[#b4232a]"
+                >
+                  削除
+                </button>
+              ) : null}
+              <Link href="/admin/knowledge" className="rounded-[14px] border border-[#e6eaf0] bg-white px-5 py-3 text-[13px] font-black text-[#343b48]">
+                一覧へ戻る
+              </Link>
+            </div>
           }
         />
 
@@ -123,6 +155,34 @@ export default function AdminKnowledgeDetailPage() {
           </div>
         )}
       </div>
+
+      {deleteConfirmOpen && knowledge ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#171717]/24 px-4 py-6">
+          <div className="w-full max-w-[460px] rounded-[24px] border border-[#f1d4d4] bg-white p-6 shadow-[0_24px_70px_rgba(17,24,39,0.18)]">
+            <h2 className="text-[22px] font-black text-[#171717]">ナレッジを削除しますか？</h2>
+            <p className="mt-3 text-[14px] leading-7 text-[#596273]">
+              「{knowledge.title}」を削除します。削除すると一覧や検索結果からも表示されなくなります。
+            </p>
+            <div className="mt-6 flex justify-end gap-3">
+              <button
+                type="button"
+                onClick={() => setDeleteConfirmOpen(false)}
+                className="inline-flex h-11 items-center justify-center rounded-[14px] border border-[#e4e8ef] bg-white px-5 text-[14px] font-bold text-[#596273]"
+              >
+                キャンセル
+              </button>
+              <button
+                type="button"
+                onClick={handleDeleteKnowledge}
+                disabled={isDeleting}
+                className="inline-flex h-11 items-center justify-center rounded-[14px] border border-[#f3cccc] bg-[#fff5f5] px-6 text-[14px] font-bold text-[#b4232a] disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {isDeleting ? "削除中" : "削除する"}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </PageShell>
   );
 }

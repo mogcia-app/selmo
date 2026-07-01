@@ -9,6 +9,8 @@ import express from "express";
 import { initializeApp, applicationDefault } from "firebase-admin/app";
 import { FieldValue, getFirestore } from "firebase-admin/firestore";
 import { getStorage } from "firebase-admin/storage";
+import { CloudTasksClient } from "@google-cloud/tasks";
+import { GoogleAuth } from "google-auth-library";
 
 const execFileAsync = promisify(execFile);
 const app = express();
@@ -19,6 +21,18 @@ const transcriptionModel = "gpt-4o-mini-transcribe";
 const maxTranscriptionFileSizeBytes = 25 * 1024 * 1024;
 const targetChunkSizeBytes = 12 * 1024 * 1024;
 const maxOpenAiRetries = 2;
+const cloudTasksLocation = process.env.CLOUD_TASKS_LOCATION ?? process.env.CLOUD_RUN_REGION ?? "asia-northeast1";
+const cloudTasksQueue = process.env.CLOUD_TASKS_QUEUE ?? "";
+const cloudTasksProjectId = process.env.GOOGLE_CLOUD_PROJECT ?? process.env.GCP_PROJECT ?? process.env.GCLOUD_PROJECT ?? "";
+const cloudRunJobName = process.env.CLOUD_RUN_TRANSCRIPTION_JOB_NAME ?? process.env.CLOUD_RUN_JOB_NAME ?? "";
+const cloudRunJobRegion = process.env.CLOUD_RUN_TRANSCRIPTION_JOB_REGION ?? process.env.CLOUD_RUN_REGION ?? cloudTasksLocation;
+const publicServiceUrl = process.env.AUDIO_CONVERTER_PUBLIC_URL ?? process.env.AUDIO_CONVERTER_CLOUD_RUN_URL ?? "";
+const cloudTaskDispatchDeadlineSec = Math.min(
+  Math.max(Number(process.env.CLOUD_TASKS_DISPATCH_DEADLINE_SEC ?? 1800), 60),
+  1800,
+);
+const tasksClient = cloudTasksQueue ? new CloudTasksClient() : null;
+const runAuth = cloudRunJobName ? new GoogleAuth({ scopes: ["https://www.googleapis.com/auth/cloud-platform"] }) : null;
 
 initializeApp({
   credential: applicationDefault(),
@@ -48,18 +62,43 @@ app.post("/kick", requireToken, (request, response) => {
   response.status(202).json({ queued: true, meetingId });
 });
 
-app.post("/kick-transcription", requireToken, (request, response) => {
+app.post("/kick-transcription", requireToken, async (request, response) => {
   const meetingId = readString(request.body?.meetingId);
   if (!meetingId) {
     response.status(400).json({ error: "meetingId is required" });
     return;
   }
 
+  try {
+    const queuedJob = await runCloudRunTranscriptionJob(meetingId);
+
+    if (queuedJob) {
+      response.status(202).json({ queued: true, jobQueued: true, meetingId, operationName: queuedJob.name });
+      return;
+    }
+  } catch (error) {
+    console.error("audio transcription job enqueue failed", { meetingId, error });
+  }
+
+  try {
+    const queuedTask = await enqueueTranscriptionTask({
+      meetingId,
+      fallbackBaseUrl: `${request.protocol}://${request.get("host")}`,
+    });
+
+    if (queuedTask) {
+      response.status(202).json({ queued: true, taskQueued: true, meetingId, taskName: queuedTask.name });
+      return;
+    }
+  } catch (error) {
+    console.error("audio transcription task enqueue failed", { meetingId, error });
+  }
+
   void transcribeMeeting(meetingId).catch((error) => {
     console.error("audio transcription failed", { meetingId, error });
   });
 
-  response.status(202).json({ queued: true, meetingId });
+  response.status(202).json({ queued: true, taskQueued: false, meetingId });
 });
 
 app.post("/convert", requireToken, async (request, response) => {
@@ -119,18 +158,169 @@ app.post("/process-transcription-pending", requireToken, async (request, respons
     .get();
   const meetingIds = snapshot.docs.map((doc) => doc.id);
 
+  const taskResults = [];
   for (const meetingId of meetingIds) {
+    try {
+      const queuedJob = await runCloudRunTranscriptionJob(meetingId);
+
+      if (queuedJob) {
+        taskResults.push({ meetingId, jobQueued: true, operationName: queuedJob.name });
+        continue;
+      }
+    } catch (error) {
+      console.error("pending audio transcription job enqueue failed", { meetingId, error });
+    }
+
+    try {
+      const queuedTask = await enqueueTranscriptionTask({
+        meetingId,
+        fallbackBaseUrl: `${request.protocol}://${request.get("host")}`,
+      });
+
+      if (queuedTask) {
+        taskResults.push({ meetingId, taskQueued: true, taskName: queuedTask.name });
+        continue;
+      }
+    } catch (error) {
+      console.error("pending audio transcription task enqueue failed", { meetingId, error });
+    }
+
     void transcribeMeeting(meetingId).catch((error) => {
       console.error("pending audio transcription failed", { meetingId, error });
     });
+    taskResults.push({ meetingId, taskQueued: false });
   }
 
-  response.status(202).json({ queued: meetingIds.length, meetingIds });
+  response.status(202).json({ queued: meetingIds.length, meetingIds, tasks: taskResults });
 });
 
-app.listen(port, () => {
-  console.log(`selmo audio converter listening on ${port}`);
-});
+if (process.env.RUN_MODE === "transcription-job") {
+  runTranscriptionJobFromEnv().catch((error) => {
+    console.error("transcription job failed", { error });
+    process.exitCode = 1;
+  });
+} else {
+  app.listen(port, () => {
+    console.log(`selmo audio converter listening on ${port}`);
+  });
+}
+
+async function runTranscriptionJobFromEnv() {
+  const meetingId = readString(process.env.TRANSCRIPTION_MEETING_ID);
+  if (!meetingId) {
+    throw new Error("TRANSCRIPTION_MEETING_ID is required");
+  }
+
+  await transcribeMeeting(meetingId);
+}
+
+async function runCloudRunTranscriptionJob(meetingId) {
+  if (!cloudRunJobName || !runAuth) {
+    return null;
+  }
+
+  const projectId = cloudTasksProjectId || await runAuth.getProjectId();
+  const authClient = await runAuth.getClient();
+  const accessTokenResponse = await authClient.getAccessToken();
+  const accessToken =
+    typeof accessTokenResponse === "string"
+      ? accessTokenResponse
+      : accessTokenResponse?.token;
+
+  if (!accessToken) {
+    throw new Error("failed to obtain Google Cloud access token");
+  }
+
+  const response = await fetch(
+    `https://run.googleapis.com/v2/projects/${projectId}/locations/${cloudRunJobRegion}/jobs/${cloudRunJobName}:run`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        overrides: {
+          containerOverrides: [
+            {
+              env: [
+                {
+                  name: "TRANSCRIPTION_MEETING_ID",
+                  value: meetingId,
+                },
+              ],
+            },
+          ],
+        },
+      }),
+    },
+  );
+  const responseText = await response.text();
+
+  if (!response.ok) {
+    throw new Error(responseText || `Cloud Run job returned ${response.status}`);
+  }
+
+  const payload = responseText.trim() ? JSON.parse(responseText) : {};
+  await db.collection("audioProcessingJobs").doc(meetingId).set(
+    {
+      meetingId,
+      status: "transcription_queued",
+      transcriptionJobName: cloudRunJobName,
+      transcriptionJobOperationName: payload.name ?? null,
+      transcriptionJobQueuedAt: FieldValue.serverTimestamp(),
+      errorMessage: null,
+      updatedAt: FieldValue.serverTimestamp(),
+    },
+    { merge: true },
+  );
+
+  return payload;
+}
+
+async function enqueueTranscriptionTask({ meetingId, fallbackBaseUrl }) {
+  if (!tasksClient || !cloudTasksQueue || !token) {
+    return null;
+  }
+
+  const projectId = cloudTasksProjectId || await tasksClient.getProjectId();
+  const parent = tasksClient.queuePath(projectId, cloudTasksLocation, cloudTasksQueue);
+  const baseUrl = (publicServiceUrl || fallbackBaseUrl || "").replace(/\/$/, "");
+
+  if (!baseUrl) {
+    return null;
+  }
+
+  const task = {
+    httpRequest: {
+      httpMethod: "POST",
+      url: `${baseUrl}/transcribe`,
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: Buffer.from(JSON.stringify({ meetingId })).toString("base64"),
+    },
+    dispatchDeadline: {
+      seconds: cloudTaskDispatchDeadlineSec,
+    },
+  };
+  const [createdTask] = await tasksClient.createTask({ parent, task });
+
+  await db.collection("audioProcessingJobs").doc(meetingId).set(
+    {
+      meetingId,
+      status: "transcription_queued",
+      transcriptionTaskName: createdTask.name ?? null,
+      transcriptionTaskQueuedAt: FieldValue.serverTimestamp(),
+      errorMessage: null,
+      updatedAt: FieldValue.serverTimestamp(),
+    },
+    { merge: true },
+  );
+
+  return createdTask;
+}
 
 function requireToken(request, response, next) {
   if (!token) {

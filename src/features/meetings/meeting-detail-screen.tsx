@@ -17,13 +17,18 @@ import {
   subscribeToMeeting,
   type MeetingRecord,
 } from "@/lib/firebase/meetings";
-import { updateAudioProcessingJob } from "@/lib/firebase/operations";
+import {
+  subscribeToAudioProcessingJob,
+  updateAudioProcessingJob,
+  type AudioProcessingJobRecord,
+} from "@/lib/firebase/operations";
 import { canUseSalesDomain } from "@/lib/sales-domains";
 
 const transcriptionRequestTimeoutMs = 10 * 60 * 1000;
 const transientBannerDurationMs = 15 * 1000;
 const aiSummaryRunningFreshMs = 10 * 60 * 1000;
 const staleTranscriptionRunningMs = 90 * 60 * 1000;
+const legacyTranscriptionRunningMs = 10 * 60 * 1000;
 const monthlyLimitMessage = MONTHLY_AI_LIMIT_MESSAGE;
 type ConversationSpeaker = "sales" | "customer" | "participant" | "unknown";
 type SpeakerPreset = {
@@ -79,6 +84,7 @@ export function MeetingDetailScreen({
   const router = useRouter();
   const { profile } = useAuth();
   const [meeting, setMeeting] = useState<MeetingRecord | null>(null);
+  const [audioProcessingJob, setAudioProcessingJob] = useState<AudioProcessingJobRecord | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isTranscribing, setIsTranscribing] = useState(false);
@@ -135,6 +141,16 @@ export function MeetingDetailScreen({
   }, [meetingId]);
 
   useEffect(() => {
+    const unsubscribe = subscribeToAudioProcessingJob(
+      meetingId,
+      setAudioProcessingJob,
+      () => setAudioProcessingJob(null),
+    );
+
+    return unsubscribe;
+  }, [meetingId]);
+
+  useEffect(() => {
     summaryGenerationRequestedRef.current = false;
   }, [meetingId]);
 
@@ -159,15 +175,10 @@ export function MeetingDetailScreen({
   }, [meeting?.userId, profile?.name, profile?.uid]);
 
   useEffect(() => {
-    if (meeting?.transcriptionProbeStatus === "running" || meeting?.conversationLogStatus === "running") {
-      setIsTranscribing(true);
-      return;
-    }
-
     if (meeting?.transcriptionProbeStatus === "completed" || meeting?.transcriptionProbeStatus === "failed") {
       setIsTranscribing(false);
     }
-  }, [meeting?.conversationLogStatus, meeting?.transcriptionProbeStatus]);
+  }, [meeting?.transcriptionProbeStatus]);
 
   useEffect(() => {
     if (meeting?.aiSummaryStatus !== "running") {
@@ -515,15 +526,25 @@ export function MeetingDetailScreen({
   const isTranscriptionRunningStatus =
     meeting?.transcriptionProbeStatus === "running" || meeting?.conversationLogStatus === "running";
   const transcriptionRunningStartedAt = meeting?.transcriptionProbeTestedAt ?? null;
+  const hasQueuedTranscriptionWorker = Boolean(
+    audioProcessingJob?.transcriptionJobOperationName ||
+      audioProcessingJob?.transcriptionTaskName ||
+      audioProcessingJob?.status === "transcription_queued",
+  );
+  const isLegacyTranscriptionRunning =
+    isTranscriptionRunningStatus &&
+    !hasQueuedTranscriptionWorker &&
+    Boolean(transcriptionRunningStartedAt && Date.now() - transcriptionRunningStartedAt.getTime() > legacyTranscriptionRunningMs);
   const isTranscriptionStale =
     !isManualTranscript &&
     editableLogs.length === 0 &&
     isTranscriptionRunningStatus &&
     (
+      isLegacyTranscriptionRunning ||
       transcriptionElapsedSec * 1000 > staleTranscriptionRunningMs ||
       Boolean(transcriptionRunningStartedAt && Date.now() - transcriptionRunningStartedAt.getTime() > staleTranscriptionRunningMs)
     );
-  const shouldShowTranscriptionLoading = (isTranscribing || isTranscriptionRunningStatus) && !isTranscriptionStale;
+  const shouldShowTranscriptionLoading = isTranscribing && !isTranscriptionStale;
   const hasAttemptedTranscription =
     meeting?.transcriptionProbeStatus === "failed" ||
     meeting?.transcriptionProbeStatus === "completed" ||
@@ -622,8 +643,7 @@ export function MeetingDetailScreen({
     !hasStoredAiSummary &&
     meeting?.aiSummaryStatus === "failed" &&
     !shouldShowAiSummaryLoading;
-  const shouldShowAiSummaryActions =
-    process.env.NODE_ENV !== "production" || shouldShowAiSummaryFailed;
+  const shouldShowAiSummaryActions = shouldShowAiSummaryFailed;
   const meetingFlowSteps = useMemo(
     () =>
       buildMeetingFlowSteps({
@@ -3816,7 +3836,7 @@ function buildTranscriptionProgressMessage({
   if (progress >= 99) {
     return {
       title: "最終処理を継続しています",
-      description: `${elapsedLabel}画面は固まっていません。完了すると自動で会話ブロックが表示されます。`,
+      description: `${elapsedLabel}完了すると自動で会話ブロックが表示されます。`,
     };
   }
 

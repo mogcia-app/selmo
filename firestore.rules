@@ -313,7 +313,7 @@ service cloud.firestore {
       allow read: if isOwnerRole()
         || (
           canAdminCompanyData(resource.data.companyId)
-          || (isSalesRole() && isCustomerMember(resource.data))
+          || (isSalesRole() && (sameCompany(resource.data.companyId) || isCustomerMember(resource.data)))
         );
       allow create: if isSignedIn()
         && sameCompany(request.resource.data.companyId)

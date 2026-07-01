@@ -4,8 +4,10 @@ import {
   addDoc,
   collection,
   doc,
+  onSnapshot,
   serverTimestamp,
   setDoc,
+  Timestamp,
   updateDoc,
 } from "firebase/firestore";
 
@@ -36,10 +38,22 @@ export type AudioProcessingJobStatus =
   | "convert_required"
   | "converting"
   | "converted"
+  | "transcription_queued"
   | "transcribing"
   | "analyzing"
   | "completed"
   | "failed";
+
+export type AudioProcessingJobRecord = {
+  meetingId: string;
+  status: AudioProcessingJobStatus | string;
+  transcriptionJobName: string | null;
+  transcriptionJobOperationName: string | null;
+  transcriptionJobQueuedAt: Date | null;
+  transcriptionTaskName: string | null;
+  transcriptionTaskQueuedAt: Date | null;
+  updatedAt: Date | null;
+};
 
 export async function saveKnowledgeSearchEvent(input: KnowledgeSearchEventInput) {
   const { firestore } = assertFirebaseClient();
@@ -138,4 +152,53 @@ export async function updateAudioProcessingJob(
   }
 
   await updateDoc(doc(firestore, "audioProcessingJobs", meetingId), payload);
+}
+
+export function subscribeToAudioProcessingJob(
+  meetingId: string,
+  onNext: (job: AudioProcessingJobRecord | null) => void,
+  onError?: (error: Error) => void,
+) {
+  const { firestore } = assertFirebaseClient();
+
+  return onSnapshot(
+    doc(firestore, "audioProcessingJobs", meetingId),
+    (snapshot) => {
+      if (!snapshot.exists()) {
+        onNext(null);
+        return;
+      }
+
+      const data = snapshot.data() as Record<string, unknown>;
+      onNext({
+        meetingId,
+        status: String(data.status ?? "waiting"),
+        transcriptionJobName: toNullableString(data.transcriptionJobName),
+        transcriptionJobOperationName: toNullableString(data.transcriptionJobOperationName),
+        transcriptionJobQueuedAt: toDateValue(data.transcriptionJobQueuedAt),
+        transcriptionTaskName: toNullableString(data.transcriptionTaskName),
+        transcriptionTaskQueuedAt: toDateValue(data.transcriptionTaskQueuedAt),
+        updatedAt: toDateValue(data.updatedAt),
+      });
+    },
+    (error) => {
+      onError?.(error);
+    },
+  );
+}
+
+function toNullableString(value: unknown) {
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function toDateValue(value: unknown) {
+  if (value instanceof Date) {
+    return value;
+  }
+
+  if (value instanceof Timestamp) {
+    return value.toDate();
+  }
+
+  return null;
 }

@@ -152,6 +152,7 @@ type AudioProcessingJobDocument = {
     | "convert_required"
     | "converting"
     | "converted"
+    | "transcription_queued"
     | "transcribing"
     | "analyzing"
     | "completed"
@@ -160,6 +161,11 @@ type AudioProcessingJobDocument = {
   completedAt?: Timestamp | null;
   errorMessage?: string | null;
   retryCount: number;
+  transcriptionJobName?: string | null;
+  transcriptionJobOperationName?: string | null;
+  transcriptionJobQueuedAt?: Timestamp | null;
+  transcriptionTaskName?: string | null;
+  transcriptionTaskQueuedAt?: Timestamp | null;
   updatedAt: Timestamp;
 };
 ```

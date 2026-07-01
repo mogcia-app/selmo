@@ -508,7 +508,7 @@ export default function AdminRoleplayPage() {
                     return (
                       <Link
                         key={result.id}
-                        href={`/admin/roleplay/results/${result.id}`}
+                        href={`/admin/roleplay/results/${result.id}?category=${result.roleplayType}`}
                         className="grid min-w-[720px] grid-cols-[120px_minmax(160px,1fr)_64px_minmax(180px,1.2fr)_56px] items-center gap-3 border-b border-[#f0f2f6] px-4 py-2.5 text-left transition last:border-b-0 hover:bg-white"
                       >
                         <div className="truncate text-[12px] font-black text-[#171717]">{member?.name ?? "未設定"}</div>

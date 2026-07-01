@@ -93,7 +93,7 @@ export default function AdminDashboardPage() {
   const selectedRoleplayResultsForMonth = useMemo(() => filterRecordsByMonth(roleplayResults, selectedMonth, (result) => result.createdAt), [roleplayResults, selectedMonth]);
   const selectedActivityEventsForMonth = useMemo(() => filterRecordsByMonth(activityEvents, selectedMonth, (event) => event.createdAt), [activityEvents, selectedMonth]);
   const selectedCustomerLogsForMonth = useMemo(() => filterRecordsByMonth(customerLogs, selectedMonth, (log) => log.actionDate ?? log.createdAt), [customerLogs, selectedMonth]);
-  const sharedKnowledgeCount = useMemo(() => knowledgeItems.filter((item) => item.scope === "shared").length, [knowledgeItems]);
+  const sharedKnowledgeCount = useMemo(() => knowledgeItems.filter((item) => item.companyId && item.scope === "shared").length, [knowledgeItems]);
   const wonMeetings = useMemo(() => selectedMeetingsForMonth.filter((meeting) => meeting.status === "won").length, [selectedMeetingsForMonth]);
   const winRate = selectedMeetingsForMonth.length > 0 ? Math.round((wonMeetings / selectedMeetingsForMonth.length) * 1000) / 10 : null;
   const analyzedMeetingCount = useMemo(() => selectedMeetingsForMonth.filter((meeting) => meeting.aiSummary).length, [selectedMeetingsForMonth]);
@@ -810,6 +810,7 @@ function RecentActivityCard({
   users: AppUserProfile[];
 }) {
   const userById = new Map(users.map((user) => [user.uid, user]));
+  const companyKnowledgeItems = knowledgeItems.filter((item) => item.companyId);
   const activityRows: ActivityTimelineRow[] = [
     ...events.map((event) => ({
       id: event.id,
@@ -822,7 +823,7 @@ function RecentActivityCard({
       href: event.href,
       createdAt: event.createdAt,
     })),
-    ...knowledgeItems
+    ...companyKnowledgeItems
       .filter((item) => item.updatedAt)
       .map((item) => ({
         id: `knowledge-${item.id}`,
@@ -842,7 +843,7 @@ function RecentActivityCard({
   const counts = {
     meeting: events.filter((event) => event.type === "meeting_uploaded" || event.type === "transcript_pasted").length,
     roleplay: events.filter((event) => event.type === "roleplay_completed").length,
-    knowledge: events.filter((event) => event.type === "knowledge_searched").length + knowledgeItems.filter((item) => item.updatedAt).length,
+    knowledge: events.filter((event) => event.type === "knowledge_searched").length + companyKnowledgeItems.filter((item) => item.updatedAt).length,
   };
 
   return (
