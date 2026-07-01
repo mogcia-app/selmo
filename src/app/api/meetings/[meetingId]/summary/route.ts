@@ -269,6 +269,7 @@ async function summarizeTranscript(
         type: "json_schema",
         json_schema: {
           name: "meeting_summary",
+          strict: true,
           schema: {
             type: "object",
             additionalProperties: false,
@@ -524,8 +525,12 @@ async function summarizeTranscript(
 
   let summary: SummaryResponse;
   try {
-    summary = JSON.parse(content) as SummaryResponse;
-  } catch {
+    summary = parseSummaryJsonContent(content);
+  } catch (error) {
+    console.error("[meeting-summary] failed to parse summary json", {
+      message: error instanceof Error ? error.message : "unknown",
+      contentPreview: content.slice(0, 500),
+    });
     throw new Error("AI要約JSONの解析に失敗しました。");
   }
 
@@ -543,6 +548,84 @@ async function summarizeTranscript(
       outputTokens: parsed.usage?.completion_tokens ?? null,
     },
   };
+}
+
+function parseSummaryJsonContent(content: string): SummaryResponse {
+  const trimmed = content.trim();
+  const directParsed = tryParseSummaryJson(trimmed);
+  if (directParsed) {
+    return directParsed;
+  }
+
+  const fencedMatch = trimmed.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
+  if (fencedMatch) {
+    const fencedParsed = tryParseSummaryJson(fencedMatch[1].trim());
+    if (fencedParsed) {
+      return fencedParsed;
+    }
+  }
+
+  const extractedObject = extractFirstJsonObject(trimmed);
+  if (extractedObject) {
+    const extractedParsed = tryParseSummaryJson(extractedObject);
+    if (extractedParsed) {
+      return extractedParsed;
+    }
+  }
+
+  throw new Error("No valid summary JSON object found.");
+}
+
+function tryParseSummaryJson(value: string): SummaryResponse | null {
+  try {
+    const parsed = JSON.parse(value) as SummaryResponse;
+    return parsed && typeof parsed === "object" ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function extractFirstJsonObject(value: string) {
+  const start = value.indexOf("{");
+  if (start < 0) return null;
+
+  let depth = 0;
+  let isInString = false;
+  let isEscaped = false;
+
+  for (let index = start; index < value.length; index += 1) {
+    const char = value[index];
+
+    if (isInString) {
+      if (isEscaped) {
+        isEscaped = false;
+      } else if (char === "\\") {
+        isEscaped = true;
+      } else if (char === "\"") {
+        isInString = false;
+      }
+      continue;
+    }
+
+    if (char === "\"") {
+      isInString = true;
+      continue;
+    }
+
+    if (char === "{") {
+      depth += 1;
+      continue;
+    }
+
+    if (char === "}") {
+      depth -= 1;
+      if (depth === 0) {
+        return value.slice(start, index + 1);
+      }
+    }
+  }
+
+  return null;
 }
 
 function normalizeManualCompliance(
