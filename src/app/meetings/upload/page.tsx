@@ -83,6 +83,7 @@ export default function MeetingUploadPage() {
   const [companyUploadDurationLimitMinutes, setCompanyUploadDurationLimitMinutes] = useState<number | null>(null);
   const salesDomain: SalesDomain = searchParams.get("category") === "teleapo" ? "teleapo" : "meeting";
   const canAccessDomain = isLoading || canUseSalesDomain(profile, salesDomain);
+  const currentMonthRange = useMemo(() => getCurrentMonthDateTimeRange(), []);
 
   useEffect(() => {
     if (!isFirebaseReady || !profile?.companyId) {
@@ -141,8 +142,8 @@ export default function MeetingUploadPage() {
 
   const productOptions = useMemo(() => products.map((product) => product.name), [products]);
   const availableCalendarEvents = useMemo(
-    () => calendarEvents.filter((event) => event.salesDomain === salesDomain),
-    [calendarEvents, salesDomain],
+    () => calendarEvents.filter((event) => event.salesDomain === salesDomain && isWithinDateRange(event.scheduledAt, currentMonthRange)),
+    [calendarEvents, currentMonthRange, salesDomain],
   );
   const selectedCalendarEvent = useMemo(
     () => availableCalendarEvents.find((event) => event.id === selectedCalendarEventId) ?? null,
@@ -177,11 +178,17 @@ export default function MeetingUploadPage() {
       setMemo(buildCalendarEventMemo(calendarEvent));
 
       if (calendarEvent.scheduledAt) {
+        if (!isWithinDateRange(calendarEvent.scheduledAt, currentMonthRange)) {
+          setErrorMessage("実施日時は今月内の日付だけ選択できます。");
+          setSelectedCalendarEventId("");
+          return;
+        }
+
         setRecordedAt(toDatetimeLocalValue(calendarEvent.scheduledAt));
         setTranscriptEndedAtTime(toTimeInputValue(addMinutes(calendarEvent.scheduledAt, 60)));
       }
     },
-    [productType],
+    [currentMonthRange, productType],
   );
 
   useEffect(() => {
@@ -197,6 +204,12 @@ export default function MeetingUploadPage() {
       return;
     }
 
+    if (!isWithinDateRange(nextRecordedAt, currentMonthRange)) {
+      setErrorMessage("実施日時は今月内の日付だけ選択できます。");
+      return;
+    }
+
+    setErrorMessage(null);
     setTranscriptEndedAtTime(toTimeInputValue(addMinutes(nextRecordedAt, 60)));
   }
 
@@ -236,6 +249,11 @@ export default function MeetingUploadPage() {
     }
 
     const normalizedRecordedAt = recordedAt ? new Date(recordedAt) : new Date();
+    if (!isWithinDateRange(normalizedRecordedAt, currentMonthRange)) {
+      setErrorMessage("実施日時は今月内の日付だけ選択できます。毎月1日に、その月の日付を選べるようになります。");
+      return;
+    }
+
     const transcriptDurationSec =
       inputMode === "transcript"
         ? calculateTranscriptDurationSec(normalizedRecordedAt, transcriptEndedAtTime)
@@ -632,9 +650,14 @@ export default function MeetingUploadPage() {
               <input
                 type="datetime-local"
                 className={inputClassName}
+                min={toDatetimeLocalValue(currentMonthRange.start)}
+                max={toDatetimeLocalValue(currentMonthRange.end)}
                 value={recordedAt}
                 onChange={(event) => handleRecordedAtChange(event.target.value)}
               />
+              <p className="mt-2 text-[12px] font-semibold text-[#8a909b]">
+                実施日時は今月内のみ選択できます。毎月1日に選択可能な月が切り替わります。
+              </p>
             </Field>
 
             {inputMode === "transcript" ? (
@@ -1017,6 +1040,19 @@ function toTimeInputValue(date: Date) {
 
 function addMinutes(date: Date, minutes: number) {
   return new Date(date.getTime() + minutes * 60 * 1000);
+}
+
+function getCurrentMonthDateTimeRange() {
+  const now = new Date();
+  const start = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0);
+  const end = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 0, 0);
+  return { start, end };
+}
+
+function isWithinDateRange(date: Date | null, range: { start: Date; end: Date }) {
+  if (!date) return false;
+  const time = date.getTime();
+  return Number.isFinite(time) && time >= range.start.getTime() && time <= range.end.getTime();
 }
 
 function calculateTranscriptDurationSec(startedAt: Date, endedAtTime: string) {

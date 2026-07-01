@@ -3,6 +3,7 @@
 import { FirebaseError } from "firebase/app";
 import Image from "next/image";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { useAuth } from "@/features/auth/auth-provider";
@@ -21,11 +22,18 @@ import { canUseSalesDomain } from "@/lib/sales-domains";
 
 const transcriptionRequestTimeoutMs = 10 * 60 * 1000;
 const transientBannerDurationMs = 15 * 1000;
+const aiSummaryRunningFreshMs = 10 * 60 * 1000;
 const monthlyLimitMessage = MONTHLY_AI_LIMIT_MESSAGE;
 type ConversationSpeaker = "sales" | "customer" | "participant" | "unknown";
 type SpeakerPreset = {
   speaker1: ConversationSpeaker;
   speaker2: ConversationSpeaker;
+};
+type FlowStepStatus = "completed" | "current" | "pending" | "failed";
+type MeetingFlowStep = {
+  label: string;
+  description: string;
+  status: FlowStepStatus;
 };
 
 type DisplayLog = {
@@ -67,11 +75,13 @@ export function MeetingDetailScreen({
 }) {
   const isTranscriptView = view === "transcript";
   const isSummaryView = view === "summary";
+  const router = useRouter();
   const { profile } = useAuth();
   const [meeting, setMeeting] = useState<MeetingRecord | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isTranscribing, setIsTranscribing] = useState(false);
+  const [summaryStatusNowMs, setSummaryStatusNowMs] = useState(() => Date.now());
   const [logSearch, setLogSearch] = useState("");
   const [transcriptViewMode, setTranscriptViewMode] = useState("all");
   const [selectedTranscriptBlockIndex, setSelectedTranscriptBlockIndex] = useState<number | null>(null);
@@ -149,6 +159,21 @@ export function MeetingDetailScreen({
   }, [meeting?.transcriptionProbeStatus]);
 
   useEffect(() => {
+    if (meeting?.aiSummaryStatus !== "running") {
+      return;
+    }
+
+    setSummaryStatusNowMs(Date.now());
+    const intervalId = window.setInterval(() => {
+      setSummaryStatusNowMs(Date.now());
+    }, 30 * 1000);
+
+    return () => {
+      window.clearInterval(intervalId);
+    };
+  }, [meeting?.aiSummaryStatus]);
+
+  useEffect(() => {
     if (!errorMessage) {
       return;
     }
@@ -192,6 +217,7 @@ export function MeetingDetailScreen({
       await saveMeetingAiSummary(meetingId, {
         status: "running",
         model: "gpt-4o-mini",
+        summary: null,
         error: null,
         processingStatus: "uploaded",
       });
@@ -239,6 +265,7 @@ export function MeetingDetailScreen({
         error: null,
         processingStatus: "uploaded",
       });
+      setErrorMessage(null);
       await saveSalesActivityEvent({
         companyId: profile?.companyId ?? meeting?.companyId ?? null,
         userId: profile?.uid ?? meeting?.userId ?? "",
@@ -260,6 +287,7 @@ export function MeetingDetailScreen({
     } catch (summaryError) {
       const summaryMessage =
         summaryError instanceof Error ? summaryError.message : "AI要約の生成に失敗しました。";
+      setErrorMessage(summaryMessage);
 
       try {
         await saveMeetingAiSummary(meetingId, {
@@ -521,13 +549,14 @@ export function MeetingDetailScreen({
         .join("\n\n"),
     [editableLogs],
   );
+  const isAiSummaryRunning = isFreshAiSummaryRunning(meeting, summaryStatusNowMs);
 
   useEffect(() => {
     if (!isSummaryView || !meeting || summaryGenerationRequestedRef.current) {
       return;
     }
 
-    if (meeting.aiSummary || meeting.aiSummaryStatus === "running") {
+    if (meeting.aiSummary || isAiSummaryRunning || meeting.aiSummaryStatus === "failed") {
       return;
     }
 
@@ -542,6 +571,7 @@ export function MeetingDetailScreen({
     editableLogs,
     exportTranscriptText,
     generateAiSummaryInBackground,
+    isAiSummaryRunning,
     isSummaryView,
     meeting,
   ]);
@@ -551,8 +581,44 @@ export function MeetingDetailScreen({
     [editableLogs],
   );
   const transcriptFocusWords = useMemo(() => buildTranscriptFocusWords(editableLogs), [editableLogs]);
-  const isAiSummaryRunning = meeting?.aiSummaryStatus === "running";
   const canRunAiSummary = exportTranscriptText.trim().length > 0 || Boolean(meeting?.transcriptionProbeText?.trim());
+  const hasStoredAiSummary = Boolean(meeting?.aiSummary);
+  const shouldShowAiSummaryLoading =
+    isSummaryView &&
+    !hasStoredAiSummary &&
+    canRunAiSummary &&
+    (isAiSummaryRunning || meeting?.aiSummaryStatus !== "failed");
+  const shouldShowAiSummaryFailed =
+    isSummaryView &&
+    !hasStoredAiSummary &&
+    meeting?.aiSummaryStatus === "failed" &&
+    !shouldShowAiSummaryLoading;
+  const shouldShowAiSummaryActions =
+    process.env.NODE_ENV !== "production" || shouldShowAiSummaryFailed;
+  const meetingFlowSteps = useMemo(
+    () =>
+      buildMeetingFlowSteps({
+        hasTranscript: editableLogs.length > 0,
+        hasSummary: hasStoredAiSummary,
+        isSummaryView,
+        isTranscriptionRunning:
+          isTranscribing ||
+          meeting?.transcriptionProbeStatus === "running" ||
+          meeting?.conversationLogStatus === "running",
+        isAiSummaryRunning: shouldShowAiSummaryLoading,
+        aiSummaryFailed: shouldShowAiSummaryFailed,
+      }),
+    [
+      editableLogs.length,
+      hasStoredAiSummary,
+      isSummaryView,
+      isTranscribing,
+      meeting?.conversationLogStatus,
+      meeting?.transcriptionProbeStatus,
+      shouldShowAiSummaryFailed,
+      shouldShowAiSummaryLoading,
+    ],
+  );
   const normalizedLogSearch = logSearch.trim().toLowerCase();
   const visibleEditableLogs = useMemo(() => {
     const indexedLogs = editableLogs.map((log, index) => ({ log, index }));
@@ -726,19 +792,27 @@ export function MeetingDetailScreen({
 
   async function handleSaveConversationEdits() {
     if (!meeting) return;
+    const cleanedLogs = editableLogs
+      .map((log, index) => mapDisplayLogToConversationLog(log, index, speakerNames))
+      .filter((log) => log.text.trim());
+    const transcriptText = cleanedLogs
+      .map((log) => `${log.label || defaultSpeakerName(normalizeEditableSpeaker(log.speaker))}: ${log.text.trim()}`)
+      .filter(Boolean)
+      .join("\n\n");
+
     setIsSavingConversationLogs(true);
     setErrorMessage(null);
     try {
       await saveMeetingConversationLogs(meetingId, {
         status: "completed",
         model: "manual-edit",
-        logs: editableLogs
-          .map((log, index) => mapDisplayLogToConversationLog(log, index, speakerNames))
-          .filter((log) => log.text.trim()),
+        logs: cleanedLogs,
         error: null,
         processingStatus: "uploaded",
       });
-      setErrorMessage("会話ブロックを保存しました。");
+      summaryGenerationRequestedRef.current = true;
+      void generateAiSummaryInBackground(transcriptText || exportTranscriptText.trim() || meeting.transcriptionProbeText?.trim() || "", editableLogs);
+      router.push(`/meetings/${meetingId}/summary`);
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "会話ブロックの保存に失敗しました。");
     } finally {
@@ -876,6 +950,8 @@ export function MeetingDetailScreen({
           </div>
         ) : null}
 
+        <MeetingFlowProgress steps={meetingFlowSteps} />
+
         {isSummaryView ? (
         <section className="rounded-[24px] border border-[#eceef4] bg-white p-6 shadow-[0_10px_28px_rgba(17,24,39,0.05)] md:p-7">
           <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
@@ -899,16 +975,24 @@ export function MeetingDetailScreen({
                 </div>
               </div>
             </div>
-            <button
-              type="button"
-              onClick={handleRegenerateAiSummary}
-              disabled={!canRunAiSummary || isAiSummaryRunning}
-              className={`relative inline-flex h-11 items-center justify-center overflow-hidden rounded-[14px] border border-[#f0c655] bg-[#ffd84d] px-5 text-[13px] font-black text-[#171717] shadow-[0_8px_18px_rgba(245,189,7,0.18)] transition hover:bg-[#ffcf33] disabled:cursor-not-allowed ${isAiSummaryRunning ? "ai-summary-regenerate-active" : "disabled:opacity-50"}`}
-            >
-              <span className="relative z-10">{isAiSummaryRunning ? "再分析中..." : "再分析実行"}</span>
-            </button>
+            {shouldShowAiSummaryActions ? (
+              <button
+                type="button"
+                onClick={handleRegenerateAiSummary}
+                disabled={!canRunAiSummary || isAiSummaryRunning}
+                className={`relative inline-flex h-11 items-center justify-center overflow-hidden rounded-[14px] border border-[#f0c655] bg-[#ffd84d] px-5 text-[13px] font-black text-[#171717] shadow-[0_8px_18px_rgba(245,189,7,0.18)] transition hover:bg-[#ffcf33] disabled:cursor-not-allowed ${isAiSummaryRunning ? "ai-summary-regenerate-active" : "disabled:opacity-50"}`}
+              >
+                <span className="relative z-10">{isAiSummaryRunning ? "分析中..." : "再分析実行"}</span>
+              </button>
+            ) : null}
           </div>
 
+          {shouldShowAiSummaryLoading ? (
+            <AiSummaryLoadingState />
+          ) : shouldShowAiSummaryFailed ? (
+            <AiSummaryFailedState message={meeting.aiSummaryError ?? "AIサマリーの生成に失敗しました。"} />
+          ) : hasStoredAiSummary ? (
+          <>
           <article className="mt-4 rounded-[24px] bg-white p-6">
             <div className="grid gap-4 xl:grid-cols-[1.9fr_0.9fr_0.82fr_0.82fr]">
               <SummaryInsightCard
@@ -1022,6 +1106,10 @@ export function MeetingDetailScreen({
           <div className="mt-5 rounded-[18px] border border-[#eceef4] bg-[#fffaf0] px-5 py-4 text-[14px] leading-7 text-[#6f6250]">
             この分析は文字起こしデータをもとにAIが自動で生成しています。誤りが含まれる可能性があるため、重要な判断は必ずご自身でご確認ください。
           </div>
+          </>
+          ) : (
+            <AiSummaryEmptyState />
+          )}
         </section>
         ) : null}
 
@@ -1189,7 +1277,7 @@ export function MeetingDetailScreen({
                                 キャンセル
                               </button>
                               <button type="button" onClick={() => void handleSaveConversationEdits()} disabled={isSavingConversationLogs} className="rounded-[12px] border border-[#171717] bg-[#171717] px-4 py-2.5 text-[13px] font-black text-white disabled:opacity-60">
-                                {isSavingConversationLogs ? "保存中..." : "保存"}
+                                {isSavingConversationLogs ? "保存中..." : "保存してAI分析へ"}
                               </button>
                             </>
                           ) : (
@@ -1506,6 +1594,93 @@ function SpeakerManagementPanel({
   );
 }
 
+function AiSummaryLoadingState() {
+  return (
+    <div className="mt-4 flex min-h-[560px] items-center justify-center rounded-[24px] border border-[#f4e2a4] bg-[#fffaf0] px-6 py-16 text-center">
+      <div className="max-w-[520px]">
+        <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-[#ffd84d] shadow-[0_14px_30px_rgba(245,189,7,0.22)]">
+          <SparkGlyph />
+        </div>
+        <h3 className="mt-6 text-[20px] font-black text-[#171717]">AIサマリーを分析中です</h3>
+        <p className="mt-3 text-[14px] font-medium leading-7 text-[#7a6a35]">
+          文字起こし本文と話者別ログをもとに、要点・温度感・改善ポイントを整理しています。
+        </p>
+        <div className="mx-auto mt-7 h-2 max-w-[360px] overflow-hidden rounded-full bg-white">
+          <div className="ai-summary-regenerate-active h-full w-2/3 rounded-full bg-[#ffd84d]" />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function AiSummaryFailedState({ message }: { message: string }) {
+  return (
+    <div className="mt-4 rounded-[24px] border border-[#ffd8cc] bg-[#fff4ef] px-6 py-12 text-center">
+      <h3 className="text-[18px] font-black text-[#171717]">AIサマリーを生成できませんでした</h3>
+      <p className="mx-auto mt-3 max-w-[620px] text-[14px] font-medium leading-7 text-[#b54a35]">{message}</p>
+    </div>
+  );
+}
+
+function AiSummaryEmptyState() {
+  return (
+    <div className="mt-4 rounded-[24px] border border-dashed border-[#d9dee7] bg-[#fcfcfd] px-6 py-12 text-center">
+      <h3 className="text-[18px] font-black text-[#171717]">分析できる文字起こし本文がありません</h3>
+      <p className="mx-auto mt-3 max-w-[620px] text-[14px] font-medium leading-7 text-[#7a808c]">
+        文字起こし本文が生成されると、AIサマリーを分析できます。
+      </p>
+    </div>
+  );
+}
+
+function MeetingFlowProgress({ steps }: { steps: MeetingFlowStep[] }) {
+  return (
+    <section className="mb-5 rounded-[22px] border border-[#eceef4] bg-white px-4 py-4 shadow-[0_8px_22px_rgba(17,24,39,0.04)] md:px-5">
+      <div className="grid gap-3 md:grid-cols-4">
+        {steps.map((step, index) => {
+          const isCompleted = step.status === "completed";
+          const isCurrent = step.status === "current";
+          const isFailed = step.status === "failed";
+          return (
+            <div
+              key={step.label}
+              className={`relative rounded-[16px] border px-4 py-3 ${
+                isFailed
+                  ? "border-[#ffd8cc] bg-[#fff4ef]"
+                  : isCurrent
+                    ? "border-[#f0c655] bg-[#fffaf0]"
+                    : isCompleted
+                      ? "border-[#dbeee2] bg-[#f4fbf6]"
+                      : "border-[#eef1f5] bg-[#fcfcfd]"
+              }`}
+            >
+              <div className="flex items-center gap-3">
+                <span
+                  className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-[12px] font-black ${
+                    isFailed
+                      ? "bg-[#d94832] text-white"
+                      : isCompleted
+                        ? "bg-[#24a15a] text-white"
+                        : isCurrent
+                          ? "bg-[#ffd84d] text-[#5f4700]"
+                          : "bg-[#e9edf3] text-[#8a909b]"
+                  }`}
+                >
+                  {isCompleted ? "✓" : isFailed ? "!" : index + 1}
+                </span>
+                <div className="min-w-0">
+                  <div className="text-[13px] font-black text-[#171717]">{step.label}</div>
+                  <div className="mt-1 text-[11px] font-bold leading-5 text-[#7a808c]">{step.description}</div>
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
 function SplitCandidateButtons({
   log,
   manualSplitIndex,
@@ -1742,6 +1917,75 @@ function normalizeTranscriptSpeaker(
 
 function buildSpeakerLabel(speaker: ConversationSpeaker) {
   return defaultSpeakerName(speaker);
+}
+
+function buildMeetingFlowSteps({
+  hasTranscript,
+  hasSummary,
+  isSummaryView,
+  isTranscriptionRunning,
+  isAiSummaryRunning,
+  aiSummaryFailed,
+}: {
+  hasTranscript: boolean;
+  hasSummary: boolean;
+  isSummaryView: boolean;
+  isTranscriptionRunning: boolean;
+  isAiSummaryRunning: boolean;
+  aiSummaryFailed: boolean;
+}): MeetingFlowStep[] {
+  const transcriptionStatus: FlowStepStatus = hasTranscript
+    ? "completed"
+    : isTranscriptionRunning
+      ? "current"
+      : "pending";
+  const speakerStatus: FlowStepStatus = hasSummary || isAiSummaryRunning || isSummaryView
+    ? "completed"
+    : hasTranscript
+      ? "current"
+      : "pending";
+  const analysisStatus: FlowStepStatus = hasSummary
+    ? "completed"
+    : aiSummaryFailed
+      ? "failed"
+      : isAiSummaryRunning
+        ? "current"
+        : "pending";
+
+  return [
+    {
+      label: "アップロード",
+      description: "音声または本文の保存完了",
+      status: "completed",
+    },
+    {
+      label: "文字起こし",
+      description: hasTranscript ? "本文を確認できます" : isTranscriptionRunning ? "音声を解析中です" : "処理開始を待っています",
+      status: transcriptionStatus,
+    },
+    {
+      label: "話者確認",
+      description: speakerStatus === "current" ? "営業/顧客を確認して保存" : speakerStatus === "completed" ? "確認済み" : "文字起こし後に確認",
+      status: speakerStatus,
+    },
+    {
+      label: "AI分析",
+      description: hasSummary ? "分析結果を表示中" : aiSummaryFailed ? "再分析できます" : isAiSummaryRunning ? "サマリーを生成中です" : "話者保存後に開始",
+      status: analysisStatus,
+    },
+  ];
+}
+
+function isFreshAiSummaryRunning(meeting: MeetingRecord | null | undefined, nowMs: number) {
+  if (meeting?.aiSummaryStatus !== "running") {
+    return false;
+  }
+
+  if (!meeting.aiSummaryTestedAt) {
+    return false;
+  }
+
+  return nowMs - meeting.aiSummaryTestedAt.getTime() < aiSummaryRunningFreshMs;
 }
 
 async function fetchWithTimeout(
