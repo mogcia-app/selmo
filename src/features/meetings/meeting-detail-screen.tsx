@@ -23,6 +23,7 @@ import { canUseSalesDomain } from "@/lib/sales-domains";
 const transcriptionRequestTimeoutMs = 10 * 60 * 1000;
 const transientBannerDurationMs = 15 * 1000;
 const aiSummaryRunningFreshMs = 10 * 60 * 1000;
+const staleTranscriptionRunningMs = 90 * 60 * 1000;
 const monthlyLimitMessage = MONTHLY_AI_LIMIT_MESSAGE;
 type ConversationSpeaker = "sales" | "customer" | "participant" | "unknown";
 type SpeakerPreset = {
@@ -89,6 +90,7 @@ export function MeetingDetailScreen({
   const [selectedTranscriptBlockIndex, setSelectedTranscriptBlockIndex] = useState<number | null>(null);
   const [pendingTranscriptScrollIndex, setPendingTranscriptScrollIndex] = useState<number | null>(null);
   const [transcriptionVisualProgress, setTranscriptionVisualProgress] = useState(12);
+  const [transcriptionElapsedSec, setTranscriptionElapsedSec] = useState(0);
   const [transcriptScrollbar, setTranscriptScrollbar] = useState<ScrollbarMetrics>({
     thumbHeight: 0,
     thumbTop: 0,
@@ -157,10 +159,15 @@ export function MeetingDetailScreen({
   }, [meeting?.userId, profile?.name, profile?.uid]);
 
   useEffect(() => {
+    if (meeting?.transcriptionProbeStatus === "running" || meeting?.conversationLogStatus === "running") {
+      setIsTranscribing(true);
+      return;
+    }
+
     if (meeting?.transcriptionProbeStatus === "completed" || meeting?.transcriptionProbeStatus === "failed") {
       setIsTranscribing(false);
     }
-  }, [meeting?.transcriptionProbeStatus]);
+  }, [meeting?.conversationLogStatus, meeting?.transcriptionProbeStatus]);
 
   useEffect(() => {
     if (meeting?.aiSummaryStatus !== "running") {
@@ -194,6 +201,7 @@ export function MeetingDetailScreen({
   useEffect(() => {
     if (!isTranscribing) {
       setTranscriptionVisualProgress(12);
+      setTranscriptionElapsedSec(0);
       return;
     }
 
@@ -203,6 +211,7 @@ export function MeetingDetailScreen({
 
     const intervalId = window.setInterval(() => {
       const elapsedSec = (performance.now() - startedAt) / 1000;
+      setTranscriptionElapsedSec(elapsedSec);
       const nextProgress = calculateTranscriptionGaugeProgress(
         elapsedSec,
         predictedSec,
@@ -503,6 +512,18 @@ export function MeetingDetailScreen({
   );
   const transcriptMetrics = useMemo(() => buildTranscriptMetrics(editableLogs), [editableLogs]);
   const isManualTranscript = meeting?.transcriptionProbeModel === "manual-paste";
+  const isTranscriptionRunningStatus =
+    meeting?.transcriptionProbeStatus === "running" || meeting?.conversationLogStatus === "running";
+  const transcriptionRunningStartedAt = meeting?.transcriptionProbeTestedAt ?? null;
+  const isTranscriptionStale =
+    !isManualTranscript &&
+    editableLogs.length === 0 &&
+    isTranscriptionRunningStatus &&
+    (
+      transcriptionElapsedSec * 1000 > staleTranscriptionRunningMs ||
+      Boolean(transcriptionRunningStartedAt && Date.now() - transcriptionRunningStartedAt.getTime() > staleTranscriptionRunningMs)
+    );
+  const shouldShowTranscriptionLoading = (isTranscribing || isTranscriptionRunningStatus) && !isTranscriptionStale;
   const hasAttemptedTranscription =
     meeting?.transcriptionProbeStatus === "failed" ||
     meeting?.transcriptionProbeStatus === "completed" ||
@@ -510,8 +531,12 @@ export function MeetingDetailScreen({
   const shouldShowTranscriptionRetry =
     !isManualTranscript &&
     Boolean(meeting?.audioDownloadUrl) &&
-    (meeting?.transcriptionProbeStatus === "failed" || editableLogs.length === 0);
+    (meeting?.transcriptionProbeStatus === "failed" || editableLogs.length === 0 || isTranscriptionStale);
   const transcriptionActionLabel = hasAttemptedTranscription ? "文字起こしを再実行" : "文字起こしを開始";
+  const transcriptionProgressMessage = buildTranscriptionProgressMessage({
+    elapsedSec: transcriptionElapsedSec,
+    progress: transcriptionVisualProgress,
+  });
   const analysisPanels = useMemo(
     () => buildAnalysisPanels(aiSummary, editableLogs),
     [aiSummary, editableLogs],
@@ -605,10 +630,7 @@ export function MeetingDetailScreen({
         hasTranscript: editableLogs.length > 0,
         hasSummary: hasStoredAiSummary,
         isSummaryView,
-        isTranscriptionRunning:
-          isTranscribing ||
-          meeting?.transcriptionProbeStatus === "running" ||
-          meeting?.conversationLogStatus === "running",
+        isTranscriptionRunning: shouldShowTranscriptionLoading,
         isAiSummaryRunning: shouldShowAiSummaryLoading,
         aiSummaryFailed: shouldShowAiSummaryFailed,
       }),
@@ -616,9 +638,7 @@ export function MeetingDetailScreen({
       editableLogs.length,
       hasStoredAiSummary,
       isSummaryView,
-      isTranscribing,
-      meeting?.conversationLogStatus,
-      meeting?.transcriptionProbeStatus,
+      shouldShowTranscriptionLoading,
       shouldShowAiSummaryFailed,
       shouldShowAiSummaryLoading,
     ],
@@ -1260,7 +1280,7 @@ export function MeetingDetailScreen({
               </div>
 
               <div className="mt-4 flex h-[860px] flex-col rounded-[22px] bg-white px-6 py-5">
-                {isTranscribing ? (
+                {shouldShowTranscriptionLoading ? (
                   <div className="flex h-full flex-col items-center justify-center rounded-[28px] border border-[#eceef4] bg-[#fffdf9] px-8 py-10 text-center shadow-[0_10px_30px_rgba(17,24,39,0.04)]">
                     <Image
                       src="/mojiokoshi.png"
@@ -1270,10 +1290,10 @@ export function MeetingDetailScreen({
                       className="h-auto w-full max-w-[420px] object-contain"
                     />
                     <h3 className="mt-6 text-[15px] font-bold tracking-[-0.03em] text-[#171717]">
-                      文字起こしを実装中です...
+                      文字起こしを実行中です...
                     </h3>
-                    <p className="mt-3 text-[8px] font-medium text-[#8a909b]">
-                      音声を解析し、テキストに変換しています
+                    <p className="mt-3 text-[12px] font-bold text-[#8a909b]">
+                      {transcriptionProgressMessage.title}
                     </p>
                     <div className="mt-8 flex w-full max-w-[760px] items-center gap-5">
                       <div className="h-3 flex-1 overflow-hidden rounded-full bg-[#eef1f5]">
@@ -1286,7 +1306,9 @@ export function MeetingDetailScreen({
                         {transcriptionVisualProgress}%
                       </div>
                     </div>
-                    <p className="mt-5 text-[8px] font-medium text-[#8a909b]">しばらくお待ちください</p>
+                    <p className="mt-5 max-w-[560px] text-[12px] font-medium leading-6 text-[#8a909b]">
+                      {transcriptionProgressMessage.description}
+                    </p>
                   </div>
                 ) : editableLogs.length > 0 ? (
                   <>
@@ -1560,7 +1582,9 @@ export function MeetingDetailScreen({
                       まだ表示できる文字起こし本文がありません
                     </div>
                     <p className="mt-3 max-w-[520px] text-[14px] leading-7 text-[#7a808c]">
-                      音声ファイルの保存は完了しています。文字起こしを開始すると、本文とAI分析の準備が進みます。
+                      {isTranscriptionStale
+                        ? "文字起こし処理が途中で止まっている可能性があります。再実行すると、最初から文字起こしを開始します。"
+                        : "音声ファイルの保存は完了しています。文字起こしを開始すると、本文とAI分析の準備が進みます。"}
                     </p>
                     {shouldShowTranscriptionRetry ? (
                       <button
@@ -1568,7 +1592,7 @@ export function MeetingDetailScreen({
                         onClick={() => {
                           void handleRunTranscription();
                         }}
-                        disabled={isTranscribing}
+                        disabled={shouldShowTranscriptionLoading}
                         className="mt-6 inline-flex h-11 items-center gap-2 rounded-[14px] bg-[#ffc400] px-5 text-[14px] font-black text-[#171717] shadow-[0_10px_20px_rgba(255,196,0,0.22)] transition hover:bg-[#f5bd07] disabled:cursor-not-allowed disabled:opacity-60"
                       >
                         <SparkGlyph />
@@ -3774,7 +3798,46 @@ function calculateTranscriptionGaugeProgress(
     return Math.round(70 + ratio * 25);
   }
 
-  return 95;
+  const overtimeSec = elapsedSec - slowPhaseSec;
+  const finalRatio = Math.min(1, overtimeSec / Math.max(90, predictedSec * 0.5));
+  return Math.min(99, Math.round(95 + finalRatio * 4));
+}
+
+function buildTranscriptionProgressMessage({
+  elapsedSec,
+  progress,
+}: {
+  elapsedSec: number;
+  progress: number;
+}) {
+  const elapsedMinutes = Math.floor(elapsedSec / 60);
+  const elapsedLabel = elapsedMinutes >= 1 ? `開始から約${elapsedMinutes}分経過しています。` : "";
+
+  if (progress >= 99) {
+    return {
+      title: "最終処理を継続しています",
+      description: `${elapsedLabel}画面は固まっていません。完了すると自動で会話ブロックが表示されます。`,
+    };
+  }
+
+  if (progress >= 95) {
+    return {
+      title: "あと少しです。会話ブロックを整えています",
+      description: `${elapsedLabel}最後の整形・保存処理に入っています。`,
+    };
+  }
+
+  if (progress >= 70) {
+    return {
+      title: "文字起こし結果を保存しています",
+      description: `${elapsedLabel}音声から抽出した本文を、確認しやすい会話ブロックに整理しています。`,
+    };
+  }
+
+  return {
+    title: "音声を解析し、テキストに変換しています",
+    description: `${elapsedLabel}完了すると自動で会話ブロックが表示されます。`,
+  };
 }
 
 function buildConsiderationSummary(

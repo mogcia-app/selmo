@@ -131,6 +131,7 @@ export async function POST(
           transcriptionProbeStatus: "running",
           transcriptionProbeModel: selectedModel,
           transcriptionProbeError: null,
+          transcriptionProbeTestedAt: FieldValue.serverTimestamp(),
           conversationLogStatus: "running",
           conversationLogModel: selectedModel,
           conversationLogError: null,

@@ -305,6 +305,7 @@ async function transcribeMeeting(meetingId) {
       transcriptionProbeStatus: "running",
       transcriptionProbeModel: transcriptionModel,
       transcriptionProbeError: null,
+      transcriptionProbeTestedAt: FieldValue.serverTimestamp(),
       conversationLogStatus: "running",
       conversationLogModel: transcriptionModel,
       conversationLogError: null,
