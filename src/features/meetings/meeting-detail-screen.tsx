@@ -4,7 +4,7 @@ import { FirebaseError } from "firebase/app";
 import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { useAuth } from "@/features/auth/auth-provider";
 import { MONTHLY_AI_LIMIT_MESSAGE } from "@/lib/ai-usage-limit";
@@ -84,7 +84,10 @@ export function MeetingDetailScreen({
   const [summaryStatusNowMs, setSummaryStatusNowMs] = useState(() => Date.now());
   const [logSearch, setLogSearch] = useState("");
   const [transcriptViewMode, setTranscriptViewMode] = useState("all");
+  const [transcriptPage, setTranscriptPage] = useState(1);
+  const [transcriptPageSize, setTranscriptPageSize] = useState(20);
   const [selectedTranscriptBlockIndex, setSelectedTranscriptBlockIndex] = useState<number | null>(null);
+  const [pendingTranscriptScrollIndex, setPendingTranscriptScrollIndex] = useState<number | null>(null);
   const [transcriptionVisualProgress, setTranscriptionVisualProgress] = useState(12);
   const [transcriptScrollbar, setTranscriptScrollbar] = useState<ScrollbarMetrics>({
     thumbHeight: 0,
@@ -95,6 +98,7 @@ export function MeetingDetailScreen({
   const [selectedLogIds, setSelectedLogIds] = useState<string[]>([]);
   const [isTranscriptEditMode, setIsTranscriptEditMode] = useState(false);
   const [manualSplitIndexes, setManualSplitIndexes] = useState<Record<string, number>>({});
+  const [speakerAssignmentMessage, setSpeakerAssignmentMessage] = useState<string | null>(null);
   const [speakerNames, setSpeakerNames] = useState<Record<ConversationSpeaker, string>>({
     sales: "営業",
     customer: "顧客",
@@ -635,6 +639,56 @@ export function MeetingDetailScreen({
       `${log.label} ${log.text}`.toLowerCase().includes(normalizedLogSearch),
     );
   }, [editableLogs, normalizedLogSearch, transcriptViewMode]);
+  const transcriptTotalPages = Math.max(1, Math.ceil(visibleEditableLogs.length / transcriptPageSize));
+  const boundedTranscriptPage = Math.min(transcriptPage, transcriptTotalPages);
+  const paginatedEditableLogs = useMemo(() => {
+    const startIndex = (boundedTranscriptPage - 1) * transcriptPageSize;
+    return visibleEditableLogs.slice(startIndex, startIndex + transcriptPageSize);
+  }, [boundedTranscriptPage, transcriptPageSize, visibleEditableLogs]);
+  const transcriptVisibleStart = visibleEditableLogs.length === 0 ? 0 : (boundedTranscriptPage - 1) * transcriptPageSize + 1;
+  const transcriptVisibleEnd = Math.min(visibleEditableLogs.length, boundedTranscriptPage * transcriptPageSize);
+  const transcriptPageButtons = useMemo(() => {
+    const pages = new Set<number>([1, transcriptTotalPages]);
+    for (let page = boundedTranscriptPage - 2; page <= boundedTranscriptPage + 2; page += 1) {
+      if (page >= 1 && page <= transcriptTotalPages) {
+        pages.add(page);
+      }
+    }
+    return Array.from(pages).sort((a, b) => a - b);
+  }, [boundedTranscriptPage, transcriptTotalPages]);
+
+  useEffect(() => {
+    if (pendingTranscriptScrollIndex !== null) {
+      return;
+    }
+
+    setTranscriptPage(1);
+    transcriptScrollRef.current?.scrollTo({ top: 0 });
+  }, [normalizedLogSearch, pendingTranscriptScrollIndex, transcriptPageSize, transcriptViewMode]);
+
+  useEffect(() => {
+    if (transcriptPage <= transcriptTotalPages) {
+      return;
+    }
+
+    setTranscriptPage(transcriptTotalPages);
+  }, [transcriptPage, transcriptTotalPages]);
+
+  useEffect(() => {
+    if (pendingTranscriptScrollIndex === null) {
+      return;
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      const target = transcriptBlockRefs.current[pendingTranscriptScrollIndex];
+      target?.scrollIntoView({ block: "center", behavior: "smooth" });
+      setPendingTranscriptScrollIndex(null);
+    }, 0);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
+  }, [paginatedEditableLogs, pendingTranscriptScrollIndex]);
 
   function handleJumpToTranscriptLog(log: DisplayLog) {
     const targetIndex = editableLogs.findIndex((item) => item.id === log.id);
@@ -644,8 +698,10 @@ export function MeetingDetailScreen({
     }
 
     setSelectedTranscriptBlockIndex(targetIndex);
-    const target = transcriptBlockRefs.current[targetIndex];
-    target?.scrollIntoView({ block: "center", behavior: "smooth" });
+    setLogSearch("");
+    setTranscriptViewMode("all");
+    setTranscriptPage(Math.floor(targetIndex / transcriptPageSize) + 1);
+    setPendingTranscriptScrollIndex(targetIndex);
   }
 
   function handleRegenerateAiSummary() {
@@ -660,6 +716,7 @@ export function MeetingDetailScreen({
   }
 
   function handleUpdateLogSpeaker(logId: string, speaker: ConversationSpeaker) {
+    setSpeakerAssignmentMessage(null);
     setEditableLogs((current) =>
       current.map((log) => (log.id === logId ? { ...log, speaker, label: speakerNames[speaker], kind: speaker === "unknown" ? "unknown" : "speech" } : log)),
     );
@@ -670,6 +727,7 @@ export function MeetingDetailScreen({
   }
 
   function handleApplySpeakerToSelected(speaker: ConversationSpeaker) {
+    setSpeakerAssignmentMessage(null);
     setEditableLogs((current) =>
       current.map((log) =>
         selectedLogIds.includes(log.id)
@@ -686,6 +744,10 @@ export function MeetingDetailScreen({
       participant: speakerNames.participant || defaultSpeakerName("participant"),
       unknown: speakerNames.unknown || defaultSpeakerName("unknown"),
     };
+    const assignmentLabel =
+      preset.speaker1 === "sales"
+        ? "話者1を営業、話者2を顧客として反映しました。"
+        : "話者1を顧客、話者2を営業として反映しました。";
 
     setSpeakerNames(nextNames);
     setEditableLogs((current) =>
@@ -707,7 +769,8 @@ export function MeetingDetailScreen({
         };
       }),
     );
-    setErrorMessage("話者1/2を営業/顧客に一括変換しました。保存すると反映されます。");
+    setSpeakerAssignmentMessage(`${assignmentLabel}保存してAI分析へ進めます。`);
+    setErrorMessage(null);
   }
 
   function handleSplitLogAtIndex(logId: string, splitIndex: number) {
@@ -862,40 +925,6 @@ export function MeetingDetailScreen({
   }, [
     visibleEditableLogs,
   ]);
-
-  async function handleCopyTranscript() {
-    if (!exportTranscriptText) {
-      setErrorMessage("コピーできる文字起こし本文がありません。");
-      return;
-    }
-
-    try {
-      await navigator.clipboard.writeText(exportTranscriptText);
-      setErrorMessage(null);
-    } catch {
-      setErrorMessage("全文のコピーに失敗しました。");
-    }
-  }
-
-  function handleDownloadTranscript() {
-    if (!exportTranscriptText) {
-      setErrorMessage("ダウンロードできる文字起こし本文がありません。");
-      return;
-    }
-
-    const blob = new Blob([exportTranscriptText], { type: "text/plain;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const anchor = document.createElement("a");
-    const safeBaseName = (meeting?.customerName || "transcript").replace(/[\\/:*?"<>|]/g, "_");
-
-    anchor.href = url;
-    anchor.download = `${safeBaseName}.txt`;
-    document.body.appendChild(anchor);
-    anchor.click();
-    document.body.removeChild(anchor);
-    URL.revokeObjectURL(url);
-    setErrorMessage(null);
-  }
 
   if (isLoading) {
     return (
@@ -1127,17 +1156,6 @@ export function MeetingDetailScreen({
                 <h2 className="text-[24px] font-bold tracking-[-0.03em] text-[#171717]">文字起こし</h2>
               </div>
               <div className="flex flex-wrap gap-3">
-              {shouldShowTranscriptionRetry ? (
-                <HeaderActionButton
-                  icon={<SparkGlyph />}
-                  label={isTranscribing ? "文字起こし中..." : transcriptionActionLabel}
-                  onClick={() => {
-                    void handleRunTranscription();
-                  }}
-                  disabled={isTranscribing}
-                  variant="warm"
-                />
-              ) : null}
               <Link
                 href={`/meetings/${meetingId}/summary`}
                 className="inline-flex h-[38px] items-center gap-1.5 rounded-[12px] border border-[#ead8a8] bg-white px-3 text-[12px] font-semibold text-[#6c5730] shadow-[0_4px_12px_rgba(15,23,42,0.05)] transition hover:border-[#ddc173] hover:bg-[#fffaf0]"
@@ -1147,20 +1165,6 @@ export function MeetingDetailScreen({
                 </span>
                 AI分析はコチラ
               </Link>
-              <HeaderActionButton
-                icon={<DownloadGlyph />}
-                label="ダウンロード（.txt）"
-                onClick={handleDownloadTranscript}
-                disabled={!exportTranscriptText}
-                variant="neutral"
-              />
-              <HeaderActionButton
-                icon={<CopyGlyph />}
-                label="全文をコピー"
-                onClick={handleCopyTranscript}
-                disabled={!exportTranscriptText}
-                variant="sage"
-              />
               </div>
           </div>
 
@@ -1192,8 +1196,36 @@ export function MeetingDetailScreen({
             </div>
           </div>
 
-          <div className="mt-6 grid gap-4 xl:grid-cols-[1.72fr_0.98fr] xl:items-stretch">
+          <div className="mt-6">
             <div className="min-w-0">
+              {editableLogs.length > 0 ? (
+                <SpeakerQuickConfirmPanel
+                  logs={editableLogs}
+                  speakerNames={speakerNames}
+                  assignmentMessage={speakerAssignmentMessage}
+                  isSaving={isSavingConversationLogs}
+                  isEditMode={isTranscriptEditMode}
+                  onApplySpeakerPreset={handleApplySpeakerPreset}
+                  onSave={() => void handleSaveConversationEdits()}
+                  onEdit={() => setIsTranscriptEditMode(true)}
+                />
+              ) : null}
+
+              {editableLogs.length > 0 ? (
+                <div className="mb-4">
+                  <SpeakerManagementPanel
+                    logs={editableLogs}
+                    speakerNames={speakerNames}
+                    onChangeSpeakerName={(speaker, name) => {
+                      const nextName = name.trim() || defaultSpeakerName(speaker);
+                      setSpeakerAssignmentMessage(null);
+                      setSpeakerNames((current) => ({ ...current, [speaker]: nextName }));
+                      setEditableLogs((current) => current.map((log) => (log.speaker === speaker ? { ...log, label: nextName } : log)));
+                    }}
+                  />
+                </div>
+              ) : null}
+
               <div className="flex flex-wrap items-center gap-3">
                 <label className="relative min-w-[250px] flex-1">
                   <span className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-[#7c8593]">
@@ -1227,7 +1259,7 @@ export function MeetingDetailScreen({
 
               </div>
 
-              <div className="mt-4 flex h-[760px] flex-col rounded-[22px] bg-white px-6 py-5">
+              <div className="mt-4 flex h-[860px] flex-col rounded-[22px] bg-white px-6 py-5">
                 {isTranscribing ? (
                   <div className="flex h-full flex-col items-center justify-center rounded-[28px] border border-[#eceef4] bg-[#fffdf9] px-8 py-10 text-center shadow-[0_10px_30px_rgba(17,24,39,0.04)]">
                     <Image
@@ -1262,12 +1294,12 @@ export function MeetingDetailScreen({
                       <div className="flex flex-wrap items-center justify-between gap-3">
                         <div>
                           <div className="text-[13px] font-black text-[#171717]">
-                            {isTranscriptEditMode ? "会話ブロック修正" : "文字起こし"}
+                            {isTranscriptEditMode ? "詳細修正" : "会話ブロック"}
                           </div>
                           <div className="mt-1 text-[12px] font-medium text-[#8a909b]">
                           {isTranscriptEditMode
-                              ? "文字起こし本文は編集できません。話者変更・分割・結合だけ修正できます。"
-                              : "AIが分割した会話ブロックと話者を確認できます。"}
+                              ? "個別の話者変更、分割、結合を調整できます。"
+                              : "発話ごとに営業/顧客を確認できます。AIによる文字起こしのため、重要な内容は必ずご確認ください。"}
                           </div>
                         </div>
                         <div className="flex flex-wrap items-center gap-2">
@@ -1282,7 +1314,7 @@ export function MeetingDetailScreen({
                             </>
                           ) : (
                             <button type="button" onClick={() => setIsTranscriptEditMode(true)} className="rounded-[12px] border border-[#f0c655] bg-[#ffd84d] px-4 py-2.5 text-[13px] font-black text-[#171717]">
-                              修正する
+                              詳細修正
                             </button>
                           )}
                         </div>
@@ -1310,10 +1342,10 @@ export function MeetingDetailScreen({
                         </div>
                       ) : isTranscriptEditMode ? (
                         <div className="mt-3 flex flex-wrap items-center gap-2 text-[12px] font-bold text-[#8a909b]">
-                          <button type="button" onClick={() => setSelectedLogIds(visibleEditableLogs.map(({ log }) => log.id))} className="rounded-[10px] border border-[#e4e8ef] bg-white px-3 py-1.5 text-[12px] font-bold text-[#596273]">
+                          <button type="button" onClick={() => setSelectedLogIds(paginatedEditableLogs.map(({ log }) => log.id))} className="rounded-[10px] border border-[#e4e8ef] bg-white px-3 py-1.5 text-[12px] font-bold text-[#596273]">
                             表示中を選択
                           </button>
-                          <span>複数選択すると、話者変更と結合ができます。</span>
+                          <span>今のページ内で複数選択すると、話者変更と結合ができます。</span>
                         </div>
                       ) : (
                         <div className="mt-3 flex flex-wrap items-center gap-2">
@@ -1334,14 +1366,14 @@ export function MeetingDetailScreen({
                       ref={transcriptScrollRef}
                       className="always-visible-scrollbar min-h-0 h-full space-y-3 overflow-y-scroll pr-6"
                     >
-                      {visibleEditableLogs.length > 0 ? (
-                        visibleEditableLogs.map(({ log, index }) => (
+                      {paginatedEditableLogs.length > 0 ? (
+                        paginatedEditableLogs.map(({ log, index }) => (
                         <article
                           key={log.id}
                           ref={(node) => {
                             transcriptBlockRefs.current[index] = node;
                           }}
-                          className={`rounded-[18px] border p-3 shadow-[0_3px_10px_rgba(17,24,39,0.03)] transition ${
+                          className={`rounded-[20px] border p-4 shadow-[0_3px_10px_rgba(17,24,39,0.03)] transition ${
                             isTranscriptEditMode ? "grid gap-3 md:grid-cols-[132px_1fr]" : ""
                           } ${
                             selectedLogIds.includes(log.id)
@@ -1417,14 +1449,21 @@ export function MeetingDetailScreen({
                                 />
                               </>
                             ) : (
-                              <div className="rounded-[14px] bg-white px-4 py-3">
-                                <div className="mb-2 flex flex-wrap items-center gap-2">
-                                  <span className="text-[11px] font-black tracking-[0.12em] text-[#b4bac5]">{String(index + 1).padStart(3, "0")}</span>
-                                  <span className="rounded-full bg-[#fff4d6] px-2.5 py-1 text-[12px] font-black text-[#7a5a00]">
-                                    {log.label || speakerNames[log.speaker]}
-                                  </span>
+                              <div className="rounded-[16px] bg-white px-5 py-4">
+                                <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+                                  <div className="flex flex-wrap items-center gap-2">
+                                    <span className="text-[11px] font-black tracking-[0.12em] text-[#b4bac5]">{String(index + 1).padStart(3, "0")}</span>
+                                    <SpeakerPill speaker={log.speaker} label={log.label || speakerNames[log.speaker]} />
+                                  </div>
+                                  <button
+                                    type="button"
+                                    onClick={() => setIsTranscriptEditMode(true)}
+                                    className="rounded-[10px] border border-[#eef1f5] bg-[#fcfcfd] px-3 py-1.5 text-[12px] font-bold text-[#596273] transition hover:border-[#e0bd4b] hover:bg-[#fffaf0]"
+                                  >
+                                    修正
+                                  </button>
                                 </div>
-                                <p className="text-[15px] font-medium leading-8 text-[#171717]">
+                                <p className="text-[16px] font-medium leading-9 text-[#171717]">
                                   {renderHighlightedText(log.text, logSearch)}
                                 </p>
                               </div>
@@ -1450,6 +1489,70 @@ export function MeetingDetailScreen({
                       ) : null}
                     </div>
                     </div>
+                    {visibleEditableLogs.length > 0 ? (
+                      <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-[#eceef4] pt-4">
+                        <div className="text-[12px] font-bold text-[#8a909b]">
+                          表示中：{transcriptVisibleStart}〜{transcriptVisibleEnd}ブロック（全{visibleEditableLogs.length}ブロック）
+                        </div>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setTranscriptPage((current) => Math.max(1, current - 1));
+                              transcriptScrollRef.current?.scrollTo({ top: 0, behavior: "smooth" });
+                            }}
+                            disabled={boundedTranscriptPage <= 1}
+                            className="h-9 rounded-[10px] border border-[#e4e8ef] bg-white px-3 text-[12px] font-black text-[#596273] transition hover:bg-[#fffaf0] disabled:cursor-not-allowed disabled:opacity-40"
+                          >
+                            前へ
+                          </button>
+                          {transcriptPageButtons.map((page, pageIndex) => {
+                            const previousPage = transcriptPageButtons[pageIndex - 1];
+                            const shouldShowGap = typeof previousPage === "number" && page - previousPage > 1;
+                            return (
+                              <Fragment key={`transcript-page-${page}`}>
+                                {shouldShowGap ? <span className="px-1 text-[12px] font-black text-[#b4bac5]">...</span> : null}
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setTranscriptPage(page);
+                                    transcriptScrollRef.current?.scrollTo({ top: 0, behavior: "smooth" });
+                                  }}
+                                  className={`h-9 min-w-9 rounded-[10px] border px-3 text-[12px] font-black transition ${
+                                    page === boundedTranscriptPage
+                                      ? "border-[#f0c655] bg-[#ffd84d] text-[#171717]"
+                                      : "border-[#e4e8ef] bg-white text-[#596273] hover:bg-[#fffaf0]"
+                                  }`}
+                                >
+                                  {page}
+                                </button>
+                              </Fragment>
+                            );
+                          })}
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setTranscriptPage((current) => Math.min(transcriptTotalPages, current + 1));
+                              transcriptScrollRef.current?.scrollTo({ top: 0, behavior: "smooth" });
+                            }}
+                            disabled={boundedTranscriptPage >= transcriptTotalPages}
+                            className="h-9 rounded-[10px] border border-[#e4e8ef] bg-white px-3 text-[12px] font-black text-[#596273] transition hover:bg-[#fffaf0] disabled:cursor-not-allowed disabled:opacity-40"
+                          >
+                            次へ
+                          </button>
+                          <select
+                            value={transcriptPageSize}
+                            onChange={(event) => setTranscriptPageSize(Number(event.target.value))}
+                            className="h-9 rounded-[10px] border border-[#e4e8ef] bg-white px-3 text-[12px] font-black text-[#596273] outline-none focus:border-[#e0bd4b]"
+                            aria-label="会話ブロックの表示件数"
+                          >
+                            <option value={20}>20件ずつ表示</option>
+                            <option value={50}>50件ずつ表示</option>
+                            <option value={100}>100件ずつ表示</option>
+                          </select>
+                        </div>
+                      </div>
+                    ) : null}
                   </>
                 ) : (
                   <div className="flex h-full flex-col items-center justify-center rounded-[22px] border border-dashed border-[#d9dee7] bg-[#fcfcfd] px-6 py-16 text-center">
@@ -1476,23 +1579,6 @@ export function MeetingDetailScreen({
                 )}
               </div>
             </div>
-
-            <aside className="flex h-[760px] flex-col gap-4">
-              <SpeakerManagementPanel
-                logs={editableLogs}
-                speakerNames={speakerNames}
-                onApplySpeakerPreset={handleApplySpeakerPreset}
-                onChangeSpeakerName={(speaker, name) => {
-                  const nextName = name.trim() || defaultSpeakerName(speaker);
-                  setSpeakerNames((current) => ({ ...current, [speaker]: nextName }));
-                  setEditableLogs((current) => current.map((log) => (log.speaker === speaker ? { ...log, label: nextName } : log)));
-                }}
-              />
-
-              <div className="rounded-[18px] border border-[#f4e2a4] bg-[#fff7db] px-4 py-4 text-[14px] leading-7 text-[#7b6740]">
-                AIによる文字起こしのため、一部誤りが含まれる可能性があります。重要な内容は必ずご確認ください。
-              </div>
-            </aside>
           </div>
         </section>
         ) : null}
@@ -1535,62 +1621,165 @@ const conversationSpeakerOptions: Array<{ value: ConversationSpeaker; label: str
   { value: "unknown", label: "不明" },
 ];
 
+function SpeakerQuickConfirmPanel({
+  logs,
+  speakerNames,
+  assignmentMessage,
+  isSaving,
+  isEditMode,
+  onApplySpeakerPreset,
+  onSave,
+  onEdit,
+}: {
+  logs: DisplayLog[];
+  speakerNames: Record<ConversationSpeaker, string>;
+  assignmentMessage: string | null;
+  isSaving: boolean;
+  isEditMode: boolean;
+  onApplySpeakerPreset: (preset: SpeakerPreset) => void;
+  onSave: () => void;
+  onEdit: () => void;
+}) {
+  const speakerCounts = conversationSpeakerOptions
+    .map((option) => ({ ...option, count: logs.filter((log) => log.speaker === option.value).length }))
+    .filter((option) => option.count > 0);
+
+  return (
+    <section className="mb-4 rounded-[22px] border border-[#f4e2a4] bg-[#fffaf0] p-4 shadow-[0_8px_22px_rgba(245,189,7,0.08)]">
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+        <div className="min-w-0">
+          <div className="text-[16px] font-black text-[#171717]">話者1はどちらですか？</div>
+          <p className="mt-1 text-[12px] font-bold leading-5 text-[#8a6a14]">
+            会話の冒頭を見て、話者1が営業か顧客かを選ぶと全ブロックへまとめて反映されます。
+          </p>
+          <div className="mt-3 flex flex-wrap gap-2">
+            {speakerCounts.map((option) => (
+              <span key={`quick-count-${option.value}`} className="rounded-full border border-[#ead8a8] bg-white px-3 py-1 text-[12px] font-black text-[#6f5500]">
+                {speakerNames[option.value]} {option.count}件
+              </span>
+            ))}
+          </div>
+        </div>
+        <div className="flex flex-col gap-2 sm:min-w-[340px]">
+          <div className="grid gap-2 sm:grid-cols-2">
+            <button
+              type="button"
+              onClick={() => onApplySpeakerPreset({ speaker1: "sales", speaker2: "customer" })}
+              className="rounded-[14px] border border-[#e0bd4b] bg-[#ffd84d] px-4 py-3 text-left text-[13px] font-black text-[#171717] shadow-[0_8px_16px_rgba(245,189,7,0.18)] transition hover:bg-[#ffcf33]"
+            >
+              話者1 = 営業
+            </button>
+            <button
+              type="button"
+              onClick={() => onApplySpeakerPreset({ speaker1: "customer", speaker2: "sales" })}
+              className="rounded-[14px] border border-[#e0bd4b] bg-white px-4 py-3 text-left text-[13px] font-black text-[#6f5500] transition hover:bg-[#fff4d6]"
+            >
+              話者1 = 顧客
+            </button>
+          </div>
+          {assignmentMessage ? (
+            <div className="rounded-[12px] border border-[#d6f2df] bg-white px-3 py-2 text-[12px] font-bold leading-5 text-[#2f8f56]">
+              {assignmentMessage}
+            </div>
+          ) : null}
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={onSave}
+              disabled={logs.length === 0 || isSaving}
+              className="min-w-[180px] flex-1 rounded-[14px] border border-[#171717] bg-[#171717] px-4 py-3 text-[13px] font-black text-white transition hover:bg-[#2a2d33] disabled:cursor-not-allowed disabled:border-[#d8dde6] disabled:bg-[#eef1f5] disabled:text-[#9aa1ac]"
+            >
+              {isSaving ? "保存中..." : "この内容でAI分析する"}
+            </button>
+            <button
+              type="button"
+              onClick={onEdit}
+              className="rounded-[14px] border border-[#ead8a8] bg-white px-4 py-3 text-[13px] font-black text-[#6f5500] transition hover:bg-[#fff4d6]"
+            >
+              {isEditMode ? "詳細修正中" : "詳細修正"}
+            </button>
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function SpeakerPill({ speaker, label }: { speaker: ConversationSpeaker; label: string }) {
+  const shortLabel = speaker === "sales" ? "営" : speaker === "customer" ? "顧" : speaker === "participant" ? "同" : "?";
+  const toneClassName =
+    speaker === "sales"
+      ? "border-[#f4d36a] bg-[#fff7db] text-[#7a5a00]"
+      : speaker === "customer"
+        ? "border-[#cfe0ff] bg-[#eef5ff] text-[#2563a8]"
+        : speaker === "participant"
+          ? "border-[#dfe6ee] bg-[#f6f8fb] text-[#596273]"
+          : "border-[#e6eaf0] bg-[#fcfcfd] text-[#7a808c]";
+  const iconClassName =
+    speaker === "sales"
+      ? "bg-[#ffc400] text-white"
+      : speaker === "customer"
+        ? "bg-[#4b8df7] text-white"
+        : speaker === "participant"
+          ? "bg-[#9aa6b2] text-white"
+          : "bg-[#c4cad4] text-white";
+
+  return (
+    <span className={`inline-flex items-center gap-2 rounded-full border px-2.5 py-1 text-[12px] font-black ${toneClassName}`}>
+      <span className={`inline-flex h-6 w-6 items-center justify-center rounded-full text-[11px] ${iconClassName}`}>
+        {shortLabel}
+      </span>
+      {label}
+    </span>
+  );
+}
+
 function SpeakerManagementPanel({
   logs,
   speakerNames,
-  onApplySpeakerPreset,
   onChangeSpeakerName,
 }: {
   logs: DisplayLog[];
   speakerNames: Record<ConversationSpeaker, string>;
-  onApplySpeakerPreset: (preset: SpeakerPreset) => void;
   onChangeSpeakerName: (speaker: ConversationSpeaker, name: string) => void;
 }) {
+  const counts = conversationSpeakerOptions.map((option) => ({
+    ...option,
+    count: logs.filter((log) => log.speaker === option.value).length,
+  }));
+
   return (
-    <section className="rounded-[20px] border border-[#eceef4] bg-white p-4">
-      <div className="flex items-center justify-between gap-3">
-        <h3 className="text-[14px] font-black text-[#171717]">話者管理</h3>
-        <span className="rounded-full bg-[#fff3cf] px-3 py-1 text-[11px] font-black text-[#8a6500]">{logs.length}ブロック</span>
-      </div>
-      <div className="mt-3 rounded-[14px] border border-[#f4e2a4] bg-[#fffaf0] px-3 py-3">
-        <div className="text-[12px] font-black text-[#7a5a00]">話者1/2を一括変換</div>
-        <div className="mt-2 grid gap-2">
-          <button
-            type="button"
-            onClick={() => onApplySpeakerPreset({ speaker1: "sales", speaker2: "customer" })}
-            className="rounded-[10px] border border-[#ead8a8] bg-white px-3 py-2 text-left text-[12px] font-black text-[#5f4700] transition hover:border-[#e0bd4b] hover:bg-[#fff4d6]"
-          >
-            話者1 = 営業 / 話者2 = 顧客
-          </button>
-          <button
-            type="button"
-            onClick={() => onApplySpeakerPreset({ speaker1: "customer", speaker2: "sales" })}
-            className="rounded-[10px] border border-[#ead8a8] bg-white px-3 py-2 text-left text-[12px] font-black text-[#5f4700] transition hover:border-[#e0bd4b] hover:bg-[#fff4d6]"
-          >
-            話者1 = 顧客 / 話者2 = 営業
-          </button>
+    <details className="rounded-[16px] border border-[#eceef4] bg-white px-4 py-3">
+      <summary className="flex cursor-pointer list-none flex-wrap items-center justify-between gap-3">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-[13px] font-black text-[#171717]">表示名・発言数</span>
+          <span className="rounded-full bg-[#fff3cf] px-3 py-1 text-[11px] font-black text-[#8a6500]">{logs.length}ブロック</span>
         </div>
-        <p className="mt-2 text-[11px] font-bold leading-5 text-[#9a7a1f]">変換後、保存するとAI分析にも反映されます。</p>
+        <div className="flex flex-wrap gap-2">
+          {counts.map((option) => (
+            <span key={`speaker-count-${option.value}`} className="rounded-full border border-[#eef1f5] bg-[#fcfcfd] px-3 py-1 text-[11px] font-black text-[#596273]">
+              {speakerNames[option.value]} {option.count}
+            </span>
+          ))}
+        </div>
+      </summary>
+      <div className="mt-3 grid gap-2 md:grid-cols-2 xl:grid-cols-4">
+        {counts.map((option) => (
+          <label key={option.value} className="rounded-[12px] border border-[#eef1f5] bg-[#fcfcfd] px-3 py-3">
+            <span className="mb-2 flex items-center justify-between gap-2 text-[11px] font-black text-[#8a909b]">
+              {option.label}
+              <span>{option.count}件</span>
+            </span>
+            <input
+              value={speakerNames[option.value]}
+              onChange={(event) => onChangeSpeakerName(option.value, event.target.value)}
+              className="h-9 w-full rounded-[10px] border border-[#e4e8ef] bg-white px-3 text-[12px] font-black text-[#343b48] outline-none focus:border-[#e0bd4b]"
+              aria-label={`${option.label}の表示名`}
+            />
+          </label>
+        ))}
       </div>
-      <div className="mt-3 space-y-3">
-        {conversationSpeakerOptions.map((option) => {
-          const count = logs.filter((log) => log.speaker === option.value).length;
-          return (
-            <div key={option.value} className="rounded-[14px] border border-[#eef1f5] bg-[#fcfcfd] px-3 py-3">
-              <div className="flex items-center justify-between gap-3">
-                <input
-                  value={speakerNames[option.value]}
-                  onChange={(event) => onChangeSpeakerName(option.value, event.target.value)}
-                  className="min-w-0 flex-1 rounded-[10px] border border-[#e4e8ef] bg-white px-3 py-2 text-[13px] font-black text-[#343b48] outline-none focus:border-[#e0bd4b]"
-                  aria-label={`${option.label}の表示名`}
-                />
-                <span className="shrink-0 text-[12px] font-bold text-[#8a909b]">発言数: {count}</span>
-              </div>
-            </div>
-          );
-        })}
-      </div>
-    </section>
+    </details>
   );
 }
 
@@ -2035,56 +2224,6 @@ async function parseApiJsonResponse(response: Response) {
 
     throw new Error("APIレスポンスの解析に失敗しました。");
   }
-}
-
-function HeaderActionButton({
-  icon,
-  label,
-  onClick,
-  disabled = false,
-  variant = "default",
-}: {
-  icon: React.ReactNode;
-  label: string;
-  onClick?: () => void;
-  disabled?: boolean;
-  variant?: "default" | "warm" | "neutral" | "sage" | "outline";
-}) {
-  const toneClassName =
-    variant === "warm"
-      ? "border-[#efcf68] bg-[linear-gradient(180deg,#fff3bf_0%,#ffe184_100%)] text-[#6b5200] hover:border-[#e4c04a] hover:bg-[linear-gradient(180deg,#ffefad_0%,#ffd96b_100%)]"
-      : variant === "outline"
-        ? "border-[#ead8a8] bg-white text-[#665430] hover:border-[#ddc173] hover:bg-[#fffaf0]"
-      : variant === "neutral"
-        ? "border-[#e9dfd1] bg-[#faf7f0] text-[#544c40] hover:border-[#d9cfbe] hover:bg-[#f4f0e7]"
-        : variant === "sage"
-          ? "border-[#ebe4d4] bg-[#fffdf8] text-[#6a6048] hover:border-[#ddd1ba] hover:bg-[#fbf6ec]"
-          : "border-[#e3e7ee] bg-white text-[#171717] hover:border-[#d7dde8] hover:bg-[#fafbfc]";
-  const iconToneClassName =
-    variant === "warm"
-      ? "bg-white text-[#b98900] border border-[#f1dd98]"
-      : variant === "outline"
-        ? "bg-[#fff1bf] text-[#b98900]"
-        : variant === "neutral"
-          ? "bg-white text-[#6d6250] border border-[#e8dfcf]"
-          : variant === "sage"
-            ? "bg-[#fff3cf] text-[#8b6c00]"
-            : "bg-[#f5f7fa] text-[#667085]";
-  const iconSizeClassName = variant === "warm" ? "h-5 w-5" : "h-6 w-6";
-
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      disabled={disabled}
-      className={`inline-flex h-[38px] items-center gap-1.5 rounded-[12px] border px-3 text-[12px] font-semibold shadow-[0_4px_12px_rgba(15,23,42,0.05)] transition disabled:cursor-not-allowed disabled:border-[#e5e7eb] disabled:bg-[#f5f6f7] disabled:text-[#a0a7b1] ${toneClassName}`}
-    >
-      <span className={`inline-flex items-center justify-center rounded-full shadow-[inset_0_-1px_0_rgba(0,0,0,0.04)] ${iconSizeClassName} ${iconToneClassName}`}>
-        {icon}
-      </span>
-      {label}
-    </button>
-  );
 }
 
 function TranscriptMetaItem({
@@ -2750,25 +2889,6 @@ function ChevronDownGlyph() {
   return (
     <svg viewBox="0 0 24 24" aria-hidden="true" className="h-4 w-4 fill-none stroke-current stroke-[2.2]">
       <path d="m6 9 6 6 6-6" />
-    </svg>
-  );
-}
-
-function CopyGlyph() {
-  return (
-    <svg viewBox="0 0 24 24" aria-hidden="true" className="h-4 w-4 fill-none stroke-current stroke-[1.9]">
-      <rect x="9" y="7" width="11" height="13" rx="2.5" />
-      <path d="M15 7V5.5A1.5 1.5 0 0 0 13.5 4h-8A1.5 1.5 0 0 0 4 5.5v10A1.5 1.5 0 0 0 5.5 17H9" />
-    </svg>
-  );
-}
-
-function DownloadGlyph() {
-  return (
-    <svg viewBox="0 0 24 24" aria-hidden="true" className="h-4 w-4 fill-none stroke-current stroke-[1.9]">
-      <path d="M12 4.5v10.2" />
-      <path d="m7.8 11.6 4.2 4.3 4.2-4.3" />
-      <path d="M5 19.5h14" />
     </svg>
   );
 }

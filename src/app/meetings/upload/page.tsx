@@ -30,7 +30,6 @@ import {
 } from "@/lib/upload-duration-limit";
 import type { MeetingPurpose } from "@/types/domain";
 
-const maxRecommendedDurationSec = 120 * 60;
 const maxOpenAiTranscriptionFileSizeBytes = 25 * 1024 * 1024;
 const supportedAudioTypes = new Set([
   "audio/mpeg",
@@ -84,6 +83,8 @@ export default function MeetingUploadPage() {
   const salesDomain: SalesDomain = searchParams.get("category") === "teleapo" ? "teleapo" : "meeting";
   const canAccessDomain = isLoading || canUseSalesDomain(profile, salesDomain);
   const currentMonthRange = useMemo(() => getCurrentMonthDateTimeRange(), []);
+  const currentMonthMinDateTime = useMemo(() => toDatetimeLocalValue(currentMonthRange.start), [currentMonthRange.start]);
+  const currentMonthMaxDateTime = useMemo(() => toDatetimeLocalValue(currentMonthRange.end), [currentMonthRange.end]);
 
   useEffect(() => {
     if (!isFirebaseReady || !profile?.companyId) {
@@ -197,10 +198,14 @@ export default function MeetingUploadPage() {
   }, [applyCalendarEventToForm, selectedCalendarEvent]);
 
   function handleRecordedAtChange(value: string) {
-    setRecordedAt(value);
+    if (!value) {
+      setRecordedAt("");
+      return;
+    }
 
     const nextRecordedAt = new Date(value);
     if (Number.isNaN(nextRecordedAt.getTime())) {
+      setErrorMessage("実施日時を正しく入力してください。");
       return;
     }
 
@@ -209,6 +214,7 @@ export default function MeetingUploadPage() {
       return;
     }
 
+    setRecordedAt(value);
     setErrorMessage(null);
     setTranscriptEndedAtTime(toTimeInputValue(addMinutes(nextRecordedAt, 60)));
   }
@@ -248,8 +254,13 @@ export default function MeetingUploadPage() {
       return;
     }
 
-    const normalizedRecordedAt = recordedAt ? new Date(recordedAt) : new Date();
-    if (!isWithinDateRange(normalizedRecordedAt, currentMonthRange)) {
+    if (!recordedAt) {
+      setErrorMessage("実施日時を入力してください。");
+      return;
+    }
+
+    const normalizedRecordedAt = new Date(recordedAt);
+    if (Number.isNaN(normalizedRecordedAt.getTime()) || !isWithinDateRange(normalizedRecordedAt, currentMonthRange)) {
       setErrorMessage("実施日時は今月内の日付だけ選択できます。毎月1日に、その月の日付を選べるようになります。");
       return;
     }
@@ -392,7 +403,7 @@ export default function MeetingUploadPage() {
               <div
                 className={`rounded-[22px] border border-dashed px-6 py-9 text-center transition ${
                   selectedFile
-                    ? "border-[#b8e6c6] bg-[#f6fbf7]"
+                    ? "border-[#f1dfaa] bg-[#fffdf7]"
                     : "border-[#dfe3ea] bg-[#fafafa]"
                 }`}
               >
@@ -410,12 +421,12 @@ export default function MeetingUploadPage() {
                   mp3 / m4a / wav に対応しています。wavは保存時にmp3へ自動変換されます。
                 </div>
                 {selectedFile ? (
-                  <div className="mx-auto mt-5 flex max-w-full items-center justify-center gap-2 rounded-[14px] border border-[#d6f2df] bg-white px-4 py-3 text-left shadow-[0_8px_18px_rgba(47,143,86,0.08)] sm:max-w-[420px]">
-                    <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[#e8f8ee] text-[#2f8f56]">
+                  <div className="mx-auto mt-5 flex max-w-full items-center justify-center gap-2 rounded-[14px] border border-[#f1dfaa] bg-white px-4 py-3 text-left shadow-[0_8px_18px_rgba(245,189,7,0.12)] sm:max-w-[420px]">
+                    <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[#fff4d6] text-[#8a6500]">
                       <CheckIcon />
                     </span>
                     <div className="min-w-0">
-                      <div className="text-[12px] font-bold text-[#2f8f56]">選択済み</div>
+                      <div className="text-[12px] font-bold text-[#8a6500]">選択済み</div>
                       <div className="mt-0.5 truncate text-[14px] font-semibold text-[#171717]">
                         {selectedFile.name}
                       </div>
@@ -427,7 +438,7 @@ export default function MeetingUploadPage() {
                   onClick={() => fileInputRef.current?.click()}
                   className={`mt-6 rounded-[14px] px-5 py-3 text-[14px] font-medium transition ${
                     selectedFile
-                      ? "bg-[#2f8f56] text-white hover:bg-[#277948]"
+                      ? "bg-[#ffd12f] text-[#171717] hover:bg-[#f5bd07]"
                       : "bg-[#171717] text-white hover:bg-[#2a2d33]"
                   }`}
                 >
@@ -564,13 +575,6 @@ export default function MeetingUploadPage() {
             </div>
           </div>
 
-          {inputMode === "audio" && detectedDurationSec !== null && detectedDurationSec > maxRecommendedDurationSec ? (
-            <AlertBox>
-              120分を超える音声です。文字起こし検証の観点では価値がありますが、
-              まずは短めの音声でも1本通して精度確認するのがおすすめです。
-            </AlertBox>
-          ) : null}
-
           {inputMode === "audio" && detectedDurationSec !== null && detectedDurationSec > effectiveUploadDurationLimitSec ? (
             <AlertBox>
               {buildUploadDurationLimitMessage(uploadDurationLimitMinutes)}
@@ -650,8 +654,8 @@ export default function MeetingUploadPage() {
               <input
                 type="datetime-local"
                 className={inputClassName}
-                min={toDatetimeLocalValue(currentMonthRange.start)}
-                max={toDatetimeLocalValue(currentMonthRange.end)}
+                min={currentMonthMinDateTime}
+                max={currentMonthMaxDateTime}
                 value={recordedAt}
                 onChange={(event) => handleRecordedAtChange(event.target.value)}
               />
