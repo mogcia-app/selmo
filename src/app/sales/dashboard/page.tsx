@@ -94,6 +94,7 @@ export default function SalesDashboardPage() {
   const [isRoleplayScenariosLoaded, setIsRoleplayScenariosLoaded] = useState(false);
   const [isRoleplayResultsLoaded, setIsRoleplayResultsLoaded] = useState(false);
   const [generatedActionCards, setGeneratedActionCards] = useState<OodaCardData[] | null>(null);
+  const [selectedMonth, setSelectedMonth] = useState(() => formatMonthInputValue(new Date()));
   const requestedActionKeyRef = useRef<string | null>(null);
   const canUseMeeting = !profile || canUseSalesDomain(profile, "meeting");
   const canUseTeleapo = !profile || canUseSalesDomain(profile, "teleapo");
@@ -172,16 +173,16 @@ export default function SalesDashboardPage() {
   }, [activeDomain, canUseMeeting, canUseRoleplay, canUseTeleapo, profile?.companyId, profile?.role, profile?.uid, unitLabel]);
 
   const monthlyMeetings = useMemo(
-    () => meetings.filter((meeting) => isCurrentMonth(meeting.recordedAt)),
-    [meetings],
+    () => filterRecordsByMonth(meetings, selectedMonth, (meeting) => meeting.recordedAt),
+    [meetings, selectedMonth],
   );
   const weeklyMeetings = useMemo(
     () => meetings.filter((meeting) => meeting.recordedAt && daysSince(meeting.recordedAt) <= 7),
     [meetings],
   );
   const monthlyRoleplayResults = useMemo(
-    () => roleplayResults.filter((result) => isCurrentMonth(result.createdAt)),
-    [roleplayResults],
+    () => filterRecordsByMonth(roleplayResults, selectedMonth, (result) => result.createdAt),
+    [roleplayResults, selectedMonth],
   );
   const recentMeetings = useMemo(() => meetings.slice(0, 5), [meetings]);
   const actionMeetings = useMemo(() => buildActionMeetings(meetings), [meetings]);
@@ -307,14 +308,17 @@ export default function SalesDashboardPage() {
     <main className="overflow-x-hidden bg-transparent px-4 pb-0 pt-4 md:px-7 md:pb-0 md:pt-5">
       <div className="mx-auto max-w-[1440px] space-y-5">
         <section className="rounded-[24px] border border-[#e7e9ef] bg-white px-5 py-5 shadow-[0_14px_34px_rgba(17,24,39,0.05)] md:px-7">
-          <div>
-            <p className="text-[12px] font-bold uppercase tracking-[0.18em] text-[#9c7600]">OODA × AAR Dashboard</p>
-            <h1 className="mt-2 text-[24px] font-bold text-[#171717] md:text-[30px]">
-              こんにちは、{displayName}さん
-            </h1>
-            <p className="mt-2 max-w-[780px] text-[13px] leading-6 text-[#6f7480]">
-              今月の商談・ロープレ・分析状況
-            </p>
+          <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+            <div>
+              <p className="text-[12px] font-bold uppercase tracking-[0.18em] text-[#9c7600]">OODA × AAR Dashboard</p>
+              <h1 className="mt-2 text-[24px] font-bold text-[#171717] md:text-[30px]">
+                こんにちは、{displayName}さん
+              </h1>
+              <p className="mt-2 max-w-[780px] text-[13px] leading-6 text-[#6f7480]">
+                対象月の商談・ロープレ・分析状況
+              </p>
+            </div>
+            <MonthSelector value={selectedMonth} onChange={setSelectedMonth} />
           </div>
         </section>
 
@@ -366,6 +370,22 @@ function SummaryCard({ metric }: { metric: SummaryMetric }) {
       <div className="mt-3 text-[34px] font-bold leading-none text-[#171717]">{metric.value}</div>
       <p className="mt-3 text-[12px] leading-5 text-[#7a808c]">{metric.caption}</p>
     </article>
+  );
+}
+
+function MonthSelector({ value, onChange }: { value: string; onChange: (value: string) => void }) {
+  const selectedDate = parseMonthValue(value) ?? new Date();
+  return (
+    <div className="flex w-fit flex-wrap items-center gap-2 rounded-[12px] border border-[#e0e4eb] bg-white px-3 py-2 shadow-[0_1px_2px_rgba(17,24,39,0.04)]">
+      <span className="text-[12px] font-black text-[#596273]">{formatMonthRange(selectedDate)}</span>
+      <input
+        type="month"
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        className="h-8 rounded-[9px] border border-[#e4e8ef] bg-[#fcfcfd] px-2 text-[12px] font-black text-[#343b48] outline-none focus:border-[#e0bd4b]"
+        aria-label="対象月"
+      />
+    </div>
   );
 }
 
@@ -723,9 +743,9 @@ function buildDashboardInsight(input: {
   return {
     summaryMetrics: [
       {
-        label: `今月の${input.unitLabel}数`,
+        label: `対象月の${input.unitLabel}数`,
         value: `${input.monthlyMeetings.length}件`,
-        caption: "今月アップロードされた記録",
+        caption: "対象月にアップロードされた記録",
         tone: "yellow",
       },
       {
@@ -771,7 +791,7 @@ function buildDashboardInsight(input: {
           { label: "未分析", value: `${pendingAnalysisCount}件` },
           { label: "分析済み", value: `${completedMeetings.length}件` },
           { label: `平均${input.unitLabel}時間`, value: averageDuration },
-          { label: "今月のロープレ", value: `${input.monthlyRoleplayCount}回` },
+          { label: "対象月のロープレ", value: `${input.monthlyRoleplayCount}回` },
           { label: "停滞/要確認", value: `${stalledCount}件` },
         ],
       },
@@ -855,25 +875,25 @@ function buildDashboardInsight(input: {
       {
         label: "AIスコア推移",
         value: formatScore(averageScore),
-        caption: averageScore === null ? "蓄積待ち" : "今月平均",
+        caption: averageScore === null ? "蓄積待ち" : "対象月平均",
         percentage: averageScore ?? 0,
       },
       {
         label: "成約率推移",
         value: `${conversionRate}%`,
-        caption: "今月",
+        caption: "対象月",
         percentage: conversionRate,
       },
       {
         label: "分析件数",
         value: `${completedMeetings.length}件`,
-        caption: `今月${input.monthlyMeetings.length}件中`,
+        caption: `対象月${input.monthlyMeetings.length}件中`,
         percentage: input.monthlyMeetings.length > 0 ? Math.round((completedMeetings.length / input.monthlyMeetings.length) * 100) : 0,
       },
       {
         label: "ロープレ回数",
         value: `${input.monthlyRoleplayCount}回`,
-        caption: "今月",
+        caption: "対象月",
         percentage: Math.min(100, input.monthlyRoleplayCount * 12),
       },
     ],
@@ -1258,18 +1278,42 @@ function truncateText(value: string, maxLength: number) {
   return value.length > maxLength ? `${value.slice(0, maxLength)}...` : value;
 }
 
-function isCurrentMonth(date: Date | null) {
-  if (!date) {
-    return false;
-  }
-
-  const now = new Date();
-  return date.getFullYear() === now.getFullYear() && date.getMonth() === now.getMonth();
-}
-
 function daysSince(date: Date) {
   const diff = Date.now() - date.getTime();
   return Math.floor(diff / (1000 * 60 * 60 * 24));
+}
+
+function formatMonthRange(date: Date) {
+  const year = date.getFullYear();
+  const month = date.getMonth();
+  const start = new Date(year, month, 1);
+  const end = new Date(year, month + 1, 0);
+  const formatter = new Intl.DateTimeFormat("ja-JP", { year: "numeric", month: "2-digit", day: "2-digit" });
+  return `${formatter.format(start)} 〜 ${formatter.format(end)}`;
+}
+
+function formatMonthInputValue(date: Date) {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
+}
+
+function parseMonthValue(value: string) {
+  if (!/^\d{4}-\d{2}$/.test(value)) return null;
+  const [yearText, monthText] = value.split("-");
+  const year = Number(yearText);
+  const month = Number(monthText);
+  if (!Number.isFinite(year) || !Number.isFinite(month) || month < 1 || month > 12) return null;
+  return new Date(year, month - 1, 1);
+}
+
+function filterRecordsByMonth<T>(records: T[], monthValue: string, getDate: (record: T) => Date | null) {
+  const monthDate = parseMonthValue(monthValue);
+  if (!monthDate) return records;
+  const year = monthDate.getFullYear();
+  const month = monthDate.getMonth();
+  return records.filter((record) => {
+    const date = getDate(record);
+    return date ? date.getFullYear() === year && date.getMonth() === month : false;
+  });
 }
 
 function formatDate(date: Date) {
