@@ -150,7 +150,7 @@ export default function SalesCustomerDetailPage() {
     if (!profile?.companyId || !params.customerId || !profile.uid) return;
     const unsubscribers = [
       subscribeToCustomerLogs(
-        { companyId: profile.companyId, customerId: params.customerId, isAdmin: true },
+        { companyId: profile.companyId, customerId: params.customerId, userId: profile.uid, isAdmin: false },
         setLogs,
         (nextError: FirebaseError) => setErrorMessage(nextError.message),
       ),

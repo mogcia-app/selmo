@@ -155,12 +155,7 @@ export function subscribeToCustomers(
   }
 
   const customersRef = collection(firestore, "customers");
-  const customersQueries = input.isAdmin || !input.userId
-    ? [query(customersRef, where("companyId", "==", input.companyId))]
-    : [
-        query(customersRef, where("assignedUserId", "==", input.userId)),
-        query(customersRef, where("memberUserIds", "array-contains", input.userId)),
-      ];
+  const customersQueries = [query(customersRef, where("companyId", "==", input.companyId))];
 
   const snapshotsByIndex = new Map<number, CustomerRecord[]>();
   const unsubscribers = customersQueries.map((customersQuery, index) =>
@@ -171,7 +166,8 @@ export function subscribeToCustomers(
           index,
           snapshot.docs
             .map((docSnapshot) => mapCustomerRecord(docSnapshot.id, docSnapshot.data()))
-            .filter((customer) => customer.companyId === input.companyId),
+            .filter((customer) => customer.companyId === input.companyId)
+            .filter((customer) => input.isAdmin || !input.userId || isCustomerVisibleToUser(customer, input.userId)),
         );
         const recordsById = new Map<string, CustomerRecord>();
         snapshotsByIndex.forEach((records) => records.forEach((record) => recordsById.set(record.id, record)));
@@ -188,6 +184,12 @@ export function subscribeToCustomers(
   );
 
   return () => unsubscribers.forEach((unsubscribe) => unsubscribe());
+}
+
+function isCustomerVisibleToUser(customer: CustomerRecord, userId: string) {
+  return customer.assignedUserId === userId
+    || customer.memberUserIds.includes(userId)
+    || customer.collaboratorUserIds.includes(userId);
 }
 
 export function subscribeToCustomer(
@@ -252,7 +254,7 @@ export function subscribeToCustomerLogs(
   const constraints = [
     where("companyId", "==", input.companyId),
     ...(input.customerId ? [where("customerId", "==", input.customerId)] : []),
-    ...(!input.isAdmin && input.userId ? [where("userId", "==", input.userId)] : []),
+    ...(!input.isAdmin && input.userId && !input.customerId ? [where("userId", "==", input.userId)] : []),
   ];
   const logsQuery = query(collection(firestore, "customerLogs"), ...constraints);
 
