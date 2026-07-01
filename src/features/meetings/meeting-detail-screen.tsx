@@ -80,6 +80,7 @@ export function MeetingDetailScreen({
   const [editableLogs, setEditableLogs] = useState<DisplayLog[]>([]);
   const [selectedLogIds, setSelectedLogIds] = useState<string[]>([]);
   const [isTranscriptEditMode, setIsTranscriptEditMode] = useState(false);
+  const [manualSplitIndexes, setManualSplitIndexes] = useState<Record<string, number>>({});
   const [speakerNames, setSpeakerNames] = useState<Record<ConversationSpeaker, string>>({
     sales: "営業",
     customer: "顧客",
@@ -630,9 +631,30 @@ export function MeetingDetailScreen({
         { ...log, id: `${log.id}_b_${Date.now()}`, text: after, confidence: "estimated" as const },
         ...current.slice(index + 1),
       ];
+      setManualSplitIndexes((indexes) => {
+        const nextIndexes = { ...indexes };
+        delete nextIndexes[logId];
+        return nextIndexes;
+      });
       setErrorMessage("ブロックを分割しました。保存すると反映されます。");
       return nextLogs;
     });
+  }
+
+  function handleSelectManualSplitIndex(logId: string) {
+    const textarea = logTextAreaRefs.current[logId];
+    if (!textarea) {
+      return;
+    }
+
+    const selectionStart = textarea.selectionStart;
+    const selectionEnd = textarea.selectionEnd;
+    const splitIndex = selectionStart === selectionEnd ? selectionStart : selectionEnd;
+
+    setManualSplitIndexes((current) => ({
+      ...current,
+      [logId]: splitIndex,
+    }));
   }
 
   function handleMergeSelectedLogs() {
@@ -1240,6 +1262,9 @@ export function MeetingDetailScreen({
                                   }}
                                   value={log.text}
                                   readOnly
+                                  onClick={() => handleSelectManualSplitIndex(log.id)}
+                                  onKeyUp={() => handleSelectManualSplitIndex(log.id)}
+                                  onSelect={() => handleSelectManualSplitIndex(log.id)}
                                   className="min-h-[96px] w-full resize-y rounded-[14px] border border-[#eef1f5] bg-[#fcfcfd] px-4 py-3 text-[15px] font-medium leading-8 text-[#171717] outline-none focus:border-[#e0bd4b] focus:bg-white"
                                   spellCheck={false}
                                   aria-label="編集不可の文字起こし本文"
@@ -1264,6 +1289,7 @@ export function MeetingDetailScreen({
                                 </div>
                                 <SplitCandidateButtons
                                   log={log}
+                                  manualSplitIndex={manualSplitIndexes[log.id] ?? null}
                                   onSplit={(splitIndex) => handleSplitLogAtIndex(log.id, splitIndex)}
                                 />
                               </>
@@ -1424,25 +1450,41 @@ function SpeakerManagementPanel({
 
 function SplitCandidateButtons({
   log,
+  manualSplitIndex,
   onSplit,
 }: {
   log: DisplayLog;
+  manualSplitIndex: number | null;
   onSplit: (splitIndex: number) => void;
 }) {
   const candidates = buildSplitCandidates(log.text).slice(0, 8);
-
-  if (candidates.length === 0) {
-    return (
-      <div className="mt-2 rounded-[12px] border border-dashed border-[#e4e8ef] bg-[#fcfcfd] px-3 py-2 text-[12px] font-bold text-[#9aa1ac]">
-        このブロックには自動分割候補がありません。
-      </div>
-    );
-  }
+  const canSplitManually =
+    typeof manualSplitIndex === "number" &&
+    manualSplitIndex > 0 &&
+    manualSplitIndex < log.text.length &&
+    Boolean(log.text.slice(0, manualSplitIndex).trim()) &&
+    Boolean(log.text.slice(manualSplitIndex).trim());
+  const manualPreview = canSplitManually
+    ? buildSplitPreview(log.text, manualSplitIndex)
+    : "本文内の区切りたい位置をクリックしてから押してください。";
 
   return (
     <div className="mt-2 rounded-[12px] border border-[#eef1f5] bg-[#fcfcfd] px-3 py-2">
       <div className="text-[11px] font-black text-[#8a909b]">分割位置</div>
-      <div className="mt-2 flex flex-wrap gap-2">
+      <div className="mt-2 flex flex-wrap items-center gap-2">
+        <button
+          type="button"
+          onClick={() => {
+            if (typeof manualSplitIndex === "number") {
+              onSplit(manualSplitIndex);
+            }
+          }}
+          disabled={!canSplitManually}
+          className="rounded-full border border-[#171717] bg-[#171717] px-3 py-1.5 text-[12px] font-black text-white transition hover:bg-[#2a2d33] disabled:cursor-not-allowed disabled:border-[#d8dde6] disabled:bg-[#eef1f5] disabled:text-[#9aa1ac]"
+          title={manualPreview}
+        >
+          選択位置で分割
+        </button>
         {candidates.map((candidate, index) => (
           <button
             key={`${log.id}_${candidate.index}`}
@@ -1451,12 +1493,26 @@ function SplitCandidateButtons({
             className="rounded-full border border-[#ead8a8] bg-white px-3 py-1.5 text-[12px] font-black text-[#6f5500] transition hover:border-[#e0bd4b] hover:bg-[#fff7db]"
             title={candidate.preview}
           >
-            {index + 1}つ目の区切り
+            自動候補 {index + 1}
           </button>
         ))}
       </div>
+      <div className="mt-2 text-[11px] font-bold leading-5 text-[#9aa1ac]">
+        {canSplitManually
+          ? `選択位置: ${manualPreview}`
+          : candidates.length === 0
+            ? "自動候補はありません。本文内の区切りたい位置をクリックすると手動分割できます。"
+            : "本文内をクリックすると、任意の位置でも分割できます。"}
+      </div>
     </div>
   );
+}
+
+function buildSplitPreview(text: string, splitIndex: number) {
+  const before = text.slice(0, splitIndex).trim();
+  const after = text.slice(splitIndex).trim();
+
+  return `${before.slice(-24)} / ${after.slice(0, 24)}`;
 }
 
 function mapDisplayLogToConversationLog(
