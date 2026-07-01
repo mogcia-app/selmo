@@ -1019,7 +1019,7 @@ export function MeetingDetailScreen({
           </div>
         ) : null}
 
-        <MeetingFlowProgress steps={meetingFlowSteps} />
+        {isTranscriptView ? <MeetingFlowProgress steps={meetingFlowSteps} /> : null}
 
         {isSummaryView ? (
         <section className="rounded-[24px] border border-[#eceef4] bg-white p-6 shadow-[0_10px_28px_rgba(17,24,39,0.05)] md:p-7">
