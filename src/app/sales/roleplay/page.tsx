@@ -454,11 +454,6 @@ export default function SalesRoleplayPage() {
 
               <div className="sticky bottom-0 z-10 border-t border-[#eef1f5] bg-white/95 px-4 py-3 backdrop-blur sm:px-5 sm:py-4">
                 <div className="flex min-w-0 flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
-                  <div className="grid min-w-0 grid-cols-3 gap-2 xl:flex-1">
-                    <CompactStatus label="録音" value={isRecording ? formatElapsed(recordingElapsedSec) : "--:--"} active={isRecording} />
-                    <CompactStatus label="状態" value={buildVoiceStatus({ isRecording, isTranscribing, isThinking, isSpeaking })} />
-                    <CompactStatus label="発話" value={`${messages.filter((message) => message.role === "sales").length}回`} />
-                  </div>
                   <div className="grid min-w-0 grid-cols-1 gap-2 sm:grid-cols-2 xl:w-[380px] xl:shrink-0">
                     <button
                       type="button"
@@ -479,6 +474,11 @@ export default function SalesRoleplayPage() {
                     >
                       {isSaving ? "保存中" : "終了して採点"}
                     </button>
+                  </div>
+                  <div className="grid min-w-0 grid-cols-3 gap-2 xl:flex-1">
+                    <CompactStatus label="録音" value={isRecording ? formatElapsed(recordingElapsedSec) : "--:--"} active={isRecording} />
+                    <CompactStatus label="状態" value={buildVoiceStatus({ isRecording, isTranscribing, isThinking, isSpeaking })} />
+                    <CompactStatus label="発話" value={`${messages.filter((message) => message.role === "sales").length}回`} />
                   </div>
                 </div>
               </div>

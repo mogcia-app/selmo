@@ -38,6 +38,13 @@ export function SalesKnowledgeChatWidget() {
   const userId = profile?.uid;
   const companyId = profile?.companyId;
   const isKnowledgePage = pathname.startsWith("/sales/knowledge");
+  const isRoleplayPracticePage = pathname === "/sales/roleplay";
+  const launcherPositionClass = isRoleplayPracticePage
+    ? "bottom-[190px] right-6 max-sm:bottom-[218px] max-sm:right-4"
+    : "bottom-6 right-6";
+  const panelPositionClass = isRoleplayPracticePage
+    ? "right-6 bottom-[278px] max-h-[min(540px,calc(100vh-320px))] max-lg:right-4 max-sm:bottom-[306px] max-sm:max-h-[min(420px,calc(100vh-340px))]"
+    : "right-6 bottom-24 max-h-[min(680px,calc(100vh-120px))] max-lg:right-4";
 
   useEffect(() => {
     if (!isKnowledgePage) return;
@@ -111,7 +118,7 @@ export function SalesKnowledgeChatWidget() {
       <button
         type="button"
         onClick={() => setIsOpen((current) => !current)}
-        className="fixed bottom-6 right-6 z-40 flex h-[76px] w-[76px] items-center justify-center rounded-full border border-[#e8ebf0] bg-white shadow-[0_18px_42px_rgba(17,24,39,0.18)] transition hover:-translate-y-0.5 hover:border-[#f0c655] hover:bg-[#fffdf7]"
+        className={`fixed z-40 flex h-[76px] w-[76px] items-center justify-center rounded-full border border-[#e8ebf0] bg-white shadow-[0_18px_42px_rgba(17,24,39,0.18)] transition hover:-translate-y-0.5 hover:border-[#f0c655] hover:bg-[#fffdf7] ${launcherPositionClass}`}
         aria-label="ナレッジチャットを開く"
         aria-expanded={isOpen}
       >
@@ -120,7 +127,7 @@ export function SalesKnowledgeChatWidget() {
 
       {isOpen && !selection ? (
         <aside
-          className="fixed right-6 bottom-24 z-40 flex max-h-[min(680px,calc(100vh-120px))] w-[min(390px,calc(100vw-32px))] flex-col overflow-hidden rounded-[24px] border border-[#e8ebf0] bg-white shadow-[0_24px_64px_rgba(17,24,39,0.2)] max-lg:right-4"
+          className={`fixed z-40 flex w-[min(390px,calc(100vw-32px))] flex-col overflow-hidden rounded-[24px] border border-[#e8ebf0] bg-white shadow-[0_24px_64px_rgba(17,24,39,0.2)] ${panelPositionClass}`}
         >
           <div className="border-b border-[#eef1f5] px-4 py-4">
             <div className="flex items-center justify-between gap-3">
@@ -227,7 +234,12 @@ export function SalesKnowledgeChatWidget() {
       ) : null}
 
       {selection ? (
-        <KnowledgeDetailDrawer selection={selection} searchTerms={searchTerms} onClose={() => setSelection(null)} />
+        <KnowledgeDetailDrawer
+          selection={selection}
+          searchTerms={searchTerms}
+          isRoleplayPracticePage={isRoleplayPracticePage}
+          onClose={() => setSelection(null)}
+        />
       ) : null}
     </>
   );
@@ -236,10 +248,12 @@ export function SalesKnowledgeChatWidget() {
 function KnowledgeDetailDrawer({
   selection,
   searchTerms,
+  isRoleplayPracticePage,
   onClose,
 }: {
   selection: KnowledgeSelection;
   searchTerms: string[];
+  isRoleplayPracticePage: boolean;
   onClose: () => void;
 }) {
   const isProduct = selection.type === "product";
@@ -260,7 +274,11 @@ function KnowledgeDetailDrawer({
   }, [searchKey, searchTerms.length, selection]);
 
   return (
-    <aside className="fixed bottom-6 right-6 top-24 z-50 flex w-[min(430px,calc(100vw-32px))] flex-col overflow-hidden rounded-[24px] border border-[#e8ebf0] bg-white shadow-[0_24px_64px_rgba(17,24,39,0.22)]">
+    <aside
+      className={`fixed right-6 top-24 z-50 flex w-[min(430px,calc(100vw-32px))] flex-col overflow-hidden rounded-[24px] border border-[#e8ebf0] bg-white shadow-[0_24px_64px_rgba(17,24,39,0.22)] max-lg:right-4 ${
+        isRoleplayPracticePage ? "bottom-[190px] max-sm:bottom-[218px]" : "bottom-6"
+      }`}
+    >
       <div className="border-b border-[#eef1f5] px-5 py-4">
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
