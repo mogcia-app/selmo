@@ -165,10 +165,13 @@ export async function POST(request: Request) {
               "重点弱点が、価格反論・競合比較・効果訴求のような切り返しの場合、顧客は最初に強めの反論を出し、営業が確認質問と価値接続をできるかを試す設定にしてください。",
               ...(isTeleapo
                 ? [
-                    "テレアポの場合、顧客プロフィールには受付担当/現場担当/決裁者のどの相手かを明記してください。",
-                    "テレアポの場合、objections の先頭には必ず『今忙しいです』『資料を送ってください』『営業電話は結構です』『担当ではありません』のような短い断りを入れてください。",
-                    "テレアポの場合、goal は『売り込む』ではなく、話す許可、担当者接続、日程候補提示、次接点確定のいずれかにしてください。",
-                    "テレアポの場合、evaluationCriteria の最初の5項目は、冒頭10秒、話す許可、短い課題仮説、断りへの1回切り返し、アポ打診/次接点確定にしてください。",
+                    "テレアポの場合、重点弱点が空、または『アポ打診』『進まない』『担当者』『キーマン』『決裁者』を含む場合は、受付突破ではなくキーマン接触後のシナリオを優先してください。",
+                    "キーマン接触後のテレアポでは、顧客役職を受付ではなく現場責任者・部門責任者・決裁者などにし、顧客プロフィールに『本人にはつながっており、話は聞くが、判断材料がないと前に進めない』と明記してください。",
+                    "テレアポの場合、顧客プロフィールには受付担当/現場担当/決裁者のどの相手かを明記してください。キーマン接触後の練習では受付担当にしないでください。",
+                    "受付突破のテレアポでは、objections の先頭に『今忙しいです』『資料を送ってください』『営業電話は結構です』『担当ではありません』のような短い断りを入れてください。",
+                    "キーマン接触後のテレアポでは、objections に『それはうちの何に関係する話ですか』『費用対効果は見えますか』『導入の手間はどのくらいですか』『現状でも大きく困ってはいません』のような担当者本人の懸念を入れてください。『担当ではありません』は入れないでください。",
+                    "テレアポの場合、goal は『売り込む』ではなく、話す許可、担当者接続、日程候補提示、次接点確定のいずれかにしてください。キーマン接触後の練習では、本人が聞いてくれている前提で、価値・判断材料を短く伝えて15分の確認日程提示まで進めるゴールにしてください。",
+                    "テレアポの場合、evaluationCriteria の最初の5項目は、冒頭10秒、話す許可、短い課題仮説、断りへの1回切り返し、アポ打診/次接点確定にしてください。キーマン接触後の練習では、受付突破よりも『本人への要点提示』『判断材料への回答』『日程候補提示』を優先してください。",
                     "テレアポの場合、長い商品説明、粘りすぎ、相手の時間を奪う会話は減点条件として採点基準に入れてください。",
                   ]
                 : []),
@@ -258,23 +261,34 @@ function buildFallbackScenario(product: ProductPayload, category: ScenarioCatego
 
 function buildTeleapoFallbackScenario(product: ProductPayload, category: ScenarioCategory, targetSegment: string, meetingInsights: string[] = []): GeneratedScenario {
   const resolvedTargetSegment = resolveTargetSegment(product, targetSegment);
-  const improvementFocus = normalizeInsightFocus(meetingInsights[0] ?? "冒頭10秒で用件を伝え、話す許可を取る");
+  const improvementFocus = normalizeInsightFocus(meetingInsights[0] ?? "キーマン本人に要点と判断材料を伝え、アポ打診へ進める");
+  const isGatekeeperFocus = /受付|取次|取り次|担当者接続/.test(improvementFocus);
   return {
-    title: `${product.name} ${resolvedTargetSegment} テレアポ弱点克服`,
-    description: `${resolvedTargetSegment}の${category}顧客に対して、${improvementFocus}を重点的に反復するテレアポ専用シナリオです。`,
+    title: isGatekeeperFocus
+      ? `${product.name} ${resolvedTargetSegment} 受付突破テレアポ弱点克服`
+      : `${product.name} ${resolvedTargetSegment} キーマン接触後のアポ打診`,
+    description: isGatekeeperFocus
+      ? `${resolvedTargetSegment}の${category}顧客に対して、${improvementFocus}を重点的に反復するテレアポ専用シナリオです。`
+      : `${resolvedTargetSegment}の${category}キーマン本人に接触した後、相手が聞いてくれている状態から判断材料を示して次接点へ進めるテレアポ専用シナリオです。`,
     targetSegment: resolvedTargetSegment,
-    customerRole: "受付または担当者",
-    customerProfile: `${resolvedTargetSegment}領域の電話対応者。忙しく、営業電話には警戒している。短く要件が伝わらない場合は会話を切ろうとする。`,
-    goal: `冒頭10秒で用件と相手メリットを伝え、話す許可を取り、断りに1回だけ切り返してアポ打診または次接点を確定する。重点弱点は「${improvementFocus}」。`,
-    objections: ["今忙しいです", "資料を送ってください", "営業電話は結構です", "担当ではありません"],
+    customerRole: isGatekeeperFocus ? "受付または担当者" : "部門責任者",
+    customerProfile: isGatekeeperFocus
+      ? `${resolvedTargetSegment}領域の電話対応者。忙しく、営業電話には警戒している。短く要件が伝わらない場合は会話を切ろうとする。`
+      : `${resolvedTargetSegment}領域のキーマン本人。担当者にはつながっており、話は聞く姿勢がある。現状を大きく変える必要性、費用対効果、導入負荷、次に確認する価値が分かれば前向きになる。`,
+    goal: isGatekeeperFocus
+      ? `冒頭10秒で用件と相手メリットを伝え、話す許可を取り、断りに1回だけ切り返してアポ打診または次接点を確定する。重点弱点は「${improvementFocus}」。`
+      : `キーマン本人に対して、用件、相手メリット、判断材料を短く伝え、15分の確認日程候補提示まで進める。重点弱点は「${improvementFocus}」。`,
+    objections: isGatekeeperFocus
+      ? ["今忙しいです", "資料を送ってください", "営業電話は結構です", "担当ではありません"]
+      : ["それはうちの何に関係する話ですか", "費用対効果は見えますか", "導入の手間はどのくらいですか", "現状でも大きく困ってはいません"],
     evaluationCriteria: [
-      "冒頭10秒で会社名・用件・相手メリットを短く伝えている",
-      "いきなり説明せず、30秒だけよいかなど話す許可を取っている",
+      isGatekeeperFocus ? "冒頭10秒で会社名・用件・相手メリットを短く伝えている" : "キーマン本人に対して、会社名・用件・相手メリットを10秒以内に伝えている",
+      isGatekeeperFocus ? "『今忙しいです』を受け止め、いきなり説明せず30秒だけよいかなど話す許可を取っている" : "キーマン本人が聞き続けられるよう、用件と相手メリットを短く整理している",
       `重点弱点「${improvementFocus}」に対して、短く具体的な改善行動ができている`,
-      "断り文句に対して、粘りすぎず1回だけ自然に切り返している",
-      "受付または担当者に合わせて、担当者接続・確認質問・日程打診を切り替えている",
+      isGatekeeperFocus ? "断り文句に対して、粘りすぎず1回だけ自然に切り返している" : "本人の懸念に対して、効果・費用対効果・導入負荷のいずれかで判断材料を返している",
+      isGatekeeperFocus ? "受付または担当者に合わせて、担当者接続・確認質問・日程打診を切り替えている" : "担当者本人の現状や判断条件を1つだけ確認している",
       "長い商品説明ではなく、業界課題や相手メリットを一言で伝えている",
-      "資料送付だけで終わらせず、送付後の確認日程または短時間の打ち合わせ候補を提示している",
+      "資料送付だけで終わらせず、送付後の確認日程または15分程度の打ち合わせ候補を提示している",
       "相手の時間を奪わず、テンポよく会話を進めている",
     ],
     difficulty: "hard",

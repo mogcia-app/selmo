@@ -894,10 +894,15 @@ function evaluateTeleapoRoleplay(scenario: RoleplayScenario, messages: RoleplayM
   const salesMessages = messages.filter((message) => message.role === "sales");
   const salesText = salesMessages.map((message) => message.content).join(" ");
   const questionCount = (salesText.match(/？|\?/g) ?? []).length;
+  const isKeyPersonScenario = includesAny(
+    `${scenario.customerRole} ${scenario.customerProfile} ${scenario.goal} ${scenario.title}`,
+    ["担当者", "責任者", "キーマン", "決裁者", "部長", "代表", "オーナー", "院長", "店長"],
+  );
   const hasOpening = includesAny(salesText, ["お世話", "突然", "失礼", "こんにちは", "お忙しい"]);
   const hasPermission = includesAny(salesText, ["30秒", "少し", "今", "お時間", "よろしい", "大丈夫"]);
   const hasShortValue = includesAny(salesText, ["課題", "改善", "削減", "効率", "集客", "売上", "採用", "事例"]);
   const hasGatekeeper = includesAny(salesText, ["担当", "部署", "責任者", "どなた", "お繋ぎ", "ご担当"]);
+  const hasKeyPersonCheck = includesAny(salesText, ["現状", "判断", "確認", "課題", "お困り", "関係", "該当", "御社"]);
   const hasAppointment = includesAny(salesText, ["日程", "候補", "打ち合わせ", "15分", "30分", "来週", "明日", "アポ"]);
   const hasOneTurnRebuttal = includesAny(salesText, ["資料", "忙しい", "結構", "必要ない", "間に合", "改め"]);
   const fillerCount = (salesText.match(/えー|あの|まあ|まー|そのー|なんか|ちょっと/g) ?? []).length;
@@ -907,7 +912,7 @@ function evaluateTeleapoRoleplay(scenario: RoleplayScenario, messages: RoleplayM
     (hasOpening ? 10 : -8) +
     (hasPermission ? 14 : -12) +
     (hasShortValue ? 14 : -10) +
-    (hasGatekeeper ? 10 : -8) +
+    (isKeyPersonScenario ? (hasKeyPersonCheck ? 10 : -8) : (hasGatekeeper ? 10 : -8)) +
     (hasOneTurnRebuttal ? 10 : -6) +
     (hasAppointment ? 18 : -16) +
     Math.min(questionCount, 3) * 3 -
@@ -929,7 +934,8 @@ function evaluateTeleapoRoleplay(scenario: RoleplayScenario, messages: RoleplayM
   const improvements = [
     ...(!hasPermission ? ["冒頭で『30秒だけよろしいですか』のように、話す許可を取りましょう。"] : []),
     ...(!hasShortValue ? ["長い商品説明ではなく、相手に関係する課題仮説やメリットを一言で伝えましょう。"] : []),
-    ...(!hasGatekeeper ? ["受付や代表番号では、担当部署・担当者につなぐ確認を入れましょう。"] : []),
+    ...(!isKeyPersonScenario && !hasGatekeeper ? ["受付や代表番号では、担当部署・担当者につなぐ確認を入れましょう。"] : []),
+    ...(isKeyPersonScenario && !hasKeyPersonCheck ? ["キーマン本人には、受付突破ではなく『御社に関係あるかの確認』として現状や判断条件を1つだけ聞きましょう。"] : []),
     ...(!hasOneTurnRebuttal ? ["『忙しい』『資料送って』などの断りに、粘りすぎず1回だけ自然に切り返しましょう。"] : []),
     ...(!hasAppointment ? ["資料送付だけで終えず、短時間の打ち合わせ候補や次接点を提示しましょう。"] : []),
     ...(maxSalesTurnLength >= 180 ? ["1回の発話が長くなっています。電話口では短く区切って相手の反応を待ちましょう。"] : []),
@@ -1061,6 +1067,18 @@ function buildRoleplayResponseHint(scenario: RoleplayScenario, messages: Rolepla
 
 function buildTeleapoResponseHint(scenario: RoleplayScenario, normalizedText: string, productName: string): RoleplayResponseHint {
   if (includesAny(normalizedText, ["忙しい", "今無理", "時間ない", "結構", "大丈夫"])) {
+    const isKeyPersonScenario = includesAny(
+      `${scenario.customerRole} ${scenario.customerProfile} ${scenario.goal} ${scenario.title}`,
+      ["担当者", "責任者", "キーマン", "決裁者", "部長", "代表", "オーナー", "院長", "店長"],
+    );
+    if (isKeyPersonScenario) {
+      return {
+        breakthrough: "キーマン本人には受付突破ではなく、判断材料を短く返して次接点へ進める",
+        intent: "聞いてくれている前提で、要点と価値を短く整理する",
+        question: "判断いただくなら、効果・費用・導入負荷のどこを先に確認したいですか？",
+        phrase: `「ありがとうございます。${productName}が合うか判断いただくために、効果と導入負荷だけ15分で整理させてください。」`,
+      };
+    }
     return {
       breakthrough: "断りを受けたら説明を増やさず、30秒の許可取りに戻す",
       intent: "引かずに、短時間の許可取りに戻す",

@@ -477,7 +477,7 @@ function ScenarioCreateDialog({
               value={weaknessFocus}
               onChange={(event) => setWeaknessFocus(event.target.value)}
               className="min-h-[88px] w-full resize-y rounded-[14px] border border-[#e4e8ef] bg-white px-4 py-3 text-[14px] leading-7 text-[#171717] outline-none transition focus:border-[#e0bd4b]"
-              placeholder={roleplayType === "teleapo" ? "例：冒頭10秒で切られる / 受付突破ができない / 資料送ってで終わる / アポ打診に進めない" : "例：価格反論を受けると説明が長くなる / 決裁者確認を聞き切れない / 次回アクションを曖昧に終えてしまう"}
+              placeholder={roleplayType === "teleapo" ? "例：キーマンは聞いてくれるがアポ打診に進めない / 費用対効果を聞かれると詰まる / 導入負荷の懸念に答えられない / 資料送付で終わる" : "例：価格反論を受けると説明が長くなる / 決裁者確認を聞き切れない / 次回アクションを曖昧に終えてしまう"}
             />
             {weaknessSuggestions.length > 0 ? (
               <div className="mt-2 flex flex-wrap gap-2">
@@ -826,11 +826,12 @@ function buildWeaknessSuggestions(input: {
   roleplayType: RoleplayType;
 }) {
   const teleapoSuggestions = [
-    "冒頭10秒で用件を伝え、切られずに話す許可を取る",
-    "受付で止められた時に担当者接続まで進める",
+    "キーマン本人に要点を10秒で伝え、15分の確認日程へ進める",
+    "費用対効果の質問に短く答えてアポ打診へつなげる",
+    "導入負荷の懸念に答え、確認日程を提示する",
     "「資料送ってください」で終わらせずアポ打診へつなげる",
-    "「忙しい」「結構です」に1回だけ自然に切り返す",
-    "長く説明せず、相手の業界課題を一言で刺す",
+    "聞いてくれている相手に長く説明しすぎず、判断材料を一言で返す",
+    "受付で止められた時に担当者接続まで進める",
   ];
   const meetingSuggestions = [
     "価格反論に対して確認質問と効果訴求で切り返す",
@@ -849,7 +850,7 @@ function buildWeaknessSuggestions(input: {
         .filter(Boolean),
       ],
     ),
-  ).slice(0, 5);
+  ).slice(0, input.roleplayType === "teleapo" ? 6 : 5);
 }
 
 function buildLowEvaluationInsights(meeting: MeetingRecord) {
