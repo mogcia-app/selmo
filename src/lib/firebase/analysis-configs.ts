@@ -5,7 +5,7 @@ import {
   addDoc,
   collection,
   doc,
-  onSnapshot,
+  getDocs,
   query,
   serverTimestamp,
   setDoc,
@@ -76,16 +76,24 @@ export function subscribeToAnalysisConfigs(
   }
 
   const configsQuery = query(collection(firestore, "analysisConfigs"), where("companyId", "==", companyId));
-  return onSnapshot(
-    configsQuery,
-    (snapshot) =>
+  let isActive = true;
+
+  getDocs(configsQuery)
+    .then((snapshot) => {
+      if (!isActive) return;
       callback(
         snapshot.docs
           .map(mapAnalysisConfig)
           .sort((left, right) => (right.updatedAt?.getTime() ?? 0) - (left.updatedAt?.getTime() ?? 0)),
-      ),
-    onError,
-  );
+      );
+    })
+    .catch((error: FirestoreError) => {
+      if (isActive) onError?.(error);
+    });
+
+  return () => {
+    isActive = false;
+  };
 }
 
 export async function createAnalysisConfig(input: AnalysisConfigInput) {

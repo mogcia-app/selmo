@@ -1,6 +1,5 @@
 "use client";
 
-import { FirebaseError } from "firebase/app";
 import Image from "next/image";
 import Link from "next/link";
 import { useParams } from "next/navigation";
@@ -48,7 +47,6 @@ export default function AdminMemberDetailPage() {
   const [activityEvents, setActivityEvents] = useState<SalesActivityEvent[]>([]);
   const [customers, setCustomers] = useState<CustomerRecord[]>([]);
   const [customerLogs, setCustomerLogs] = useState<CustomerLogRecord[]>([]);
-  const [activityError, setActivityError] = useState<string | null>(null);
   const [guidanceComment, setGuidanceComment] = useState("");
   const [guidanceMessage, setGuidanceMessage] = useState<string | null>(null);
   const [isSendingGuidance, setIsSendingGuidance] = useState(false);
@@ -108,7 +106,7 @@ export default function AdminMemberDetailPage() {
       subscribeToSalesActivityEvents(
         adminProfile.companyId,
         setActivityEvents,
-        (nextError: FirebaseError) => setActivityError(nextError.message),
+        () => setActivityEvents([]),
       ),
       subscribeToCustomers(
         { companyId: adminProfile.companyId, isAdmin: true },
@@ -286,7 +284,7 @@ export default function AdminMemberDetailPage() {
           )}
         />
 
-        {error || activityError ? <ErrorBox message={error ?? activityError ?? ""} /> : null}
+        {error ? <ErrorBox message={error} /> : null}
 
         {member ? (
           <section className="mt-8 rounded-[24px] border border-[#eceef4] bg-white px-5 py-5 shadow-[0_10px_28px_rgba(17,24,39,0.05)]">

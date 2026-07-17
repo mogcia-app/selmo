@@ -4,11 +4,9 @@ import {
   FirestoreError,
   Timestamp,
   collection,
-  deleteDoc,
   doc,
   getDocs,
   getDoc,
-  onSnapshot,
   serverTimestamp,
   setDoc,
   updateDoc,
@@ -140,6 +138,8 @@ export type MeetingRecord = {
   audioSizeBytes: number | null;
   audioDurationSec: number | null;
   audioDeletedAt: Date | null;
+  deletedAt: Date | null;
+  deletedBy?: string | null;
   audioMimeType: string | null;
   processingStatus: ProcessingStatus | string;
   reanalysisCount: number;
@@ -278,13 +278,13 @@ export async function createMeeting(input: CreateMeetingInput) {
     companyId,
     userId: input.userId,
     type: hasTranscriptText ? "transcript_pasted" : "meeting_uploaded",
-    title: hasTranscriptText ? "文字起こし貼り付け" : salesDomain === "teleapo" ? "テレアポアップロード" : "商談アップロード",
+    title: hasTranscriptText ? "商談ログ貼り付け" : salesDomain === "teleapo" ? "テレアポ音声登録" : "商談音声登録",
     summary: `${input.customerName || (salesDomain === "teleapo" ? "未設定のテレアポ" : "未設定の商談")}を登録しました`,
     detail: [
       `顧客名: ${input.customerName || "未設定"}`,
       `商材: ${input.productType || "未設定"}`,
       `商談目的: ${getMeetingPurposeLabel(input.meetingPurpose ?? inferMeetingPurpose(input.customerType, input.status))}`,
-      `入力方法: ${hasTranscriptText ? "文字起こし貼り付け" : "音声アップロード"}`,
+      `入力方法: ${hasTranscriptText ? "商談ログ貼り付け" : "音声からログ作成"}`,
       `ステータス: ${input.status}`,
     ].join("\n"),
     href: `/admin/meetings/${meetingRef.id}`,
@@ -304,10 +304,10 @@ export async function createMeeting(input: CreateMeetingInput) {
       companyId,
       userId: input.userId,
       meetingId: meetingRef.id,
-      title: hasTranscriptText ? "文字起こしを登録しました" : "商談を登録しました",
+      title: hasTranscriptText ? "商談ログを登録しました" : "音声を登録しました",
       body: hasTranscriptText
-        ? "登録した文字起こしから、要約や分析を開始できます。"
-        : "商談情報を保存しました。",
+        ? "登録した商談ログから、要約や分析を開始できます。"
+        : "音声から分析用ログを作成できます。",
     }).catch(() => undefined);
     return meetingRef.id;
   }
@@ -471,6 +471,7 @@ function buildConversationLogsFromText(text: string): MeetingConversationLog[] {
   let currentLines: string[] = [];
   let currentHasExplicitSpeaker = false;
   let nextUnlabeledSpeakerIndex = 1;
+  const explicitSpeakerSlots = new Map<string, MeetingConversationLog["speaker"]>();
 
   function flushCurrent() {
     const body = currentLines.join("\n").trim();
@@ -498,7 +499,7 @@ function buildConversationLogsFromText(text: string): MeetingConversationLog[] {
 
     if (inlineSpeakerLine) {
       flushCurrent();
-      currentSpeaker = inferPastedTranscriptSpeaker(inlineSpeakerLine.label);
+      currentSpeaker = inferPastedTranscriptSpeaker(inlineSpeakerLine.label, explicitSpeakerSlots);
       currentLabel = inlineSpeakerLine.label;
       currentHasExplicitSpeaker = true;
       if (inlineSpeakerLine.text) {
@@ -511,7 +512,7 @@ function buildConversationLogsFromText(text: string): MeetingConversationLog[] {
 
     if (speakerLabel) {
       flushCurrent();
-      currentSpeaker = inferPastedTranscriptSpeaker(speakerLabel);
+      currentSpeaker = inferPastedTranscriptSpeaker(speakerLabel, explicitSpeakerSlots);
       currentLabel = speakerLabel;
       currentHasExplicitSpeaker = true;
       continue;
@@ -607,9 +608,13 @@ function isKnownPastedTranscriptSpeakerLabel(label: string) {
     /^[一-龠][一-龠ぁ-んァ-ヶA-Za-z\s　・.]{0,15}$/.test(label);
 }
 
-function inferPastedTranscriptSpeaker(label: string): MeetingConversationLog["speaker"] {
+function inferPastedTranscriptSpeaker(label: string, speakerSlots: Map<string, MeetingConversationLog["speaker"]>): MeetingConversationLog["speaker"] {
   if (/^(顧客|お客様|お客さま|クライアント|相手|先方)$/.test(label)) {
     return "customer";
+  }
+
+  if (/^(営業|担当)$/.test(label)) {
+    return "sales";
   }
 
   if (/^Speaker\s*1$/i.test(label) || /^話者\s*1$/.test(label)) {
@@ -628,7 +633,13 @@ function inferPastedTranscriptSpeaker(label: string): MeetingConversationLog["sp
     return "unknown";
   }
 
-  return "sales";
+  const normalizedLabel = label.trim();
+  const existing = speakerSlots.get(normalizedLabel);
+  if (existing) return existing;
+
+  const nextSpeaker = speakerSlots.size % 2 === 0 ? "speaker_1" : "speaker_2";
+  speakerSlots.set(normalizedLabel, nextSpeaker);
+  return nextSpeaker;
 }
 
 export async function fetchMeeting(meetingId: string) {
@@ -648,6 +659,7 @@ export function subscribeToMeetings(
     userId: string;
     companyId?: string | null;
     salesDomains?: SalesDomain[];
+    includeDeleted?: boolean;
   },
   callback: (meetings: MeetingRecord[]) => void,
   onError?: (error: FirestoreError) => void,
@@ -675,40 +687,38 @@ export function subscribeToMeetings(
           )
         : [query(meetingsRef, where("companyId", "==", input.companyId), where("userId", "==", input.userId))];
 
-  const snapshotsByIndex = new Map<number, MeetingRecord[]>();
-  const unsubscribers = meetingsQueries.map((meetingsQuery, index) =>
-    onSnapshot(
-      meetingsQuery,
-      (snapshot) => {
-        snapshotsByIndex.set(
-          index,
-          snapshot.docs.map((docSnapshot) =>
-            mapMeetingRecord(docSnapshot.id, docSnapshot.data() as Record<string, unknown>),
-          ),
-        );
+  let isActive = true;
 
-        const recordsById = new Map<string, MeetingRecord>();
-        snapshotsByIndex.forEach((records) => {
-          records.forEach((record) => recordsById.set(record.id, record));
+  Promise.all(meetingsQueries.map((meetingsQuery) => getDocs(meetingsQuery)))
+    .then((snapshots) => {
+      if (!isActive) return;
+
+      const recordsById = new Map<string, MeetingRecord>();
+      snapshots.forEach((snapshot) => {
+        snapshot.docs.forEach((docSnapshot) => {
+          recordsById.set(
+            docSnapshot.id,
+            mapMeetingRecord(docSnapshot.id, docSnapshot.data() as Record<string, unknown>),
+          );
+        });
+      });
+
+      const meetings = Array.from(recordsById.values())
+        .filter((record) => input.includeDeleted || !record.deletedAt)
+        .sort((left, right) => {
+          const leftTime = left.recordedAt?.getTime() ?? 0;
+          const rightTime = right.recordedAt?.getTime() ?? 0;
+          return rightTime - leftTime;
         });
 
-        const meetings = Array.from(recordsById.values())
-          .sort((left, right) => {
-            const leftTime = left.recordedAt?.getTime() ?? 0;
-            const rightTime = right.recordedAt?.getTime() ?? 0;
-            return rightTime - leftTime;
-          });
-
-        callback(meetings);
-      },
-      (error) => {
-        onError?.(error);
-      },
-    ),
-  );
+      callback(meetings);
+    })
+    .catch((error: FirestoreError) => {
+      if (isActive) onError?.(error);
+    });
 
   return () => {
-    unsubscribers.forEach((unsubscribe) => unsubscribe());
+    isActive = false;
   };
 }
 
@@ -718,22 +728,25 @@ export function subscribeToMeeting(
   onError?: (error: FirestoreError) => void,
 ): Unsubscribe {
   const { firestore } = assertFirebaseClient();
-  return onSnapshot(
-    doc(firestore, "meetings", meetingId),
-    (snapshot) => {
+  let isActive = true;
+
+  getDoc(doc(firestore, "meetings", meetingId))
+    .then((snapshot) => {
+      if (!isActive) return;
       if (!snapshot.exists()) {
         callback(null);
         return;
       }
 
       callback(mapMeetingRecord(snapshot.id, snapshot.data() as Record<string, unknown>));
-    },
-    (error) => {
-      if (onError) {
-        onError(error);
-      }
-    },
-  );
+    })
+    .catch((error: FirestoreError) => {
+      if (isActive) onError?.(error);
+    });
+
+  return () => {
+    isActive = false;
+  };
 }
 
 export async function saveMeetingTranscriptionProbe(
@@ -897,14 +910,21 @@ export async function saveMeetingAdminComment(
   });
 }
 
-export async function deleteMeetingRecord(meeting: MeetingRecord) {
+export async function deleteMeetingRecord(meeting: MeetingRecord, deletedBy?: string | null) {
   const { firestore, firebaseStorage } = assertFirebaseClient();
 
   if (meeting.audioFilePath) {
     await deleteObject(ref(firebaseStorage, meeting.audioFilePath)).catch(() => undefined);
   }
 
-  await deleteDoc(doc(firestore, "meetings", meeting.id));
+  await updateDoc(doc(firestore, "meetings", meeting.id), {
+    audioFilePath: null,
+    audioDownloadUrl: null,
+    audioDeletedAt: serverTimestamp(),
+    deletedAt: serverTimestamp(),
+    deletedBy: deletedBy ?? null,
+    updatedAt: serverTimestamp(),
+  });
 }
 
 function buildMeetingAudioPath(userId: string, meetingId: string, fileName: string) {
@@ -972,6 +992,8 @@ function mapMeetingRecord(id: string, data: Record<string, unknown>): MeetingRec
     audioSizeBytes: toNullableNumber(data.audioSizeBytes),
     audioDurationSec: toNullableNumber(data.audioDurationSec),
     audioDeletedAt: toDateValue(data.audioDeletedAt),
+    deletedAt: toDateValue(data.deletedAt),
+    deletedBy: toNullableString(data.deletedBy),
     audioMimeType: toNullableString(data.audioMimeType),
     processingStatus: String(data.processingStatus ?? "uploaded"),
     reanalysisCount: Number(data.reanalysisCount ?? 0),

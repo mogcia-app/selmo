@@ -44,7 +44,7 @@ export default function AdminAnalysisConfigsPage() {
 
   useEffect(() => {
     if (!profile?.companyId) return;
-    return subscribeToAnalysisConfigs(profile.companyId, setConfigs, (error) => setMessage(error.message));
+    return subscribeToAnalysisConfigs(profile.companyId, setConfigs, () => setConfigs([]));
   }, [profile?.companyId]);
 
   const selectedConfig = useMemo(

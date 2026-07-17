@@ -1,6 +1,5 @@
 "use client";
 
-import { FirebaseError } from "firebase/app";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
@@ -137,7 +136,7 @@ export default function SalesCustomersPage() {
     return subscribeToCustomers(
       { companyId: profile.companyId, userId: profile.uid, isAdmin: false },
       setCustomers,
-      (nextError: FirebaseError) => setErrorMessage(nextError.message),
+      () => setCustomers([]),
     );
   }, [profile?.companyId, profile?.uid]);
 
@@ -151,11 +150,11 @@ export default function SalesCustomersPage() {
       subscribeToKnowledgeProducts(
         profile.companyId,
         setProducts,
-        (nextError: FirebaseError) => setErrorMessage(nextError.message),
+        () => setProducts([]),
       ),
       subscribeToUserProfiles(
         (profiles) => setSalesUsers(profiles.filter((user) => user.role === "sales" && user.status === "active")),
-        (nextError: FirebaseError) => setErrorMessage(nextError.message),
+        () => setSalesUsers([]),
         profile.companyId,
       ),
     ];

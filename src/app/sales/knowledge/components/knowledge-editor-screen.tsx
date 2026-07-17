@@ -1,6 +1,5 @@
 "use client";
 
-import { FirebaseError } from "firebase/app";
 import Image from "next/image";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -110,10 +109,9 @@ export function KnowledgeEditorScreen({ mode, knowledgeId, audience = "sales" }:
       setSalesUsers([]);
       return;
     }
-    const handleError = (nextError: FirebaseError) => setError(nextError.message);
     const unsubscribers = [
-      subscribeToKnowledgeProducts(companyId, setProducts, handleError),
-      subscribeToUserProfiles(setSalesUsers, handleError, companyId),
+      subscribeToKnowledgeProducts(companyId, setProducts, () => setProducts([])),
+      subscribeToUserProfiles(setSalesUsers, () => setSalesUsers([]), companyId),
     ];
 
     return () => {
@@ -130,7 +128,10 @@ export function KnowledgeEditorScreen({ mode, knowledgeId, audience = "sales" }:
     return subscribeToKnowledgeItem(
       knowledgeId,
       setKnowledge,
-      (nextError: FirebaseError) => setError(nextError.message),
+      () => {
+        setKnowledge(null);
+        setError("このナレッジは表示できません。");
+      },
     );
   }, [canAccessKnowledge, knowledgeId, mode]);
 
@@ -164,7 +165,7 @@ export function KnowledgeEditorScreen({ mode, knowledgeId, audience = "sales" }:
     return subscribeToKnowledgeItemsByProduct(
       { productId, userId, companyId },
       setProductKnowledgeItems,
-      (nextError: FirebaseError) => setError(nextError.message),
+      () => setProductKnowledgeItems([]),
     );
   }, [canAccessKnowledge, companyId, mode, productId, userId]);
 

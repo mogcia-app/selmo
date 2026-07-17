@@ -4,7 +4,7 @@ import {
   addDoc,
   collection,
   doc,
-  onSnapshot,
+  getDoc,
   serverTimestamp,
   setDoc,
   Timestamp,
@@ -160,31 +160,45 @@ export function subscribeToAudioProcessingJob(
   onError?: (error: Error) => void,
 ) {
   const { firestore } = assertFirebaseClient();
+  let isActive = true;
+  let timeoutId: ReturnType<typeof setTimeout> | null = null;
 
-  return onSnapshot(
-    doc(firestore, "audioProcessingJobs", meetingId),
-    (snapshot) => {
+  const loadJob = async () => {
+    try {
+      const snapshot = await getDoc(doc(firestore, "audioProcessingJobs", meetingId));
+      if (!isActive) return;
       if (!snapshot.exists()) {
         onNext(null);
-        return;
+      } else {
+        const data = snapshot.data() as Record<string, unknown>;
+        const status = String(data.status ?? "waiting");
+        onNext({
+          meetingId,
+          status,
+          transcriptionJobName: toNullableString(data.transcriptionJobName),
+          transcriptionJobOperationName: toNullableString(data.transcriptionJobOperationName),
+          transcriptionJobQueuedAt: toDateValue(data.transcriptionJobQueuedAt),
+          transcriptionTaskName: toNullableString(data.transcriptionTaskName),
+          transcriptionTaskQueuedAt: toDateValue(data.transcriptionTaskQueuedAt),
+          updatedAt: toDateValue(data.updatedAt),
+        });
+        if (status === "completed" || status === "failed") {
+          isActive = false;
+        }
       }
+    } catch (error) {
+      if (isActive) onError?.(error instanceof Error ? error : new Error(String(error)));
+    } finally {
+      if (isActive) timeoutId = setTimeout(loadJob, 3000);
+    }
+  };
 
-      const data = snapshot.data() as Record<string, unknown>;
-      onNext({
-        meetingId,
-        status: String(data.status ?? "waiting"),
-        transcriptionJobName: toNullableString(data.transcriptionJobName),
-        transcriptionJobOperationName: toNullableString(data.transcriptionJobOperationName),
-        transcriptionJobQueuedAt: toDateValue(data.transcriptionJobQueuedAt),
-        transcriptionTaskName: toNullableString(data.transcriptionTaskName),
-        transcriptionTaskQueuedAt: toDateValue(data.transcriptionTaskQueuedAt),
-        updatedAt: toDateValue(data.updatedAt),
-      });
-    },
-    (error) => {
-      onError?.(error);
-    },
-  );
+  void loadJob();
+
+  return () => {
+    isActive = false;
+    if (timeoutId) clearTimeout(timeoutId);
+  };
 }
 
 function toNullableString(value: unknown) {

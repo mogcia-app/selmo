@@ -4,7 +4,7 @@ import {
   Timestamp,
   addDoc,
   collection,
-  onSnapshot,
+  getDocs,
   query,
   serverTimestamp,
   where,
@@ -72,11 +72,9 @@ export function subscribeToCalendarEvents(
     (domain): domain is SalesDomain => domain === "meeting" || domain === "teleapo",
   );
   const targetDomains = salesDomains.length > 0 ? salesDomains : [null];
-  const recordsById = new Map<string, CalendarEvent>();
-  const loadedIndexes = new Set<number>();
   let isActive = true;
 
-  const unsubscribers = targetDomains.map((salesDomain, index) => {
+  const eventsQueries = targetDomains.map((salesDomain) => {
     const baseConstraints = [
       where("companyId", "==", input.companyId),
       ...(salesDomain ? [where("salesDomain", "==", salesDomain)] : []),
@@ -88,33 +86,30 @@ export function subscribeToCalendarEvents(
           ...baseConstraints,
           where("userId", "==", input.userId),
         );
-
-    return onSnapshot(
-      eventsQuery,
-      (snapshot) => {
-        if (!isActive) return;
-        snapshot.docChanges().forEach((change) => {
-          if (change.type === "removed") {
-            recordsById.delete(change.doc.id);
-          } else {
-            recordsById.set(change.doc.id, mapCalendarEvent(change.doc));
-          }
-        });
-        loadedIndexes.add(index);
-        if (loadedIndexes.size !== targetDomains.length) return;
-        callback(
-          Array.from(recordsById.values()).sort(
-            (left, right) => (left.scheduledAt?.getTime() ?? 0) - (right.scheduledAt?.getTime() ?? 0),
-          ),
-        );
-      },
-      onError,
-    );
+    return eventsQuery;
   });
+
+  Promise.all(eventsQueries.map((eventsQuery) => getDocs(eventsQuery)))
+    .then((snapshots) => {
+      if (!isActive) return;
+      const recordsById = new Map<string, CalendarEvent>();
+      snapshots.forEach((snapshot) => {
+        snapshot.docs.forEach((docSnapshot) => {
+          recordsById.set(docSnapshot.id, mapCalendarEvent(docSnapshot));
+        });
+      });
+      callback(
+        Array.from(recordsById.values()).sort(
+          (left, right) => (left.scheduledAt?.getTime() ?? 0) - (right.scheduledAt?.getTime() ?? 0),
+        ),
+      );
+    })
+    .catch((error: FirestoreError) => {
+      if (isActive) onError?.(error);
+    });
 
   return () => {
     isActive = false;
-    unsubscribers.forEach((unsubscribe) => unsubscribe());
   };
 }
 

@@ -4,7 +4,7 @@ import {
   Timestamp,
   addDoc,
   collection,
-  onSnapshot,
+  getDocs,
   query,
   serverTimestamp,
   setDoc,
@@ -77,17 +77,24 @@ export function subscribeToSalesManuals(
     return () => undefined;
   }
   const manualsQuery = query(collection(firestore, "salesManuals"), where("companyId", "==", companyId));
+  let isActive = true;
 
-  return onSnapshot(
-    manualsQuery,
-    (snapshot) =>
+  getDocs(manualsQuery)
+    .then((snapshot) => {
+      if (!isActive) return;
       callback(
         snapshot.docs
           .map(mapSalesManual)
           .sort((left, right) => (right.updatedAt?.getTime() ?? 0) - (left.updatedAt?.getTime() ?? 0)),
-      ),
-    onError,
-  );
+      );
+    })
+    .catch((error: FirestoreError) => {
+      if (isActive) onError?.(error);
+    });
+
+  return () => {
+    isActive = false;
+  };
 }
 
 export async function createSalesManual(input: SalesManualInput) {

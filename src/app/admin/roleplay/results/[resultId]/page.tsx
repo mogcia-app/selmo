@@ -1,6 +1,5 @@
 "use client";
 
-import { FirebaseError } from "firebase/app";
 import Link from "next/link";
 import { useParams, useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
@@ -21,7 +20,6 @@ export default function AdminRoleplayResultDetailPage() {
   const companyId = profile?.companyId;
   const canAccessRoleplay = !profile || canUseSalesDomain(profile, requestedRoleplayType);
   const [results, setResults] = useState<RoleplayResult[]>([]);
-  const [error, setError] = useState<string | null>(null);
   const result = useMemo(() => results.find((item) => item.id === params.resultId) ?? null, [params.resultId, results]);
   const roleplayType = result?.roleplayType ?? requestedRoleplayType;
 
@@ -34,7 +32,7 @@ export default function AdminRoleplayResultDetailPage() {
     return subscribeToRoleplayResults(
       { userId, companyId, isAdmin: true },
       setResults,
-      (nextError: FirebaseError) => setError(nextError.message),
+      () => setResults([]),
     );
   }, [canAccessRoleplay, companyId, requestedRoleplayType, userId]);
 
@@ -52,12 +50,6 @@ export default function AdminRoleplayResultDetailPage() {
             一覧へ戻る
           </Link>
         </div>
-
-        {error ? (
-          <div className="mt-4 rounded-[16px] border border-[#f4d4d4] bg-[#fff8f8] px-4 py-3 text-[13px] font-medium text-[#b4232a]">
-            {error}
-          </div>
-        ) : null}
 
         <section className="mt-3">
           {result ? (

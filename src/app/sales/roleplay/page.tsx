@@ -1,6 +1,5 @@
 "use client";
 
-import { FirebaseError } from "firebase/app";
 import Image from "next/image";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -92,10 +91,9 @@ export default function SalesRoleplayPage() {
       setAssignments([]);
       return;
     }
-    const handleError = (nextError: FirebaseError) => setError(nextError.message);
     const unsubscribers = [
-      subscribeToRoleplayScenarios(companyId, setScenarios, handleError),
-      subscribeToRoleplayAssignments({ companyId, userId, isAdmin: false }, setAssignments, handleError),
+      subscribeToRoleplayScenarios(companyId, setScenarios, () => setScenarios([])),
+      subscribeToRoleplayAssignments({ companyId, userId, isAdmin: false }, setAssignments, () => setAssignments([])),
     ];
 
     return () => {

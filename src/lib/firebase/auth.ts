@@ -14,7 +14,7 @@ import {
   collection,
   doc,
   getDoc,
-  onSnapshot,
+  getDocs,
   query,
   serverTimestamp,
   setDoc,
@@ -281,10 +281,11 @@ export function subscribeToUserProfiles(
     return () => undefined;
   }
   const usersQuery = query(collection(firestore, "users"), where("companyId", "==", companyId));
+  let isActive = true;
 
-  return onSnapshot(
-    usersQuery,
-    (snapshot) => {
+  getDocs(usersQuery)
+    .then((snapshot) => {
+      if (!isActive) return;
       callback(
         snapshot.docs
           .map((userSnapshot) => {
@@ -365,9 +366,14 @@ export function subscribeToUserProfiles(
           })
           .filter((profile): profile is AppUserProfile => Boolean(profile)),
       );
-    },
-    onError,
-  );
+    })
+    .catch((error: FirestoreError) => {
+      if (isActive) onError?.(error);
+    });
+
+  return () => {
+    isActive = false;
+  };
 }
 
 export async function uploadUserAvatar(input: { userId: string; file: File }) {

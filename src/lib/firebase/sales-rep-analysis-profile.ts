@@ -2,7 +2,7 @@
 
 import {
   doc,
-  onSnapshot,
+  getDoc,
   runTransaction,
   serverTimestamp,
   type FirestoreError,
@@ -48,13 +48,19 @@ export function subscribeToSalesRepAnalysisProfile(
     return () => undefined;
   }
 
-  return onSnapshot(
-    doc(firestore, "salesRepAnalysisProfiles", input.userId),
-    (snapshot) => {
+  let isActive = true;
+  getDoc(doc(firestore, "salesRepAnalysisProfiles", input.userId))
+    .then((snapshot) => {
+      if (!isActive) return;
       callback(snapshot.exists() ? mapSalesRepAnalysisProfile(snapshot.data() as Record<string, unknown>) : null);
-    },
-    onError,
-  );
+    })
+    .catch((error: FirestoreError) => {
+      if (isActive) onError?.(error);
+    });
+
+  return () => {
+    isActive = false;
+  };
 }
 
 export async function updateSalesRepAnalysisProfileFromMeeting(input: {

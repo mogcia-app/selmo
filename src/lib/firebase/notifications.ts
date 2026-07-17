@@ -4,7 +4,7 @@ import {
   addDoc,
   collection,
   doc,
-  onSnapshot,
+  getDocs,
   query,
   serverTimestamp,
   updateDoc,
@@ -37,9 +37,11 @@ export function subscribeToAppNotifications(
     where("companyId", "==", input.companyId),
     where("userId", "==", input.userId),
   );
-  return onSnapshot(
-    notificationsQuery,
-    (snapshot) => {
+  let isActive = true;
+
+  getDocs(notificationsQuery)
+    .then((snapshot) => {
+      if (!isActive) return;
       callback(
         snapshot.docs
           .map((docSnapshot) => {
@@ -59,9 +61,14 @@ export function subscribeToAppNotifications(
           .sort((left, right) => (right.createdAt?.getTime() ?? 0) - (left.createdAt?.getTime() ?? 0))
           .slice(0, 3),
       );
-    },
-    onError,
-  );
+    })
+    .catch((error: FirestoreError) => {
+      if (isActive) onError?.(error);
+    });
+
+  return () => {
+    isActive = false;
+  };
 }
 
 export async function markAppNotificationRead(notificationId: string) {

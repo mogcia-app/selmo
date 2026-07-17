@@ -1,6 +1,5 @@
 "use client";
 
-import { FirebaseError } from "firebase/app";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
@@ -142,7 +141,11 @@ export default function SalesCustomerDetailPage() {
           setFormState(buildFormState(nextCustomer));
         }
       },
-      (nextError: FirebaseError) => setErrorMessage(nextError.message),
+      () => {
+        setCustomer(null);
+        setFormState(null);
+        setErrorMessage("この顧客カルテは表示できません。");
+      },
     );
   }, [params.customerId]);
 
@@ -152,12 +155,12 @@ export default function SalesCustomerDetailPage() {
       subscribeToCustomerLogs(
         { companyId: profile.companyId, customerId: params.customerId, userId: profile.uid, isAdmin: false },
         setLogs,
-        (nextError: FirebaseError) => setErrorMessage(nextError.message),
+        () => setLogs([]),
       ),
       subscribeToCustomerMeetings(
         { companyId: profile.companyId, customerId: params.customerId },
         (links) => setLinkedMeetingIds(links.map((link) => link.meetingId)),
-        (nextError: FirebaseError) => setErrorMessage(nextError.message),
+        () => setLinkedMeetingIds([]),
       ),
       subscribeToMeetings(
         {
@@ -167,7 +170,7 @@ export default function SalesCustomerDetailPage() {
           salesDomains: allowedSalesDomains,
         },
         setMeetings,
-        (nextError: FirebaseError) => setErrorMessage(nextError.message),
+        () => setMeetings([]),
       ),
     ];
 
@@ -184,11 +187,11 @@ export default function SalesCustomerDetailPage() {
       subscribeToKnowledgeProducts(
         profile.companyId,
         setProducts,
-        (nextError: FirebaseError) => setErrorMessage(nextError.message),
+        () => setProducts([]),
       ),
       subscribeToUserProfiles(
         (profiles) => setSalesUsers(profiles.filter((user) => user.role === "sales" && user.status === "active")),
-        (nextError: FirebaseError) => setErrorMessage(nextError.message),
+        () => setSalesUsers([]),
         profile.companyId,
       ),
     ];

@@ -1,6 +1,5 @@
 "use client";
 
-import { FirebaseError } from "firebase/app";
 import Image from "next/image";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
@@ -28,7 +27,6 @@ export default function SalesKnowledgePage() {
   const [searchTerm, setSearchTerm] = useState("");
   const [products, setProducts] = useState<KnowledgeProduct[]>([]);
   const [searchHistory, setSearchHistory] = useState<KnowledgeSearchHistory[]>([]);
-  const [error, setError] = useState<string | null>(null);
   const [productDialogOpen, setProductDialogOpen] = useState(false);
   const userId = profile?.uid;
   const companyId = profile?.companyId;
@@ -46,12 +44,9 @@ export default function SalesKnowledgePage() {
       return;
     }
 
-    const handleError = (nextError: FirebaseError) => {
-      setError(nextError.message);
-    };
     const unsubscribers = [
-      subscribeToKnowledgeProducts(companyId, setProducts, handleError),
-      subscribeToRecentKnowledgeSearches(userId, setSearchHistory, handleError),
+      subscribeToKnowledgeProducts(companyId, setProducts, () => setProducts([])),
+      subscribeToRecentKnowledgeSearches(userId, setSearchHistory, () => setSearchHistory([])),
     ];
 
     return () => {
@@ -193,12 +188,6 @@ export default function SalesKnowledgePage() {
           </section>
 
         </header>
-
-      {error ? (
-        <div className="mt-5 rounded-[16px] border border-[#f4d4d4] bg-[#fff8f8] px-4 py-3 text-[13px] font-medium text-[#b4232a]">
-          {error}
-        </div>
-      ) : null}
 
       <section className="mt-6 rounded-[28px] border border-[#eceef4] bg-white p-5 shadow-[0_12px_34px_rgba(17,24,39,0.04)] md:p-6">
         <div className="flex flex-wrap items-center justify-between gap-3">

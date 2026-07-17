@@ -6,9 +6,10 @@ import {
   addDoc,
   collection,
   doc,
+  getDoc,
+  getDocs,
   increment,
   limit,
-  onSnapshot,
   orderBy,
   query,
   runTransaction,
@@ -193,17 +194,24 @@ export function subscribeToKnowledgeCategories(
     return () => undefined;
   }
   const categoriesQuery = query(collection(firestore, "knowledgeCategories"), where("companyId", "==", companyId));
+  let isActive = true;
 
-  return onSnapshot(
-    categoriesQuery,
-    (snapshot) =>
+  getDocs(categoriesQuery)
+    .then((snapshot) => {
+      if (!isActive) return;
       callback(
         mergeSystemCategory(snapshot.docs.map(mapKnowledgeCategory)).sort(
           (left, right) => (right.updatedAt?.getTime() ?? 0) - (left.updatedAt?.getTime() ?? 0),
         ),
-      ),
-    onError,
-  );
+      );
+    })
+    .catch((error: FirestoreError) => {
+      if (isActive) onError?.(error);
+    });
+
+  return () => {
+    isActive = false;
+  };
 }
 
 export function subscribeToKnowledgeProducts(
@@ -217,17 +225,24 @@ export function subscribeToKnowledgeProducts(
     return () => undefined;
   }
   const productsQuery = query(collection(firestore, "knowledgeProducts"), where("companyId", "==", companyId));
+  let isActive = true;
 
-  return onSnapshot(
-    productsQuery,
-    (snapshot) =>
+  getDocs(productsQuery)
+    .then((snapshot) => {
+      if (!isActive) return;
       callback(
         snapshot.docs
           .map(mapKnowledgeProduct)
           .sort((left, right) => (right.updatedAt?.getTime() ?? 0) - (left.updatedAt?.getTime() ?? 0)),
-      ),
-    onError,
-  );
+      );
+    })
+    .catch((error: FirestoreError) => {
+      if (isActive) onError?.(error);
+    });
+
+  return () => {
+    isActive = false;
+  };
 }
 
 export function subscribeToVisibleKnowledgeItems(
@@ -243,17 +258,24 @@ export function subscribeToVisibleKnowledgeItems(
 
   if (input.role === "admin") {
     const allItemsQuery = query(collection(firestore, "knowledgeItems"), where("companyId", "==", input.companyId));
+    let isActive = true;
 
-    return onSnapshot(
-      allItemsQuery,
-      (snapshot) =>
+    getDocs(allItemsQuery)
+      .then((snapshot) => {
+        if (!isActive) return;
         callback(
           mergeSystemKnowledgeItems(snapshot.docs.map(mapKnowledgeItem), input.role).sort(
             (left, right) => (right.updatedAt?.getTime() ?? 0) - (left.updatedAt?.getTime() ?? 0),
           ),
-        ),
-      onError,
-    );
+        );
+      })
+      .catch((error: FirestoreError) => {
+        if (isActive) onError?.(error);
+      });
+
+    return () => {
+      isActive = false;
+    };
   }
 
   const sharedQuery = query(
@@ -272,37 +294,31 @@ export function subscribeToVisibleKnowledgeItems(
     where("sharedWithUserIds", "array-contains", input.userId),
   );
 
-  const snapshotsBySource = new Map<string, KnowledgeItem[]>();
-  const emitItems = () => {
-    const itemsById = new Map<string, KnowledgeItem>();
+  let isActive = true;
+  Promise.all([getDocs(sharedQuery), getDocs(personalQuery), getDocs(assignedQuery)])
+    .then((snapshots) => {
+      if (!isActive) return;
+      const itemsById = new Map<string, KnowledgeItem>();
 
-    Array.from(snapshotsBySource.values()).flat().forEach((item) => {
-      itemsById.set(item.id, item);
+      snapshots
+        .flatMap((snapshot) => snapshot.docs.map(mapKnowledgeItem))
+        .forEach((item) => {
+          itemsById.set(item.id, item);
+        });
+
+      callback(
+        mergeSystemKnowledgeItems(Array.from(itemsById.values()), input.role).sort(
+          (left, right) => (right.updatedAt?.getTime() ?? 0) - (left.updatedAt?.getTime() ?? 0),
+        ),
+      );
+    })
+    .catch((error: FirestoreError) => {
+      if (isActive) onError?.(error);
     });
 
-    callback(
-      mergeSystemKnowledgeItems(Array.from(itemsById.values()), input.role).sort(
-        (left, right) => (right.updatedAt?.getTime() ?? 0) - (left.updatedAt?.getTime() ?? 0),
-      ),
-    );
+  return () => {
+    isActive = false;
   };
-
-  const unsubscribers = [
-    onSnapshot(sharedQuery, (snapshot) => {
-      snapshotsBySource.set("shared", snapshot.docs.map(mapKnowledgeItem));
-      emitItems();
-    }, onError),
-    onSnapshot(personalQuery, (snapshot) => {
-      snapshotsBySource.set("personal", snapshot.docs.map(mapKnowledgeItem));
-      emitItems();
-    }, onError),
-    onSnapshot(assignedQuery, (snapshot) => {
-      snapshotsBySource.set("assigned", snapshot.docs.map(mapKnowledgeItem));
-      emitItems();
-    }, onError),
-  ];
-
-  return () => unsubscribers.forEach((unsubscribe) => unsubscribe());
 }
 
 export function subscribeToAllKnowledgeItems(
@@ -316,17 +332,24 @@ export function subscribeToAllKnowledgeItems(
     return () => undefined;
   }
   const itemsQuery = query(collection(firestore, "knowledgeItems"), where("companyId", "==", companyId));
+  let isActive = true;
 
-  return onSnapshot(
-    itemsQuery,
-    (snapshot) =>
+  getDocs(itemsQuery)
+    .then((snapshot) => {
+      if (!isActive) return;
       callback(
         mergeSystemKnowledgeItems(snapshot.docs.map(mapKnowledgeItem)).sort(
           (left, right) => (right.updatedAt?.getTime() ?? 0) - (left.updatedAt?.getTime() ?? 0),
         ),
-      ),
-    onError,
-  );
+      );
+    })
+    .catch((error: FirestoreError) => {
+      if (isActive) onError?.(error);
+    });
+
+  return () => {
+    isActive = false;
+  };
 }
 
 export function subscribeToKnowledgeItemsByCategory(
@@ -365,14 +388,20 @@ export function subscribeToKnowledgeItem(
   }
 
   const { firestore } = assertFirebaseClient();
+  let isActive = true;
 
-  return onSnapshot(
-    doc(firestore, "knowledgeItems", knowledgeId),
-    (snapshot) => {
+  getDoc(doc(firestore, "knowledgeItems", knowledgeId))
+    .then((snapshot) => {
+      if (!isActive) return;
       callback(snapshot.exists() ? mapKnowledgeItem(snapshot) : null);
-    },
-    onError,
-  );
+    })
+    .catch((error: FirestoreError) => {
+      if (isActive) onError?.(error);
+    });
+
+  return () => {
+    isActive = false;
+  };
 }
 
 export function subscribeToRecentKnowledgeSearches(
@@ -386,12 +415,19 @@ export function subscribeToRecentKnowledgeSearches(
     orderBy("searchedAt", "desc"),
     limit(5),
   );
+  let isActive = true;
 
-  return onSnapshot(
-    historyQuery,
-    (snapshot) => callback(snapshot.docs.map(mapSearchHistory)),
-    onError,
-  );
+  getDocs(historyQuery)
+    .then((snapshot) => {
+      if (isActive) callback(snapshot.docs.map(mapSearchHistory));
+    })
+    .catch((error: FirestoreError) => {
+      if (isActive) onError?.(error);
+    });
+
+  return () => {
+    isActive = false;
+  };
 }
 
 export async function saveKnowledgeSearch(userId: string, term: string) {

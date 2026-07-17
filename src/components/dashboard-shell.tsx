@@ -7,7 +7,7 @@ import { useEffect, useState } from "react";
 import {
   Timestamp,
   collection,
-  onSnapshot,
+  getDocs,
   query,
   where,
   type DocumentData,
@@ -186,11 +186,10 @@ export function DashboardShell({ children, variant }: DashboardShellProps) {
           ]
         : []),
     ];
-    let meetingDates: Array<Date | null> = [];
-    let roleplayResultDates: Array<Date | null> = [];
-    const meetingDatesByIndex = new Map<number, Array<Date | null>>();
+    let isActive = true;
 
-    function updateUsage() {
+    function updateUsage(meetingDates: Array<Date | null>, roleplayResultDates: Array<Date | null>) {
+      if (!isActive) return;
       const meetingAnalysisCount = meetingDates.filter((date) => isCurrentMonth(date)).length;
       const roleplayCount = roleplayResultDates.filter((date) => isCurrentMonth(date)).length;
 
@@ -202,46 +201,40 @@ export function DashboardShell({ children, variant }: DashboardShellProps) {
       });
     }
 
-    const unsubscribeMeetings = meetingsQueries.map((meetingsQuery, index) =>
-      onSnapshot(
-        meetingsQuery,
-        (snapshot) => {
-          meetingDatesByIndex.set(index, snapshot.docs.map(mapCreatedAtDate));
-          meetingDates = Array.from(meetingDatesByIndex.values()).flat();
-          updateUsage();
-        },
-        () => {
-          setAiUsage({ used: 0, meetingAnalysisCount: 0, roleplayCount: 0, isLoading: false });
-        },
-      ),
-    );
-    const unsubscribeRoleplay = canUseRoleplay
-      ? onSnapshot(
-          query(
+    const roleplayQuery = canUseRoleplay
+      ? query(
             collection(firestore, "roleplaySessions"),
             where("companyId", "==", profile.companyId),
             where("userId", "==", profile.uid),
-          ),
-          (snapshot) => {
-            roleplayResultDates = snapshot.docs.map((docSnapshot) => {
+          )
+      : null;
+
+    Promise.all([
+      Promise.all(meetingsQueries.map((meetingsQuery) => getDocs(meetingsQuery))),
+      roleplayQuery ? getDocs(roleplayQuery) : Promise.resolve(null),
+    ])
+      .then(([meetingSnapshots, roleplaySnapshot]) => {
+        const meetingDates = meetingSnapshots.flatMap((snapshot) => snapshot.docs.map(mapCreatedAtDate));
+        const roleplayResultDates = roleplaySnapshot
+          ? roleplaySnapshot.docs.map((docSnapshot) => {
               const createdAt = docSnapshot.data().createdAt;
               return createdAt instanceof Timestamp ? createdAt.toDate() : null;
-            });
-            updateUsage();
-          },
-          () => {
-            setAiUsage({ used: 0, meetingAnalysisCount: 0, roleplayCount: 0, isLoading: false });
-          },
-        )
-      : undefined;
+            })
+          : [];
+        updateUsage(meetingDates, roleplayResultDates);
+      })
+      .catch(() => {
+        if (isActive) {
+          setAiUsage({ used: 0, meetingAnalysisCount: 0, roleplayCount: 0, isLoading: false });
+        }
+      });
 
     if (meetingsQueries.length === 0 && !canUseRoleplay) {
       setAiUsage({ used: 0, meetingAnalysisCount: 0, roleplayCount: 0, isLoading: false });
     }
 
     return () => {
-      unsubscribeMeetings.forEach((unsubscribe) => unsubscribe());
-      unsubscribeRoleplay?.();
+      isActive = false;
     };
   }, [profile, profile?.companyId, profile?.role, profile?.uid, variant]);
 
@@ -607,8 +600,8 @@ function resolveCurrentLabel(
   if (pathname === "/admin/account" || pathname === "/sales/account") return "アカウント設定";
   if (pathname === "/meetings/upload") return getCategoryLabel(searchParams, "アップロード");
   if (pathname === "/meetings") return getCategoryLabel(searchParams, "一覧");
-  if (pathname.match(/^\/meetings\/[^/]+\/summary$/)) return "AIサマリー";
-  if (pathname.match(/^\/meetings\/[^/]+$/)) return "文字起こし";
+  if (pathname.match(/^\/meetings\/[^/]+\/summary$/)) return "AI営業分析";
+  if (pathname.match(/^\/meetings\/[^/]+$/)) return "商談ログ";
   if (pathname.match(/^\/admin\/meetings\/[^/]+$/)) return "レビュー詳細";
   if (pathname.match(/^\/admin\/knowledge\/[^/]+$/)) return "ナレッジ詳細";
   if (pathname.match(/^\/admin\/members\/[^/]+$/)) return "メンバー詳細";

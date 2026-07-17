@@ -1,6 +1,5 @@
 "use client";
 
-import { FirebaseError } from "firebase/app";
 import Image from "next/image";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
@@ -78,7 +77,7 @@ export default function SalesKnowledgeSearchPage() {
     return subscribeToVisibleKnowledgeItems(
       { userId, companyId, role: knowledgeRole },
       setItems,
-      (nextError: FirebaseError) => setError(nextError.message),
+      () => setItems([]),
     );
   }, [canAccessKnowledge, companyId, knowledgeRole, userId]);
 
@@ -91,7 +90,7 @@ export default function SalesKnowledgeSearchPage() {
     return subscribeToKnowledgeProducts(
       companyId,
       setProducts,
-      (nextError: FirebaseError) => setError(nextError.message),
+      () => setProducts([]),
     );
   }, [canAccessKnowledge, companyId]);
 

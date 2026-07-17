@@ -739,7 +739,8 @@ async function transcribeChunk({ fileName, mimeType, fileBuffer, language, model
     const formData = new FormData();
     formData.append("file", file);
     formData.append("model", model);
-    formData.append("response_format", "json");
+    formData.append("response_format", "verbose_json");
+    formData.append("timestamp_granularities[]", "segment");
 
     if (language) {
       formData.append("language", language);

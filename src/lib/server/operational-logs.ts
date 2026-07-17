@@ -159,11 +159,11 @@ async function isCurrentMonthRoleplaySession(input: {
   userId: string;
   sessionId: string;
 }) {
-  const sessionSnapshot = await input.db
+  const sessionDoc = await input.db
     .collection("roleplaySessions")
     .doc(buildRoleplaySessionDocId(input.userId, input.sessionId))
     .get();
-  const createdAt = readFirestoreDate(sessionSnapshot.data()?.createdAt);
+  const createdAt = readFirestoreDate(sessionDoc.data()?.createdAt);
 
   if (!createdAt) {
     return false;

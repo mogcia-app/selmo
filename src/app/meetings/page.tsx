@@ -5,7 +5,7 @@ import { useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 
 import { useAuth } from "@/features/auth/auth-provider";
-import { getMeetingPurposeLabel, subscribeToMeetings, type MeetingRecord } from "@/lib/firebase/meetings";
+import { deleteMeetingRecord, getMeetingPurposeLabel, subscribeToMeetings, type MeetingRecord } from "@/lib/firebase/meetings";
 import { canUseSalesDomain } from "@/lib/sales-domains";
 
 const productIconMap: Record<string, React.ReactNode> = {
@@ -21,20 +21,20 @@ export default function MeetingsPage() {
   const copy = category === "teleapo"
     ? {
         title: "テレアポ一覧",
-        description: "過去のテレアポログを検索し、文字起こしや詳細を確認できます。",
+        description: "過去のテレアポログを検索し、営業分析や詳細を確認できます。",
         loading: "テレアポ一覧を読み込み中です。",
         empty: "条件に一致するテレアポログがありません。検索条件を変更してください。",
-        uploadLabel: "テレアポログをアップロード",
+        uploadLabel: "テレアポログを分析",
         searchPlaceholder: "会社名・担当者名・商材で検索",
         purposeLabel: "テレアポ目的",
         backLabel: "ダッシュボードへ戻る",
       }
     : {
         title: "打ち合わせ一覧",
-        description: "過去の商談・打ち合わせデータを検索し、文字起こしや詳細を確認できます。",
+        description: "過去の商談ログを検索し、営業分析や詳細を確認できます。",
         loading: "打ち合わせ一覧を読み込み中です。",
         empty: "条件に一致する打ち合わせがありません。検索条件を変更してください。",
-        uploadLabel: "音声をアップロード",
+        uploadLabel: "商談ログを分析",
         searchPlaceholder: "会社名・担当者名・商材で検索",
         purposeLabel: "目的",
         backLabel: "ダッシュボードへ戻る",
@@ -49,6 +49,7 @@ export default function MeetingsPage() {
   const [productFilter, setProductFilter] = useState("all");
   const [dateFilter, setDateFilter] = useState("all");
   const [selectedInfoMeeting, setSelectedInfoMeeting] = useState<MeetingRecord | null>(null);
+  const [deletingMeetingId, setDeletingMeetingId] = useState<string | null>(null);
 
   useEffect(() => {
     if (isAuthLoading) {
@@ -118,6 +119,28 @@ export default function MeetingsPage() {
       return matchesSearch && matchesStatus && matchesProduct && matchesDate;
     });
   }, [category, dateFilter, meetings, productFilter, search, statusFilter]);
+
+  async function handleDeleteMeeting(meeting: MeetingRecord) {
+    const label = meeting.customerName || "この打ち合わせ";
+    const confirmed = window.confirm(`${label}を一覧から削除します。AI利用回数は戻りません。削除してよろしいですか？`);
+    if (!confirmed) {
+      return;
+    }
+
+    setDeletingMeetingId(meeting.id);
+    setErrorMessage(null);
+    try {
+      await deleteMeetingRecord(meeting, profile?.uid ?? null);
+      setMeetings((current) => current.filter((item) => item.id !== meeting.id));
+      if (selectedInfoMeeting?.id === meeting.id) {
+        setSelectedInfoMeeting(null);
+      }
+    } catch {
+      setErrorMessage("打ち合わせの削除に失敗しました。時間を置いて再度お試しください。");
+    } finally {
+      setDeletingMeetingId(null);
+    }
+  }
 
   return (
     <main className="overflow-x-hidden bg-transparent px-5 pb-3 pt-4 md:px-8 md:pb-4 md:pt-5">
@@ -290,6 +313,15 @@ export default function MeetingsPage() {
                             詳細
                             <span>›</span>
                           </Link>
+                          <button
+                            type="button"
+                            onClick={() => void handleDeleteMeeting(meeting)}
+                            disabled={deletingMeetingId === meeting.id}
+                            className="inline-flex items-center gap-2 rounded-[12px] border border-[#ffd8cc] bg-white px-3 py-2 text-[13px] font-medium text-[#cf4b39] transition hover:bg-[#fff4ef] disabled:cursor-not-allowed disabled:opacity-60"
+                          >
+                            <TrashIcon />
+                            {deletingMeetingId === meeting.id ? "削除中" : "削除"}
+                          </button>
                         </div>
                       </td>
                     </tr>
@@ -616,6 +648,17 @@ function MemoIcon() {
       <path d="M6 3.5h9l3 3v14H6z" />
       <path d="M15 3.5v3h3" />
       <path d="M9 12h6M9 16h4" />
+    </svg>
+  );
+}
+
+function TrashIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true" className="h-4 w-4 fill-none stroke-current stroke-[1.8]">
+      <path d="M4 7h16" />
+      <path d="M10 11v6M14 11v6" />
+      <path d="M6 7l1 13h10l1-13" />
+      <path d="M9 7V4h6v3" />
     </svg>
   );
 }

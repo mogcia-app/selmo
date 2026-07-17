@@ -1,6 +1,5 @@
 "use client";
 
-import { FirebaseError } from "firebase/app";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 
@@ -60,18 +59,16 @@ export function useAdminInsights() {
   const [knowledgeItems, setKnowledgeItems] = useState<KnowledgeItem[]>([]);
   const [roleplayScenarios, setRoleplayScenarios] = useState<RoleplayScenario[]>([]);
   const [roleplayResults, setRoleplayResults] = useState<RoleplayResult[]>([]);
-  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!profile?.companyId) return;
-    const handleError = (nextError: FirebaseError) => setError(nextError.message);
     const unsubscribers = [
-      subscribeToUserProfiles(setUsers, handleError, profile.companyId),
-      subscribeToMeetings({ role: "admin", userId: "admin", companyId: profile.companyId }, setMeetings, handleError),
-      subscribeToKnowledgeProducts(profile.companyId, setProducts, handleError),
-      subscribeToKnowledgeCategories(profile.companyId, setCategories, handleError),
-      subscribeToAllKnowledgeItems(profile.companyId, setKnowledgeItems, handleError),
-      subscribeToRoleplayScenarios(profile.companyId, setRoleplayScenarios, handleError),
+      subscribeToUserProfiles(setUsers, () => setUsers([]), profile.companyId),
+      subscribeToMeetings({ role: "admin", userId: "admin", companyId: profile.companyId }, setMeetings, () => setMeetings([])),
+      subscribeToKnowledgeProducts(profile.companyId, setProducts, () => setProducts([])),
+      subscribeToKnowledgeCategories(profile.companyId, setCategories, () => setCategories([])),
+      subscribeToAllKnowledgeItems(profile.companyId, setKnowledgeItems, () => setKnowledgeItems([])),
+      subscribeToRoleplayScenarios(profile.companyId, setRoleplayScenarios, () => setRoleplayScenarios([])),
     ];
 
     return () => {
@@ -84,7 +81,7 @@ export function useAdminInsights() {
     return subscribeToRoleplayResults(
       { userId: profile.uid, companyId: profile.companyId, isAdmin: true },
       setRoleplayResults,
-      (nextError: FirebaseError) => setError(nextError.message),
+      () => setRoleplayResults([]),
     );
   }, [profile?.companyId, profile?.uid]);
 
@@ -104,7 +101,7 @@ export function useAdminInsights() {
     roleplayScenarios,
     roleplayResults,
     memberRows,
-    error,
+    error: null,
   };
 }
 

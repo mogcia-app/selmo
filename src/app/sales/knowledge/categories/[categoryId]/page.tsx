@@ -1,6 +1,5 @@
 "use client";
 
-import { FirebaseError } from "firebase/app";
 import Image from "next/image";
 import Link from "next/link";
 import { useParams, usePathname } from "next/navigation";
@@ -38,15 +37,13 @@ export default function SalesKnowledgeCategoryPage() {
     canUseSalesDomain(profile, "teleapo");
   const [categories, setCategories] = useState<KnowledgeCategory[]>([]);
   const [items, setItems] = useState<KnowledgeItem[]>([]);
-  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!companyId || !canAccessKnowledge) {
       setCategories([]);
       return;
     }
-    const handleError = (nextError: FirebaseError) => setError(nextError.message);
-    return subscribeToKnowledgeCategories(companyId, setCategories, handleError);
+    return subscribeToKnowledgeCategories(companyId, setCategories, () => setCategories([]));
   }, [canAccessKnowledge, companyId]);
 
   useEffect(() => {
@@ -58,7 +55,7 @@ export default function SalesKnowledgeCategoryPage() {
     return subscribeToKnowledgeItemsByCategory(
       { categoryId, userId, companyId, role: knowledgeRole },
       setItems,
-      (nextError: FirebaseError) => setError(nextError.message),
+      () => setItems([]),
     );
   }, [canAccessKnowledge, categoryId, companyId, knowledgeRole, userId]);
 
@@ -90,12 +87,6 @@ export default function SalesKnowledgeCategoryPage() {
             <ArrowLeftIcon />
             ナレッジへ戻る
           </Link>
-
-          {error ? (
-            <div className="mt-5 rounded-[16px] border border-[#f4d4d4] bg-[#fff8f8] px-4 py-3 text-[13px] font-medium text-[#b4232a]">
-              {error}
-            </div>
-          ) : null}
 
           <section className="mt-6 grid min-w-0 items-center gap-8 lg:grid-cols-[minmax(0,1fr)_360px]">
             <div className="min-w-0">

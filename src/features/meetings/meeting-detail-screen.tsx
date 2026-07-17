@@ -31,11 +31,9 @@ const aiSummaryRunningFreshMs = 10 * 60 * 1000;
 const staleTranscriptionRunningMs = 90 * 60 * 1000;
 const legacyTranscriptionRunningMs = 10 * 60 * 1000;
 const monthlyLimitMessage = MONTHLY_AI_LIMIT_MESSAGE;
+const meetingAnalysisModel = "gpt-4o-mini";
+const meetingTranscriptionModel = "gpt-4o-mini-transcribe";
 type ConversationSpeaker = "sales" | "customer" | "participant" | "unknown";
-type SpeakerPreset = {
-  speaker1: ConversationSpeaker;
-  speaker2: ConversationSpeaker;
-};
 type FlowStepStatus = "completed" | "current" | "pending" | "failed";
 type MeetingFlowStep = {
   label: string;
@@ -107,7 +105,6 @@ export function MeetingDetailScreen({
   const [selectedLogIds, setSelectedLogIds] = useState<string[]>([]);
   const [isTranscriptEditMode, setIsTranscriptEditMode] = useState(false);
   const [manualSplitIndexes, setManualSplitIndexes] = useState<Record<string, number>>({});
-  const [speakerAssignmentMessage, setSpeakerAssignmentMessage] = useState<string | null>(null);
   const [speakerNames, setSpeakerNames] = useState<Record<ConversationSpeaker, string>>({
     sales: "営業",
     customer: "顧客",
@@ -245,7 +242,7 @@ export function MeetingDetailScreen({
     try {
       await saveMeetingAiSummary(meetingId, {
         status: "running",
-        model: "gpt-4o-mini",
+        model: meetingAnalysisModel,
         summary: null,
         error: null,
         processingStatus: "uploaded",
@@ -289,7 +286,7 @@ export function MeetingDetailScreen({
 
       await saveMeetingAiSummary(meetingId, {
         status: "completed",
-        model: summaryPayload.model ?? "gpt-4o-mini",
+        model: summaryPayload.model ?? meetingAnalysisModel,
         summary: summaryPayload.summary ?? null,
         error: null,
         processingStatus: "uploaded",
@@ -327,7 +324,7 @@ export function MeetingDetailScreen({
       try {
         await saveMeetingAiSummary(meetingId, {
           status: "failed",
-          model: "gpt-4o-mini",
+          model: meetingAnalysisModel,
           error: summaryMessage,
           processingStatus: "uploaded",
         });
@@ -493,7 +490,7 @@ export function MeetingDetailScreen({
 
   async function handleRunTranscription() {
     await runTranscription({
-      model: "gpt-4o-mini-transcribe",
+      model: meetingTranscriptionModel,
     });
   }
 
@@ -645,6 +642,10 @@ export function MeetingDetailScreen({
     meeting,
   ]);
   const transcriptFrequentWords = useMemo(() => buildFrequentWords(editableLogs), [editableLogs]);
+  const speakerSummaryCounts = useMemo(
+    () => buildSpeakerSummaryCounts(editableLogs, speakerNames),
+    [editableLogs, speakerNames],
+  );
   const customerFrequentWords = useMemo(
     () => buildFrequentWords(editableLogs.filter((log) => inferConversationSide(log) === "customer")),
     [editableLogs],
@@ -704,6 +705,8 @@ export function MeetingDetailScreen({
     const startIndex = (boundedTranscriptPage - 1) * transcriptPageSize;
     return visibleEditableLogs.slice(startIndex, startIndex + transcriptPageSize);
   }, [boundedTranscriptPage, transcriptPageSize, visibleEditableLogs]);
+  const selectedLogIdSet = useMemo(() => new Set(selectedLogIds), [selectedLogIds]);
+  const firstSelectedLogId = selectedLogIds[0] ?? null;
   const transcriptVisibleStart = visibleEditableLogs.length === 0 ? 0 : (boundedTranscriptPage - 1) * transcriptPageSize + 1;
   const transcriptVisibleEnd = Math.min(visibleEditableLogs.length, boundedTranscriptPage * transcriptPageSize);
   const transcriptPageButtons = useMemo(() => {
@@ -774,8 +777,19 @@ export function MeetingDetailScreen({
     void generateAiSummaryInBackground(transcriptText, editableLogs);
   }
 
+  function handleSkipSpeakerConfirmation() {
+    const transcriptText = exportTranscriptText.trim() || meeting?.transcriptionProbeText?.trim() || "";
+    if (!transcriptText) {
+      setErrorMessage("分析できる商談ログがありません。");
+      return;
+    }
+
+    summaryGenerationRequestedRef.current = true;
+    void generateAiSummaryInBackground(transcriptText, editableLogs);
+    router.push(`/meetings/${meetingId}/summary`);
+  }
+
   function handleUpdateLogSpeaker(logId: string, speaker: ConversationSpeaker) {
-    setSpeakerAssignmentMessage(null);
     setEditableLogs((current) =>
       current.map((log) => (log.id === logId ? { ...log, speaker, label: speakerNames[speaker], kind: speaker === "unknown" ? "unknown" : "speech" } : log)),
     );
@@ -783,53 +797,6 @@ export function MeetingDetailScreen({
 
   function handleToggleLogSelection(logId: string, checked: boolean) {
     setSelectedLogIds((current) => checked ? Array.from(new Set([...current, logId])) : current.filter((id) => id !== logId));
-  }
-
-  function handleApplySpeakerToSelected(speaker: ConversationSpeaker) {
-    setSpeakerAssignmentMessage(null);
-    setEditableLogs((current) =>
-      current.map((log) =>
-        selectedLogIds.includes(log.id)
-          ? { ...log, speaker, label: speakerNames[speaker], kind: speaker === "unknown" ? "unknown" : "speech" }
-          : log,
-      ),
-    );
-  }
-
-  function handleApplySpeakerPreset(preset: SpeakerPreset) {
-    const nextNames: Record<ConversationSpeaker, string> = {
-      sales: defaultSpeakerName("sales"),
-      customer: defaultSpeakerName("customer"),
-      participant: speakerNames.participant || defaultSpeakerName("participant"),
-      unknown: speakerNames.unknown || defaultSpeakerName("unknown"),
-    };
-    const assignmentLabel =
-      preset.speaker1 === "sales"
-        ? "話者1を営業、話者2を顧客として反映しました。"
-        : "話者1を顧客、話者2を営業として反映しました。";
-
-    setSpeakerNames(nextNames);
-    setEditableLogs((current) =>
-      current.map((log) => {
-        const speakerSlot = detectSpeakerSlot(log);
-        const nextSpeaker =
-          speakerSlot === "speaker_1"
-            ? preset.speaker1
-            : speakerSlot === "speaker_2"
-              ? preset.speaker2
-              : log.speaker;
-
-        return {
-          ...log,
-          speaker: nextSpeaker,
-          label: nextNames[nextSpeaker],
-          kind: nextSpeaker === "unknown" ? "unknown" : "speech",
-          confidence: "estimated",
-        };
-      }),
-    );
-    setSpeakerAssignmentMessage(`${assignmentLabel}保存してAI分析へ進めます。`);
-    setErrorMessage(null);
   }
 
   function handleSplitLogAtIndex(logId: string, splitIndex: number) {
@@ -912,7 +879,7 @@ export function MeetingDetailScreen({
     });
   }
 
-  async function handleSaveConversationEdits() {
+  async function handleSaveConversationEdits({ analyze }: { analyze: boolean }) {
     if (!meeting) return;
     const cleanedLogs = editableLogs
       .map((log, index) => mapDisplayLogToConversationLog(log, index, speakerNames))
@@ -932,9 +899,16 @@ export function MeetingDetailScreen({
         error: null,
         processingStatus: "uploaded",
       });
-      summaryGenerationRequestedRef.current = true;
-      void generateAiSummaryInBackground(transcriptText || exportTranscriptText.trim() || meeting.transcriptionProbeText?.trim() || "", editableLogs);
-      router.push(`/meetings/${meetingId}/summary`);
+      setEditableLogs(cleanedLogs.map((log) => mapConversationLogToDisplayLog(log, meeting.transcriptionProbeSegments ?? [])));
+      setSelectedLogIds([]);
+      setManualSplitIndexes({});
+      setIsTranscriptEditMode(false);
+
+      if (analyze) {
+        summaryGenerationRequestedRef.current = true;
+        void generateAiSummaryInBackground(transcriptText || exportTranscriptText.trim() || meeting.transcriptionProbeText?.trim() || "", editableLogs);
+        router.push(`/meetings/${meetingId}/summary`);
+      }
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "会話ブロックの保存に失敗しました。");
     } finally {
@@ -1053,7 +1027,7 @@ export function MeetingDetailScreen({
                   className="h-[52px] w-[52px] object-contain"
                 />
                 <div className="flex flex-wrap items-center gap-2 text-[#171717]">
-                  <h2 className="text-[30px] font-bold tracking-[-0.04em]">AIサマリー</h2>
+                  <h2 className="text-[30px] font-bold tracking-[-0.04em]">AI営業分析</h2>
                   <span className="rounded-full bg-[#fff3cd] px-2.5 py-1 text-[12px] font-semibold text-[#9c7600]">
                     分析結果は目安です
                   </span>
@@ -1192,7 +1166,7 @@ export function MeetingDetailScreen({
           </article>
 
           <div className="mt-5 rounded-[18px] border border-[#eceef4] bg-[#fffaf0] px-5 py-4 text-[14px] leading-7 text-[#6f6250]">
-            この分析は文字起こしデータをもとにAIが自動で生成しています。誤りが含まれる可能性があるため、重要な判断は必ずご自身でご確認ください。
+            この分析は商談ログをもとにAIが自動で生成しています。顧客の実際の発言を確認しながら、勝ち筋・改善点・次アクションの検討に活用してください。
           </div>
           </>
           ) : (
@@ -1204,17 +1178,37 @@ export function MeetingDetailScreen({
         {isTranscriptView ? (
         <section className="rounded-[24px] border border-[#eceef4] bg-white p-6 shadow-[0_10px_28px_rgba(17,24,39,0.05)]">
           <div className="flex flex-wrap items-start justify-between gap-4">
+            <div className="min-w-0">
               <div className="flex items-center gap-3">
                 <Image
                   src="/mojiokoshi.png"
-                  alt="文字起こし"
+                  alt="商談ログ"
                   width={52}
                   height={52}
                   className="h-[52px] w-[52px] object-contain"
                 />
-                <h2 className="text-[24px] font-bold tracking-[-0.03em] text-[#171717]">文字起こし</h2>
+                <h2 className="text-[24px] font-bold tracking-[-0.03em] text-[#171717]">商談ログ</h2>
               </div>
+            </div>
               <div className="flex flex-wrap gap-3">
+              {editableLogs.length > 0 ? (
+                isTranscriptEditMode ? (
+                  <>
+                    <button type="button" onClick={() => setIsTranscriptEditMode(false)} className="inline-flex h-[38px] items-center rounded-[12px] border border-[#e4e8ef] bg-white px-3 text-[12px] font-semibold text-[#596273] shadow-[0_4px_12px_rgba(15,23,42,0.05)] transition hover:bg-[#fcfcfd]">
+                      キャンセル
+                    </button>
+                    <button type="button" onClick={() => void handleSaveConversationEdits({ analyze: false })} disabled={isSavingConversationLogs} className="inline-flex h-[38px] items-center rounded-[12px] border border-[#ead8a8] bg-white px-3 text-[12px] font-semibold text-[#6f5500] shadow-[0_4px_12px_rgba(15,23,42,0.05)] transition hover:bg-[#fffaf0] disabled:opacity-60">
+                      {isSavingConversationLogs ? "保存中..." : "保存する"}
+                    </button>
+                    <button type="button" onClick={handleSkipSpeakerConfirmation} className="inline-flex h-[38px] items-center rounded-[12px] border border-[#171717] bg-[#171717] px-3 text-[12px] font-semibold text-white shadow-[0_4px_12px_rgba(15,23,42,0.08)] transition hover:bg-[#2a2d33]">
+                      このままAI分析へ
+                    </button>
+                    <button type="button" onClick={() => void handleSaveConversationEdits({ analyze: true })} disabled={isSavingConversationLogs} className="inline-flex h-[38px] items-center rounded-[12px] border border-[#f0c655] bg-[#ffd84d] px-3 text-[12px] font-semibold text-[#171717] shadow-[0_4px_12px_rgba(245,189,7,0.16)] transition hover:bg-[#ffcf33] disabled:opacity-60">
+                      {isSavingConversationLogs ? "保存中..." : "保存して分析"}
+                    </button>
+                  </>
+                ) : null
+              ) : null}
               <Link
                 href={`/meetings/${meetingId}/summary`}
                 className="inline-flex h-[38px] items-center gap-1.5 rounded-[12px] border border-[#ead8a8] bg-white px-3 text-[12px] font-semibold text-[#6c5730] shadow-[0_4px_12px_rgba(15,23,42,0.05)] transition hover:border-[#ddc173] hover:bg-[#fffaf0]"
@@ -1251,7 +1245,7 @@ export function MeetingDetailScreen({
                   <audio ref={audioRef} controls src={meeting.audioDownloadUrl} className="w-full" />
                 ) : isManualTranscript ? (
                   <div className="rounded-[14px] border border-[#e6eaf0] bg-[#fcfcfd] px-4 py-3 text-[13px] leading-6 text-[#7a808c]">
-                    文字起こし貼り付けで登録されたため、音声ファイルはありません。
+                    商談ログ貼り付けで登録されたため、音声ファイルはありません。
                   </div>
                 ) : (
                   <div className="text-[13px] text-[#7a808c]">音声ファイルの保存がまだ完了していません。</div>
@@ -1263,30 +1257,12 @@ export function MeetingDetailScreen({
           <div className="mt-6">
             <div className="min-w-0">
               {editableLogs.length > 0 ? (
-                <SpeakerQuickConfirmPanel
-                  logs={editableLogs}
-                  speakerNames={speakerNames}
-                  assignmentMessage={speakerAssignmentMessage}
-                  isSaving={isSavingConversationLogs}
-                  isEditMode={isTranscriptEditMode}
-                  onApplySpeakerPreset={handleApplySpeakerPreset}
-                  onSave={() => void handleSaveConversationEdits()}
-                  onEdit={() => setIsTranscriptEditMode(true)}
-                />
-              ) : null}
-
-              {editableLogs.length > 0 ? (
-                <div className="mb-4">
-                  <SpeakerManagementPanel
-                    logs={editableLogs}
-                    speakerNames={speakerNames}
-                    onChangeSpeakerName={(speaker, name) => {
-                      const nextName = name.trim() || defaultSpeakerName(speaker);
-                      setSpeakerAssignmentMessage(null);
-                      setSpeakerNames((current) => ({ ...current, [speaker]: nextName }));
-                      setEditableLogs((current) => current.map((log) => (log.speaker === speaker ? { ...log, label: nextName } : log)));
-                    }}
-                  />
+                <div className="mb-3 flex flex-wrap items-center justify-end gap-2">
+                  {speakerSummaryCounts.map((item) => (
+                    <span key={`speaker-summary-${item.speaker}`} className="rounded-full border border-[#e4e8ef] bg-white px-3 py-1 text-[12px] font-bold text-[#596273]">
+                      {item.label} {item.count}件
+                    </span>
+                  ))}
                 </div>
               ) : null}
 
@@ -1320,7 +1296,6 @@ export function MeetingDetailScreen({
                     <ChevronDownGlyph />
                   </span>
                 </div>
-
               </div>
 
               <div className="mt-4 flex h-[860px] flex-col rounded-[22px] bg-white px-6 py-5">
@@ -1356,77 +1331,6 @@ export function MeetingDetailScreen({
                   </div>
                 ) : editableLogs.length > 0 ? (
                   <>
-                    <div className="mb-3 rounded-[18px] border border-[#eceef4] bg-[#fcfcfd] px-4 py-3">
-                      <div className="flex flex-wrap items-center justify-between gap-3">
-                        <div>
-                          <div className="text-[13px] font-black text-[#171717]">
-                            {isTranscriptEditMode ? "詳細修正" : "会話ブロック"}
-                          </div>
-                          <div className="mt-1 text-[12px] font-medium text-[#8a909b]">
-                          {isTranscriptEditMode
-                              ? "個別の話者変更、分割、結合を調整できます。"
-                              : "発話ごとに営業/顧客を確認できます。AIによる文字起こしのため、重要な内容は必ずご確認ください。"}
-                          </div>
-                        </div>
-                        <div className="flex flex-wrap items-center gap-2">
-                          {isTranscriptEditMode ? (
-                            <>
-                              <button type="button" onClick={() => setIsTranscriptEditMode(false)} className="rounded-[12px] border border-[#e4e8ef] bg-white px-4 py-2.5 text-[13px] font-black text-[#596273]">
-                                キャンセル
-                              </button>
-                              <button type="button" onClick={() => void handleSaveConversationEdits()} disabled={isSavingConversationLogs} className="rounded-[12px] border border-[#171717] bg-[#171717] px-4 py-2.5 text-[13px] font-black text-white disabled:opacity-60">
-                                {isSavingConversationLogs ? "保存中..." : "保存してAI分析へ"}
-                              </button>
-                            </>
-                          ) : (
-                            <button type="button" onClick={() => setIsTranscriptEditMode(true)} className="rounded-[12px] border border-[#f0c655] bg-[#ffd84d] px-4 py-2.5 text-[13px] font-black text-[#171717]">
-                              詳細修正
-                            </button>
-                          )}
-                        </div>
-                      </div>
-
-                      {isTranscriptEditMode && selectedLogIds.length > 0 ? (
-                        <div className="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-[14px] border border-[#f0e3c1] bg-[#fffaf0] px-3 py-2.5">
-                          <div className="flex flex-wrap items-center gap-2">
-                            <span className="rounded-full bg-[#171717] px-3 py-1 text-[12px] font-black text-white">{selectedLogIds.length}件選択中</span>
-                            <button type="button" onClick={handleMergeSelectedLogs} disabled={selectedLogIds.length < 2} className="rounded-[10px] border border-[#171717] bg-white px-3 py-1.5 text-[12px] font-black text-[#171717] disabled:opacity-40">結合</button>
-                            <button type="button" onClick={() => setSelectedLogIds([])} className="rounded-[10px] border border-[#e4e8ef] bg-white px-3 py-1.5 text-[12px] font-bold text-[#596273]">解除</button>
-                          </div>
-                          <div className="flex flex-wrap gap-2">
-                            {conversationSpeakerOptions.map((option) => (
-                              <button
-                                key={`bulk-${option.value}`}
-                                type="button"
-                                onClick={() => handleApplySpeakerToSelected(option.value)}
-                                className="rounded-[10px] border border-[#ead8a8] bg-white px-3 py-1.5 text-[12px] font-black text-[#6f5500]"
-                              >
-                                {option.label}
-                              </button>
-                            ))}
-                          </div>
-                        </div>
-                      ) : isTranscriptEditMode ? (
-                        <div className="mt-3 flex flex-wrap items-center gap-2 text-[12px] font-bold text-[#8a909b]">
-                          <button type="button" onClick={() => setSelectedLogIds(paginatedEditableLogs.map(({ log }) => log.id))} className="rounded-[10px] border border-[#e4e8ef] bg-white px-3 py-1.5 text-[12px] font-bold text-[#596273]">
-                            表示中を選択
-                          </button>
-                          <span>今のページ内で複数選択すると、話者変更と結合ができます。</span>
-                        </div>
-                      ) : (
-                        <div className="mt-3 flex flex-wrap items-center gap-2">
-                          {conversationSpeakerOptions.map((option) => {
-                            const count = editableLogs.filter((log) => log.speaker === option.value).length;
-                            if (count === 0) return null;
-                            return (
-                              <span key={`summary-${option.value}`} className="rounded-full border border-[#e4e8ef] bg-white px-3 py-1 text-[12px] font-bold text-[#596273]">
-                                {speakerNames[option.value]} {count}件
-                              </span>
-                            );
-                          })}
-                        </div>
-                      )}
-                    </div>
                     <div className="relative min-h-0 flex-1">
                     <div
                       ref={transcriptScrollRef}
@@ -1442,7 +1346,7 @@ export function MeetingDetailScreen({
                           className={`rounded-[20px] border p-4 shadow-[0_3px_10px_rgba(17,24,39,0.03)] transition ${
                             isTranscriptEditMode ? "grid gap-3 md:grid-cols-[132px_1fr]" : ""
                           } ${
-                            selectedLogIds.includes(log.id)
+                            selectedLogIdSet.has(log.id)
                               ? "border-[#f0c655] bg-[#fffaf0]"
                               : selectedTranscriptBlockIndex === index
                                 ? "border-[#171717] bg-[#f8fafc] shadow-[0_8px_22px_rgba(17,24,39,0.08)]"
@@ -1455,7 +1359,7 @@ export function MeetingDetailScreen({
                                 <span className="text-[12px] font-black tracking-[0.12em] text-[#8a909b]">{String(index + 1).padStart(3, "0")}</span>
                                 <input
                                   type="checkbox"
-                                  checked={selectedLogIds.includes(log.id)}
+                                  checked={selectedLogIdSet.has(log.id)}
                                   onChange={(event) => handleToggleLogSelection(log.id, event.target.checked)}
                                   className="h-4 w-4 accent-[#ffcf33]"
                                 />
@@ -1512,6 +1416,11 @@ export function MeetingDetailScreen({
                                   log={log}
                                   manualSplitIndex={manualSplitIndexes[log.id] ?? null}
                                   onSplit={(splitIndex) => handleSplitLogAtIndex(log.id, splitIndex)}
+                                  selectedCount={selectedLogIds.length}
+                                  isSelected={selectedLogIdSet.has(log.id)}
+                                  canShowMergeActions={firstSelectedLogId === log.id}
+                                  onMerge={handleMergeSelectedLogs}
+                                  onClearSelection={() => setSelectedLogIds([])}
                                 />
                               </>
                             ) : (
@@ -1689,90 +1598,6 @@ const conversationSpeakerOptions: Array<{ value: ConversationSpeaker; label: str
   { value: "unknown", label: "不明" },
 ];
 
-function SpeakerQuickConfirmPanel({
-  logs,
-  speakerNames,
-  assignmentMessage,
-  isSaving,
-  isEditMode,
-  onApplySpeakerPreset,
-  onSave,
-  onEdit,
-}: {
-  logs: DisplayLog[];
-  speakerNames: Record<ConversationSpeaker, string>;
-  assignmentMessage: string | null;
-  isSaving: boolean;
-  isEditMode: boolean;
-  onApplySpeakerPreset: (preset: SpeakerPreset) => void;
-  onSave: () => void;
-  onEdit: () => void;
-}) {
-  const speakerCounts = conversationSpeakerOptions
-    .map((option) => ({ ...option, count: logs.filter((log) => log.speaker === option.value).length }))
-    .filter((option) => option.count > 0);
-
-  return (
-    <section className="mb-4 rounded-[22px] border border-[#f4e2a4] bg-[#fffaf0] p-4 shadow-[0_8px_22px_rgba(245,189,7,0.08)]">
-      <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-        <div className="min-w-0">
-          <div className="text-[16px] font-black text-[#171717]">話者1はどちらですか？</div>
-          <p className="mt-1 text-[12px] font-bold leading-5 text-[#8a6a14]">
-            会話の冒頭を見て、話者1が営業か顧客かを選ぶと全ブロックへまとめて反映されます。
-          </p>
-          <div className="mt-3 flex flex-wrap gap-2">
-            {speakerCounts.map((option) => (
-              <span key={`quick-count-${option.value}`} className="rounded-full border border-[#ead8a8] bg-white px-3 py-1 text-[12px] font-black text-[#6f5500]">
-                {speakerNames[option.value]} {option.count}件
-              </span>
-            ))}
-          </div>
-        </div>
-        <div className="flex flex-col gap-2 sm:min-w-[340px]">
-          <div className="grid gap-2 sm:grid-cols-2">
-            <button
-              type="button"
-              onClick={() => onApplySpeakerPreset({ speaker1: "sales", speaker2: "customer" })}
-              className="rounded-[14px] border border-[#e0bd4b] bg-[#ffd84d] px-4 py-3 text-left text-[13px] font-black text-[#171717] shadow-[0_8px_16px_rgba(245,189,7,0.18)] transition hover:bg-[#ffcf33]"
-            >
-              話者1 = 営業
-            </button>
-            <button
-              type="button"
-              onClick={() => onApplySpeakerPreset({ speaker1: "customer", speaker2: "sales" })}
-              className="rounded-[14px] border border-[#e0bd4b] bg-white px-4 py-3 text-left text-[13px] font-black text-[#6f5500] transition hover:bg-[#fff4d6]"
-            >
-              話者1 = 顧客
-            </button>
-          </div>
-          {assignmentMessage ? (
-            <div className="rounded-[12px] border border-[#d6f2df] bg-white px-3 py-2 text-[12px] font-bold leading-5 text-[#2f8f56]">
-              {assignmentMessage}
-            </div>
-          ) : null}
-          <div className="flex flex-wrap gap-2">
-            <button
-              type="button"
-              onClick={onSave}
-              disabled={logs.length === 0 || isSaving}
-              className="min-w-[180px] flex-1 rounded-[14px] border border-[#171717] bg-[#171717] px-4 py-3 text-[13px] font-black text-white transition hover:bg-[#2a2d33] disabled:cursor-not-allowed disabled:border-[#d8dde6] disabled:bg-[#eef1f5] disabled:text-[#9aa1ac]"
-            >
-              {isSaving ? "保存中..." : "この内容でAI分析する"}
-            </button>
-            <button
-              type="button"
-              onClick={onEdit}
-              className="rounded-[14px] border border-[#ead8a8] bg-white px-4 py-3 text-[13px] font-black text-[#6f5500] transition hover:bg-[#fff4d6]"
-            >
-              {isEditMode ? "詳細修正中" : "詳細修正"}
-            </button>
-          </div>
-        </div>
-      </div>
-    </section>
-  );
-}
-
 function SpeakerPill({ speaker, label }: { speaker: ConversationSpeaker; label: string }) {
   const shortLabel = speaker === "sales" ? "営" : speaker === "customer" ? "顧" : speaker === "participant" ? "同" : "?";
   const toneClassName =
@@ -1802,53 +1627,44 @@ function SpeakerPill({ speaker, label }: { speaker: ConversationSpeaker; label: 
   );
 }
 
-function SpeakerManagementPanel({
-  logs,
-  speakerNames,
-  onChangeSpeakerName,
-}: {
-  logs: DisplayLog[];
-  speakerNames: Record<ConversationSpeaker, string>;
-  onChangeSpeakerName: (speaker: ConversationSpeaker, name: string) => void;
-}) {
-  const counts = conversationSpeakerOptions.map((option) => ({
-    ...option,
-    count: logs.filter((log) => log.speaker === option.value).length,
+function buildSpeakerSummaryCounts(
+  logs: DisplayLog[],
+  speakerNames: Record<ConversationSpeaker, string>,
+) {
+  const counts = new Map<ConversationSpeaker, number>(
+    conversationSpeakerOptions.map((option) => [option.value, 0]),
+  );
+  const normalizedNames = conversationSpeakerOptions.map((option) => ({
+    speaker: option.value,
+    label: speakerNames[option.value] || defaultSpeakerName(option.value),
+    normalized: normalizeSpeakerDisplayName(speakerNames[option.value] || defaultSpeakerName(option.value)),
   }));
 
-  return (
-    <details className="rounded-[16px] border border-[#eceef4] bg-white px-4 py-3">
-      <summary className="flex cursor-pointer list-none flex-wrap items-center justify-between gap-3">
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="text-[13px] font-black text-[#171717]">表示名・発言数</span>
-          <span className="rounded-full bg-[#fff3cf] px-3 py-1 text-[11px] font-black text-[#8a6500]">{logs.length}ブロック</span>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          {counts.map((option) => (
-            <span key={`speaker-count-${option.value}`} className="rounded-full border border-[#eef1f5] bg-[#fcfcfd] px-3 py-1 text-[11px] font-black text-[#596273]">
-              {speakerNames[option.value]} {option.count}
-            </span>
-          ))}
-        </div>
-      </summary>
-      <div className="mt-3 grid gap-2 md:grid-cols-2 xl:grid-cols-4">
-        {counts.map((option) => (
-          <label key={option.value} className="rounded-[12px] border border-[#eef1f5] bg-[#fcfcfd] px-3 py-3">
-            <span className="mb-2 flex items-center justify-between gap-2 text-[11px] font-black text-[#8a909b]">
-              {option.label}
-              <span>{option.count}件</span>
-            </span>
-            <input
-              value={speakerNames[option.value]}
-              onChange={(event) => onChangeSpeakerName(option.value, event.target.value)}
-              className="h-9 w-full rounded-[10px] border border-[#e4e8ef] bg-white px-3 text-[12px] font-black text-[#343b48] outline-none focus:border-[#e0bd4b]"
-              aria-label={`${option.label}の表示名`}
-            />
-          </label>
-        ))}
-      </div>
-    </details>
-  );
+  logs.forEach((log) => {
+    const normalizedLabel = normalizeSpeakerDisplayName(log.label);
+    const matchedByLabel = normalizedNames.find((item) => {
+      if (!normalizedLabel || !item.normalized) return false;
+      return normalizedLabel === item.normalized
+        || normalizedLabel.includes(item.normalized)
+        || item.normalized.includes(normalizedLabel);
+    });
+    const targetSpeaker = matchedByLabel?.speaker ?? log.speaker;
+    counts.set(targetSpeaker, (counts.get(targetSpeaker) ?? 0) + 1);
+  });
+
+  return conversationSpeakerOptions.map((option) => ({
+    speaker: option.value,
+    label: speakerNames[option.value] || defaultSpeakerName(option.value),
+    count: counts.get(option.value) ?? 0,
+  }));
+}
+
+function normalizeSpeakerDisplayName(value: string) {
+  return value
+    .replace(/(様|さま|さん|氏|くん|ちゃん)/g, "")
+    .replace(/\s+/g, "")
+    .trim()
+    .toLowerCase();
 }
 
 function AiSummaryLoadingState() {
@@ -1860,7 +1676,7 @@ function AiSummaryLoadingState() {
         </div>
         <h3 className="mt-6 text-[20px] font-black text-[#171717]">AIサマリーを分析中です</h3>
         <p className="mt-3 text-[14px] font-medium leading-7 text-[#7a6a35]">
-          文字起こし本文と話者別ログをもとに、要点・温度感・改善ポイントを整理しています。
+          商談ログと話者別の発話をもとに、勝ち筋・改善点・次アクションを整理しています。
         </p>
         <div className="mx-auto mt-7 h-2 max-w-[360px] overflow-hidden rounded-full bg-white">
           <div className="ai-summary-regenerate-active h-full w-2/3 rounded-full bg-[#ffd84d]" />
@@ -1882,9 +1698,9 @@ function AiSummaryFailedState({ message }: { message: string }) {
 function AiSummaryEmptyState() {
   return (
     <div className="mt-4 rounded-[24px] border border-dashed border-[#d9dee7] bg-[#fcfcfd] px-6 py-12 text-center">
-      <h3 className="text-[18px] font-black text-[#171717]">分析できる文字起こし本文がありません</h3>
+      <h3 className="text-[18px] font-black text-[#171717]">分析できる商談ログがありません</h3>
       <p className="mx-auto mt-3 max-w-[620px] text-[14px] font-medium leading-7 text-[#7a808c]">
-        文字起こし本文が生成されると、AIサマリーを分析できます。
+        商談ログが登録されると、AI営業分析を開始できます。
       </p>
     </div>
   );
@@ -1942,10 +1758,20 @@ function SplitCandidateButtons({
   log,
   manualSplitIndex,
   onSplit,
+  selectedCount,
+  isSelected,
+  canShowMergeActions,
+  onMerge,
+  onClearSelection,
 }: {
   log: DisplayLog;
   manualSplitIndex: number | null;
   onSplit: (splitIndex: number) => void;
+  selectedCount: number;
+  isSelected: boolean;
+  canShowMergeActions: boolean;
+  onMerge: () => void;
+  onClearSelection: () => void;
 }) {
   const candidates = buildSplitCandidates(log.text).slice(0, 8);
   const canSplitManually =
@@ -1960,7 +1786,31 @@ function SplitCandidateButtons({
 
   return (
     <div className="mt-2 rounded-[12px] border border-[#eef1f5] bg-[#fcfcfd] px-3 py-2">
-      <div className="text-[11px] font-black text-[#8a909b]">分割位置</div>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="text-[11px] font-black text-[#8a909b]">分割位置</div>
+        {isSelected ? (
+          <div className="flex flex-wrap items-center gap-1.5">
+            <span className="rounded-full bg-[#171717] px-2.5 py-1 text-[11px] font-black text-white">{selectedCount}件選択中</span>
+            {canShowMergeActions ? (
+              <button
+                type="button"
+                onClick={onMerge}
+                disabled={selectedCount < 2}
+                className="rounded-full border border-[#171717] bg-white px-2.5 py-1 text-[11px] font-black text-[#171717] disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                結合
+              </button>
+            ) : null}
+            <button
+              type="button"
+              onClick={onClearSelection}
+              className="rounded-full border border-[#e4e8ef] bg-white px-2.5 py-1 text-[11px] font-bold text-[#596273]"
+            >
+              解除
+            </button>
+          </div>
+        ) : null}
+      </div>
       <div className="mt-2 flex flex-wrap items-center gap-2">
         <button
           type="button"
@@ -2026,19 +1876,6 @@ function normalizeEditableSpeaker(value: unknown): ConversationSpeaker {
   if (value === "customer" || value === "speaker_2") return "customer";
   if (value === "participant") return "participant";
   return "unknown";
-}
-
-function detectSpeakerSlot(log: DisplayLog): "speaker_1" | "speaker_2" | null {
-  const normalizedLabel = normalizeSpeakerSlotText(log.label);
-  if (normalizedLabel === "speaker1" || normalizedLabel === "話者1") return "speaker_1";
-  if (normalizedLabel === "speaker2" || normalizedLabel === "話者2") return "speaker_2";
-  if (log.speaker === "sales") return "speaker_1";
-  if (log.speaker === "customer") return "speaker_2";
-  return null;
-}
-
-function normalizeSpeakerSlotText(value: string) {
-  return value.trim().toLowerCase().replace(/[\s＿_\-ー:：]/g, "");
 }
 
 function defaultSpeakerName(speaker: ConversationSpeaker) {
@@ -2216,23 +2053,23 @@ function buildMeetingFlowSteps({
 
   return [
     {
-      label: "アップロード",
-      description: "音声または本文の保存完了",
+      label: "登録",
+      description: "音声または商談ログを保存",
       status: "completed",
     },
     {
-      label: "文字起こし",
-      description: hasTranscript ? "本文を確認できます" : isTranscriptionRunning ? "音声を解析中です" : "処理開始を待っています",
+      label: "ログ化",
+      description: hasTranscript ? "商談ログを確認できます" : isTranscriptionRunning ? "音声を解析中です" : "処理開始を待っています",
       status: transcriptionStatus,
     },
     {
       label: "話者確認",
-      description: speakerStatus === "current" ? "営業/顧客を確認して保存" : speakerStatus === "completed" ? "確認済み" : "文字起こし後に確認",
+      description: speakerStatus === "current" ? "営業/顧客を確認して保存" : speakerStatus === "completed" ? "確認済み" : "ログ化後に確認",
       status: speakerStatus,
     },
     {
-      label: "AI分析",
-      description: hasSummary ? "分析結果を表示中" : aiSummaryFailed ? "再分析できます" : isAiSummaryRunning ? "サマリーを生成中です" : "話者保存後に開始",
+      label: "AI営業分析",
+      description: hasSummary ? "分析結果を表示中" : aiSummaryFailed ? "再分析できます" : isAiSummaryRunning ? "勝ち筋と改善点を生成中です" : "そのまま開始できます",
       status: analysisStatus,
     },
   ];
@@ -2811,7 +2648,7 @@ function TranscriptAnalysisInsightSection({
     <article className="mt-5 rounded-[24px] border border-[#eceef4] bg-white p-6 shadow-[0_6px_18px_rgba(17,24,39,0.04)]">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <div className="text-[18px] font-bold text-[#171717]">文字起こしインサイト</div>
+          <div className="text-[18px] font-bold text-[#171717]">商談ログインサイト</div>
           <div className="mt-2 text-[13px] leading-6 text-[#7a808c]">
             確定した会話ブロックから、分析時に確認したい言葉をまとめています。
           </div>
@@ -2837,7 +2674,7 @@ function TranscriptAnalysisInsightSection({
               ))
             ) : (
               <p className="rounded-[14px] border border-dashed border-[#d9dee7] px-3 py-5 text-[13px] leading-6 text-[#7a808c]">
-                文字起こし生成後に表示します。
+                商談ログ登録後に表示します。
               </p>
             )}
           </div>
@@ -3980,7 +3817,7 @@ function buildAiSummary(
 
   if (!normalized) {
     return {
-      overview: "文字起こし本文が生成されると、この欄に打ち合わせの要約を表示できます。",
+      overview: "商談ログが登録されると、この欄に営業分析を表示できます。",
       bullets: [
         "主要論点の整理",
         "商談の温度感の確認",
@@ -3999,7 +3836,7 @@ function buildAiSummary(
   const bullets = sentences.slice(0, 4).map((sentence) => sentence.replace(/\s+/g, " "));
 
   while (bullets.length < 4) {
-    bullets.push("打ち合わせ内容の詳細は文字起こし本文で確認できます。");
+    bullets.push("打ち合わせ内容の詳細は商談ログで確認できます。");
   }
 
   return {

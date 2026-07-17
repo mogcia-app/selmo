@@ -1,6 +1,5 @@
 "use client";
 
-import { FirebaseError } from "firebase/app";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 
@@ -46,7 +45,6 @@ export default function AdminActivityPage() {
   const { profile } = useAuth();
   const { meetings, memberRows, error: insightError } = useAdminInsights();
   const [events, setEvents] = useState<SalesActivityEvent[]>([]);
-  const [eventError, setEventError] = useState<string | null>(null);
   const [filter, setFilter] = useState<SalesActivityType | "all">("all");
   const [memberId, setMemberId] = useState("");
   const [dateRange, setDateRange] = useState<DateRangeFilter>("30d");
@@ -62,7 +60,7 @@ export default function AdminActivityPage() {
     return subscribeToSalesActivityEvents(
       profile.companyId,
       setEvents,
-      (nextError: FirebaseError) => setEventError(nextError.message),
+      () => setEvents([]),
     );
   }, [profile?.companyId]);
 
@@ -125,9 +123,9 @@ export default function AdminActivityPage() {
           }
         />
 
-        {insightError || eventError ? (
+        {insightError ? (
           <div className="mt-5 rounded-[16px] border border-[#f4d4d4] bg-[#fff8f8] px-4 py-3 text-[13px] font-medium text-[#b4232a]">
-            {insightError ?? eventError}
+            {insightError}
           </div>
         ) : null}
 

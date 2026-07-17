@@ -1,6 +1,5 @@
 "use client";
 
-import { FirebaseError } from "firebase/app";
 import Link from "next/link";
 import { useParams, usePathname } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
@@ -43,8 +42,7 @@ export default function SalesKnowledgeProductPage() {
 
   useEffect(() => {
     if (!companyId) return;
-    const handleError = (nextError: FirebaseError) => setError(nextError.message);
-    return subscribeToKnowledgeProducts(companyId, setProducts, handleError);
+    return subscribeToKnowledgeProducts(companyId, setProducts, () => setProducts([]));
   }, [companyId]);
 
   useEffect(() => {
@@ -53,7 +51,7 @@ export default function SalesKnowledgeProductPage() {
     return subscribeToKnowledgeItemsByProduct(
       { productId, userId, companyId },
       setItems,
-      (nextError: FirebaseError) => setError(nextError.message),
+      () => setItems([]),
     );
   }, [companyId, productId, userId]);
 

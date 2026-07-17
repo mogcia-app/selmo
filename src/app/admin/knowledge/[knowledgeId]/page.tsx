@@ -1,6 +1,5 @@
 "use client";
 
-import { FirebaseError } from "firebase/app";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
@@ -30,7 +29,10 @@ export default function AdminKnowledgeDetailPage() {
     return subscribeToKnowledgeItem(
       params.knowledgeId,
       setKnowledge,
-      (nextError: FirebaseError) => setError(nextError.message),
+      () => {
+        setKnowledge(null);
+        setError("このナレッジは表示できません。");
+      },
     );
   }, [params.knowledgeId]);
 

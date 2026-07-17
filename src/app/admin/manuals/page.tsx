@@ -1,6 +1,5 @@
 "use client";
 
-import { FirebaseError } from "firebase/app";
 import { FormEvent, useEffect, useState } from "react";
 
 import {
@@ -30,15 +29,13 @@ export default function AdminManualsPage() {
   const [editingManual, setEditingManual] = useState<SalesManual | null>(null);
   const [viewingManual, setViewingManual] = useState<SalesManual | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const activeManuals = manuals.filter((manual) => manual.status === "active");
 
   useEffect(() => {
     if (!profile?.companyId) return;
-    const handleError = (nextError: FirebaseError) => setError(nextError.message);
     const unsubscribers = [
-      subscribeToSalesManuals(profile.companyId, setManuals, handleError),
-      subscribeToKnowledgeProducts(profile.companyId, setProducts, handleError),
+      subscribeToSalesManuals(profile.companyId, setManuals, () => setManuals([])),
+      subscribeToKnowledgeProducts(profile.companyId, setProducts, () => setProducts([])),
     ];
     return () => {
       unsubscribers.forEach((unsubscribe) => unsubscribe());
@@ -53,8 +50,6 @@ export default function AdminManualsPage() {
           title="マニュアル"
           description="会社の勝ちパターン、必須ヒアリング、反論対応、クロージング基準を登録します。sales側の分析結果はこの基準に沿って表示されます。"
         />
-        {error ? <ErrorBox message={error} /> : null}
-
         <section className="mt-8 rounded-[24px] border border-[#f0c655] bg-[#fffaf0] px-5 py-5 shadow-[0_10px_28px_rgba(245,189,7,0.08)] md:px-6">
           <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
             <div className="min-w-0">

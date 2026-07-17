@@ -1,6 +1,5 @@
 "use client";
 
-import { FirebaseError } from "firebase/app";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
@@ -29,7 +28,10 @@ export default function AdminCustomerDetailPage() {
     return subscribeToCustomer(
       params.customerId,
       setCustomer,
-      (nextError: FirebaseError) => setErrorMessage(nextError.message),
+      () => {
+        setCustomer(null);
+        setErrorMessage("この顧客カルテは表示できません。");
+      },
     );
   }, [params.customerId]);
 
@@ -44,12 +46,12 @@ export default function AdminCustomerDetailPage() {
       subscribeToCustomerLogs(
         { companyId: profile.companyId, customerId: params.customerId, isAdmin: true },
         setLogs,
-        (nextError: FirebaseError) => setErrorMessage(nextError.message),
+        () => setLogs([]),
       ),
       subscribeToMeetings(
         { role: "admin", userId: profile.uid, companyId: profile.companyId },
         setMeetings,
-        (nextError: FirebaseError) => setErrorMessage(nextError.message),
+        () => setMeetings([]),
       ),
     ];
 

@@ -210,15 +210,15 @@ async function buildConversationLogBatch({
     "あなたは日本語の営業商談文字起こしを、読みやすい会話ログに整形する編集者です。",
     "入力は Whisper 由来の短いセグメント列です。",
     "目的は、話者1 / 話者2 の交互ができるだけ自然に読める会話ログを作ることです。",
-    "厳密な話者識別よりも、読みやすい会話の流れを優先してください。",
+    "話者識別は、読みやすさよりも会話の応答関係を優先してください。",
     "次のルールを守ってください。",
     "1. 出力は JSON のみ。",
     "2. logs 配列を返す。",
     "3. speaker は speaker_1 または speaker_2。",
     "4. label は 話者1 または 話者2。",
-    "5. text は読みやすい日本語に軽く整える。ただし意味を足しすぎない。",
+    "5. text は読みやすい日本語に軽く整える。ただし意味の追加、営業トークの補完、顧客意図の捏造は禁止。",
     "6. 明らかな重複やノイズだけ除去してよい。",
-    "7. 連続する同一話者の短い発話はまとめてよい。",
+    "7. 連続する同一話者の短い発話はまとめてよいが、質問と回答、反論と返答は別ログに分ける。",
     "8. sourceSegmentIndexes には元セグメントの index を配列で入れる。",
     "9. confidence は estimated を入れる。",
     "10. sourceSegmentIndexes には、入力の index をそのまま使う。",
@@ -232,6 +232,7 @@ async function buildConversationLogBatch({
     },
     body: JSON.stringify({
       model: "gpt-4o-mini",
+      temperature: 0.1,
       response_format: { type: "json_object" },
       messages: [
         {

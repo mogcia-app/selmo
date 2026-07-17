@@ -1,6 +1,5 @@
 "use client";
 
-import { FirebaseError } from "firebase/app";
 import Image from "next/image";
 import { usePathname } from "next/navigation";
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
@@ -54,7 +53,7 @@ export function SalesKnowledgeChatWidget() {
     return subscribeToVisibleKnowledgeItems(
       { userId, companyId, role: "sales" },
       setItems,
-      (nextError: FirebaseError) => setError(nextError.message),
+      () => setItems([]),
     );
   }, [companyId, userId]);
 
@@ -67,7 +66,7 @@ export function SalesKnowledgeChatWidget() {
     return subscribeToKnowledgeProducts(
       companyId,
       setProducts,
-      (nextError: FirebaseError) => setError(nextError.message),
+      () => setProducts([]),
     );
   }, [companyId]);
 

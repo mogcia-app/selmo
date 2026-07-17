@@ -5,7 +5,8 @@ import {
   addDoc,
   collection,
   doc,
-  onSnapshot,
+  getDoc,
+  getDocs,
   query,
   serverTimestamp,
   updateDoc,
@@ -157,33 +158,27 @@ export function subscribeToCustomers(
   const customersRef = collection(firestore, "customers");
   const customersQueries = [query(customersRef, where("companyId", "==", input.companyId))];
 
-  const snapshotsByIndex = new Map<number, CustomerRecord[]>();
-  const unsubscribers = customersQueries.map((customersQuery, index) =>
-    onSnapshot(
-      customersQuery,
-      (snapshot) => {
-        snapshotsByIndex.set(
-          index,
-          snapshot.docs
-            .map((docSnapshot) => mapCustomerRecord(docSnapshot.id, docSnapshot.data()))
-            .filter((customer) => customer.companyId === input.companyId)
-            .filter((customer) => input.isAdmin || !input.userId || isCustomerVisibleToUser(customer, input.userId)),
-        );
-        const recordsById = new Map<string, CustomerRecord>();
-        snapshotsByIndex.forEach((records) => records.forEach((record) => recordsById.set(record.id, record)));
-        callback(Array.from(recordsById.values()).sort((left, right) => (right.updatedAt?.getTime() ?? 0) - (left.updatedAt?.getTime() ?? 0)));
-      },
-      (error) => {
-        if (!input.isAdmin && index > 0 && error.code === "permission-denied") {
-          snapshotsByIndex.set(index, []);
-          return;
-        }
-        onError?.(error);
-      },
-    ),
-  );
+  let isActive = true;
+  Promise.all(customersQueries.map((customersQuery) => getDocs(customersQuery)))
+    .then((snapshots) => {
+      if (!isActive) return;
+      const recordsById = new Map<string, CustomerRecord>();
+      snapshots.forEach((snapshot) => {
+        snapshot.docs
+          .map((docSnapshot) => mapCustomerRecord(docSnapshot.id, docSnapshot.data()))
+          .filter((customer) => customer.companyId === input.companyId)
+          .filter((customer) => input.isAdmin || !input.userId || isCustomerVisibleToUser(customer, input.userId))
+          .forEach((record) => recordsById.set(record.id, record));
+      });
+      callback(Array.from(recordsById.values()).sort((left, right) => (right.updatedAt?.getTime() ?? 0) - (left.updatedAt?.getTime() ?? 0)));
+    })
+    .catch((error: FirestoreError) => {
+      if (isActive) onError?.(error);
+    });
 
-  return () => unsubscribers.forEach((unsubscribe) => unsubscribe());
+  return () => {
+    isActive = false;
+  };
 }
 
 function isCustomerVisibleToUser(customer: CustomerRecord, userId: string) {
@@ -198,13 +193,20 @@ export function subscribeToCustomer(
   onError?: (error: FirestoreError) => void,
 ): Unsubscribe {
   const { firestore } = assertFirebaseClient();
-  return onSnapshot(
-    doc(firestore, "customers", customerId),
-    (snapshot) => {
+  let isActive = true;
+
+  getDoc(doc(firestore, "customers", customerId))
+    .then((snapshot) => {
+      if (!isActive) return;
       callback(snapshot.exists() ? mapCustomerRecord(snapshot.id, snapshot.data()) : null);
-    },
-    onError,
-  );
+    })
+    .catch((error: FirestoreError) => {
+      if (isActive) onError?.(error);
+    });
+
+  return () => {
+    isActive = false;
+  };
 }
 
 export async function createCustomer(input: SaveCustomerInput) {
@@ -257,18 +259,24 @@ export function subscribeToCustomerLogs(
     ...(!input.isAdmin && input.userId && !input.customerId ? [where("userId", "==", input.userId)] : []),
   ];
   const logsQuery = query(collection(firestore, "customerLogs"), ...constraints);
+  let isActive = true;
 
-  return onSnapshot(
-    logsQuery,
-    (snapshot) => {
+  getDocs(logsQuery)
+    .then((snapshot) => {
+      if (!isActive) return;
       callback(
         snapshot.docs
           .map((docSnapshot) => mapCustomerLogRecord(docSnapshot.id, docSnapshot.data()))
           .sort((left, right) => (right.actionDate?.getTime() ?? right.createdAt?.getTime() ?? 0) - (left.actionDate?.getTime() ?? left.createdAt?.getTime() ?? 0)),
       );
-    },
-    onError,
-  );
+    })
+    .catch((error: FirestoreError) => {
+      if (isActive) onError?.(error);
+    });
+
+  return () => {
+    isActive = false;
+  };
 }
 
 export async function createCustomerLog(input: SaveCustomerLogInput) {
@@ -302,14 +310,20 @@ export function subscribeToCustomerMeetings(
     where("companyId", "==", input.companyId),
     where("customerId", "==", input.customerId),
   );
+  let isActive = true;
 
-  return onSnapshot(
-    linksQuery,
-    (snapshot) => {
+  getDocs(linksQuery)
+    .then((snapshot) => {
+      if (!isActive) return;
       callback(snapshot.docs.map((docSnapshot) => mapCustomerMeetingLink(docSnapshot.id, docSnapshot.data())));
-    },
-    onError,
-  );
+    })
+    .catch((error: FirestoreError) => {
+      if (isActive) onError?.(error);
+    });
+
+  return () => {
+    isActive = false;
+  };
 }
 
 export async function createCustomerMeetingLink(input: { companyId: string; customerId: string; meetingId: string }) {

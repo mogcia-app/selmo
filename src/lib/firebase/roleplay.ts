@@ -7,7 +7,6 @@ import {
   deleteDoc,
   doc,
   getDocs,
-  onSnapshot,
   query,
   serverTimestamp,
   updateDoc,
@@ -184,17 +183,24 @@ export function subscribeToRoleplayScenarios(
     return () => undefined;
   }
   const scenariosQuery = query(collection(firestore, "roleplayScenarios"), where("companyId", "==", companyId));
+  let isActive = true;
 
-  return onSnapshot(
-    scenariosQuery,
-    (snapshot) =>
+  getDocs(scenariosQuery)
+    .then((snapshot) => {
+      if (!isActive) return;
       callback(
         snapshot.docs
           .map(mapRoleplayScenario)
           .sort((left, right) => (right.updatedAt?.getTime() ?? 0) - (left.updatedAt?.getTime() ?? 0)),
-      ),
-    onError,
-  );
+      );
+    })
+    .catch((error: FirestoreError) => {
+      if (isActive) onError?.(error);
+    });
+
+  return () => {
+    isActive = false;
+  };
 }
 
 export function subscribeToRoleplayResults(
@@ -257,17 +263,24 @@ export function subscribeToRoleplayAssignments(
         where("companyId", "==", input.companyId),
         where("userId", "==", input.userId ?? ""),
       );
+  let isActive = true;
 
-  return onSnapshot(
-    assignmentsQuery,
-    (snapshot) =>
+  getDocs(assignmentsQuery)
+    .then((snapshot) => {
+      if (!isActive) return;
       callback(
         snapshot.docs
           .map(mapRoleplayAssignment)
           .sort((left, right) => (right.createdAt?.getTime() ?? 0) - (left.createdAt?.getTime() ?? 0)),
-      ),
-    onError,
-  );
+      );
+    })
+    .catch((error: FirestoreError) => {
+      if (isActive) onError?.(error);
+    });
+
+  return () => {
+    isActive = false;
+  };
 }
 
 export function subscribeToRoleplayResultComments(
@@ -286,17 +299,24 @@ export function subscribeToRoleplayResultComments(
     where("resultId", "==", input.resultId),
     ...(input.userId ? [where("userId", "==", input.userId)] : []),
   );
+  let isActive = true;
 
-  return onSnapshot(
-    commentsQuery,
-    (snapshot) =>
+  getDocs(commentsQuery)
+    .then((snapshot) => {
+      if (!isActive) return;
       callback(
         snapshot.docs
           .map(mapRoleplayResultComment)
           .sort((left, right) => (right.createdAt?.getTime() ?? 0) - (left.createdAt?.getTime() ?? 0)),
-      ),
-    onError,
-  );
+      );
+    })
+    .catch((error: FirestoreError) => {
+      if (isActive) onError?.(error);
+    });
+
+  return () => {
+    isActive = false;
+  };
 }
 
 export function subscribeToRoleplayTalkGuides(
@@ -310,17 +330,24 @@ export function subscribeToRoleplayTalkGuides(
     return () => undefined;
   }
   const guidesQuery = query(collection(firestore, "roleplayTalkGuides"), where("companyId", "==", companyId));
+  let isActive = true;
 
-  return onSnapshot(
-    guidesQuery,
-    (snapshot) =>
+  getDocs(guidesQuery)
+    .then((snapshot) => {
+      if (!isActive) return;
       callback(
         snapshot.docs
           .map(mapRoleplayTalkGuide)
           .sort((left, right) => (right.updatedAt?.getTime() ?? 0) - (left.updatedAt?.getTime() ?? 0)),
-      ),
-    onError,
-  );
+      );
+    })
+    .catch((error: FirestoreError) => {
+      if (isActive) onError?.(error);
+    });
+
+  return () => {
+    isActive = false;
+  };
 }
 
 export async function createRoleplayScenario(input: CreateRoleplayScenarioInput) {

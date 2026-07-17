@@ -1,6 +1,5 @@
 "use client";
 
-import { FirebaseError } from "firebase/app";
 import Image from "next/image";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
@@ -45,7 +44,6 @@ export default function AdminDashboardPage() {
   const [activityEvents, setActivityEvents] = useState<SalesActivityEvent[]>([]);
   const [customers, setCustomers] = useState<CustomerRecord[]>([]);
   const [customerLogs, setCustomerLogs] = useState<CustomerLogRecord[]>([]);
-  const [error, setError] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<"overview" | "members">("overview");
   const [scoreDomain, setScoreDomain] = useState<"meeting" | "teleapo">("meeting");
   const [selectedMemberId, setSelectedMemberId] = useState("");
@@ -54,16 +52,15 @@ export default function AdminDashboardPage() {
 
   useEffect(() => {
     if (!profile?.companyId) return;
-    const handleError = (nextError: FirebaseError) => setError(nextError.message);
     const handleOptionalCustomerError = () => {
       setCustomers([]);
       setCustomerLogs([]);
     };
     const unsubscribers = [
-      subscribeToUserProfiles(setUsers, handleError, profile.companyId),
-      subscribeToMeetings({ role: "admin", userId: "admin", companyId: profile.companyId }, setMeetings, handleError),
-      subscribeToKnowledgeProducts(profile?.companyId, setProducts, handleError),
-      subscribeToSalesActivityEvents(profile.companyId, setActivityEvents, handleError),
+      subscribeToUserProfiles(setUsers, () => setUsers([]), profile.companyId),
+      subscribeToMeetings({ role: "admin", userId: "admin", companyId: profile.companyId }, setMeetings, () => setMeetings([])),
+      subscribeToKnowledgeProducts(profile?.companyId, setProducts, () => setProducts([])),
+      subscribeToSalesActivityEvents(profile.companyId, setActivityEvents, () => setActivityEvents([])),
       subscribeToCustomers({ companyId: profile.companyId, isAdmin: true }, setCustomers, handleOptionalCustomerError),
       subscribeToCustomerLogs({ companyId: profile.companyId, isAdmin: true }, setCustomerLogs, handleOptionalCustomerError),
     ];
@@ -76,10 +73,9 @@ export default function AdminDashboardPage() {
   useEffect(() => {
     if (!adminUserId || !profile?.companyId) return;
 
-    const handleError = (nextError: FirebaseError) => setError(nextError.message);
     const unsubscribers = [
-      subscribeToVisibleKnowledgeItems({ userId: adminUserId, companyId: profile?.companyId }, setKnowledgeItems, handleError),
-      subscribeToRoleplayResults({ userId: adminUserId, companyId: profile.companyId, isAdmin: true }, setRoleplayResults, handleError),
+      subscribeToVisibleKnowledgeItems({ userId: adminUserId, companyId: profile?.companyId }, setKnowledgeItems, () => setKnowledgeItems([])),
+      subscribeToRoleplayResults({ userId: adminUserId, companyId: profile.companyId, isAdmin: true }, setRoleplayResults, () => setRoleplayResults([])),
     ];
 
     return () => {
@@ -142,12 +138,6 @@ export default function AdminDashboardPage() {
   return (
     <main className="overflow-x-hidden bg-[#f6f7f9] px-4 pb-5 pt-4 md:px-6 lg:px-8">
       <div className="mx-auto max-w-[1480px]">
-        {error ? (
-          <div className="mt-4 rounded-[12px] border border-[#f4d4d4] bg-[#fff8f8] px-4 py-3 text-[13px] font-medium text-[#b4232a]">
-            {error}
-          </div>
-        ) : null}
-
         <div className="flex flex-wrap items-center gap-3">
           <MonthSelector value={selectedMonth} onChange={setSelectedMonth} />
           <div className="inline-flex flex-wrap items-center gap-1 rounded-[12px] border border-[#e3e7ee] bg-white p-1 shadow-[0_1px_2px_rgba(17,24,39,0.04)]">

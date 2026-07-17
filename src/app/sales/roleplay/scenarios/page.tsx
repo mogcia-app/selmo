@@ -1,6 +1,5 @@
 "use client";
 
-import { FirebaseError } from "firebase/app";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { FormEvent, useEffect, useMemo, useState } from "react";
@@ -74,13 +73,12 @@ export default function SalesRoleplayScenariosPage() {
       setProducts([]);
       return;
     }
-    const handleError = (nextError: FirebaseError) => setError(nextError.message);
     const unsubscribers = [
-      subscribeToRoleplayScenarios(profile.companyId, setScenarios, handleError),
+      subscribeToRoleplayScenarios(profile.companyId, setScenarios, () => setScenarios([])),
       subscribeToRoleplayAssignments(
         { companyId: profile.companyId, userId: profile.uid, isAdmin: false },
         setAssignments,
-        handleError,
+        () => setAssignments([]),
       ),
       subscribeToMeetings(
         {
@@ -90,9 +88,9 @@ export default function SalesRoleplayScenariosPage() {
           salesDomains: allowedSalesDomains,
         },
         setMeetings,
-        handleError,
+        () => setMeetings([]),
       ),
-      subscribeToKnowledgeProducts(profile.companyId, setProducts, handleError),
+      subscribeToKnowledgeProducts(profile.companyId, setProducts, () => setProducts([])),
     ];
 
     return () => {

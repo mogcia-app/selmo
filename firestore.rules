@@ -311,10 +311,7 @@ service cloud.firestore {
 
     match /customers/{customerId} {
       allow read: if isOwnerRole()
-        || (
-          canAdminCompanyData(resource.data.companyId)
-          || (isSalesRole() && (sameCompany(resource.data.companyId) || isCustomerMember(resource.data)))
-        );
+        || canReadCompanyData(resource.data.companyId);
       allow create: if isSignedIn()
         && sameCompany(request.resource.data.companyId)
         && (
@@ -337,16 +334,7 @@ service cloud.firestore {
 
     match /customerLogs/{logId} {
       allow read: if isOwnerRole()
-        || (
-          canReadCompanyData(resource.data.companyId)
-          && (
-            isAdminRole()
-            || isSalesRole()
-            || resource.data.userId == request.auth.uid
-            || resource.data.createdBy == request.auth.uid
-            || isCustomerMember(get(/databases/$(database)/documents/customers/$(resource.data.customerId)).data)
-          )
-        );
+        || canReadCompanyData(resource.data.companyId);
       allow create: if isSignedIn()
         && sameCompany(request.resource.data.companyId)
         && (

@@ -53,76 +53,6 @@ const meetingPurposeOptions: MeetingPurpose[] = [
   "onboarding",
   "retention",
 ];
-type TranscriptCorrectionRule = {
-  id: string;
-  source: string;
-  replacement: string;
-  note: string;
-};
-
-const transcriptCorrectionRules: TranscriptCorrectionRule[] = [
-  {
-    id: "neppan",
-    source: "熱ぱ",
-    replacement: "ねっぱん！",
-    note: "予約管理システム名の認識ミス候補",
-  },
-  {
-    id: "toei-hotel",
-    source: "東営ホテル",
-    replacement: "",
-    note: "ホテル名の認識ミスの可能性があります。正しいホテル名を入力して置換できます。",
-  },
-  {
-    id: "template",
-    source: "コンプレート",
-    replacement: "テンプレート",
-    note: "テンプレートの認識ミス候補",
-  },
-  {
-    id: "form",
-    source: "フォア",
-    replacement: "フォーム",
-    note: "フォームの認識ミス候補",
-  },
-  {
-    id: "commo",
-    source: "コモコモ",
-    replacement: "commo.",
-    note: "サービス名の認識ミス候補",
-  },
-  {
-    id: "pl",
-    source: "PL",
-    replacement: "",
-    note: "別の予約システム名として認識された可能性があります。正しい名称を入力して置換できます。",
-  },
-  {
-    id: "selmo-kana",
-    source: "セルモ",
-    replacement: "selmo.",
-    note: "サービス名の表記ゆれ候補",
-  },
-  {
-    id: "commo-kana",
-    source: "コモ",
-    replacement: "commo.",
-    note: "サービス名の表記ゆれ候補",
-  },
-  {
-    id: "sns-reading",
-    source: "エスエヌエス",
-    replacement: "SNS",
-    note: "SNSの読み表記候補",
-  },
-  {
-    id: "sns-daiku",
-    source: "SNS運用大工",
-    replacement: "SNS運用代行",
-    note: "商材名の認識ミス候補",
-  },
-];
-
 export default function MeetingUploadPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -146,9 +76,8 @@ export default function MeetingUploadPage() {
   const [status, setStatus] = useState<"won" | "considering" | "lost">("considering");
   const [location, setLocation] = useState("");
   const [memo, setMemo] = useState("");
-  const [inputMode, setInputMode] = useState<"audio" | "transcript">("audio");
+  const [inputMode, setInputMode] = useState<"audio" | "transcript">("transcript");
   const [transcriptText, setTranscriptText] = useState("");
-  const [correctionOverrides, setCorrectionOverrides] = useState<Record<string, string>>({});
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [detectedDurationSec, setDetectedDurationSec] = useState<number | null>(null);
   const [uploadProgress, setUploadProgress] = useState(0);
@@ -186,7 +115,7 @@ export default function MeetingUploadPage() {
 
     const unsubscribers = [
       subscribeToMeetings(
-        { role: profile.role, userId: profile.uid, companyId: profile.companyId, salesDomains: [salesDomain] },
+        { role: profile.role, userId: profile.uid, companyId: profile.companyId, salesDomains: [salesDomain], includeDeleted: true },
         setMeetings,
         () => setMeetings([]),
       ),
@@ -268,11 +197,6 @@ export default function MeetingUploadPage() {
   );
   const monthlyUploadQuota = profile ? profile.monthlyTranscriptionQuota : 10;
   const isUploadQuotaUnavailable = monthlyUploadQuota !== null && monthlyUploadQuota <= 0;
-  const detectedTranscriptCorrections = useMemo(
-    () => detectTranscriptCorrections(transcriptText, [productType, ...productOptions]),
-    [productOptions, productType, transcriptText],
-  );
-
   const applyCalendarEventToForm = useCallback(
     (calendarEvent: CalendarEvent) => {
       setCustomerName(calendarEvent.customerName);
@@ -334,23 +258,10 @@ export default function MeetingUploadPage() {
     setTranscriptEndedAtTime(toTimeInputValue(addMinutes(nextRecordedAt, 60)));
   }
 
-  function applyTranscriptCorrection(ruleId: string) {
-    const rule = transcriptCorrectionRules.find((item) => item.id === ruleId);
-    if (!rule) return;
-
-    const replacement = (correctionOverrides[rule.id] ?? rule.replacement).trim();
-    if (!replacement) return;
-
-    setTranscriptText((current) => replaceAllLiteral(current, rule.source, replacement));
-  }
-
-  function applyAllTranscriptCorrections() {
-    setTranscriptText((current) =>
-      detectedTranscriptCorrections.reduce((nextText, correction) => {
-        const replacement = (correctionOverrides[correction.rule.id] ?? correction.rule.replacement).trim();
-        return replacement ? replaceAllLiteral(nextText, correction.rule.source, replacement) : nextText;
-      }, current),
-    );
+  function applyTranscriptFormatting(formatter: (text: string) => string) {
+    setTranscriptText((current) => formatter(current));
+    setErrorMessage(null);
+    setSuccessMessage(null);
   }
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
@@ -376,7 +287,7 @@ export default function MeetingUploadPage() {
     }
 
     if (inputMode === "audio" && !selectedFile) {
-      setErrorMessage("文字起こし検証のため、音声ファイルを選択してください。");
+      setErrorMessage("分析用ログを作成するため、音声ファイルを選択してください。");
       return;
     }
 
@@ -384,7 +295,7 @@ export default function MeetingUploadPage() {
       inputMode === "transcript" ? normalizePastedTranscript(transcriptText) : "";
 
     if (inputMode === "transcript" && normalizedTranscriptText.length < 20) {
-      setErrorMessage("文字起こしテキストを20文字以上入力してください。");
+      setErrorMessage("商談ログを20文字以上入力してください。");
       return;
     }
 
@@ -471,8 +382,8 @@ export default function MeetingUploadPage() {
 
       setSuccessMessage(
         inputMode === "transcript"
-          ? `文字起こしテキストを保存しました。ID: ${meetingId}`
-          : `アップロード完了しました。処理状況は一覧で確認できます。ID: ${meetingId}`,
+          ? `商談ログを保存しました。分析画面で確認できます。ID: ${meetingId}`
+          : `音声を保存しました。文字起こし後に分析できます。ID: ${meetingId}`,
       );
       router.push(`/meetings?category=${salesDomain}`);
     } catch (error) {
@@ -516,14 +427,14 @@ export default function MeetingUploadPage() {
               </div>
               <div className="min-w-0">
                 <h2 className="text-[22px] font-bold tracking-[-0.03em] text-[#171717]">
-                  入力方法
+                  アップロード方法
                 </h2>
               </div>
             </div>
             <Segmented
               options={[
-                { label: "音声", value: "audio" },
                 { label: "文字起こし", value: "transcript" },
+                { label: "音声から作成", value: "audio" },
               ]}
               active={inputMode}
               onChange={(value) => {
@@ -551,10 +462,10 @@ export default function MeetingUploadPage() {
                   className="mx-auto h-[124px] w-[124px] object-contain"
                 />
                 <div className="mt-4 text-[22px] font-bold tracking-[-0.03em] text-[#171717]">
-                  音声ファイルをアップロード
+                  音声から分析用ログを作成
                 </div>
                 <div className="mt-2 text-[14px] leading-7 text-[#7a808c]">
-                  mp3 / m4a / wav に対応しています。wavは保存時にmp3へ自動変換されます。
+                  話者分離済みログがある場合は「商談ログ」貼り付けがおすすめです。音声だけある場合は、mp3 / m4a / wav からログを作成できます。
                 </div>
                 {selectedFile ? (
                   <div className="mx-auto mt-5 flex max-w-full items-center justify-center gap-2 rounded-[14px] border border-[#f1dfaa] bg-white px-4 py-3 text-left shadow-[0_8px_18px_rgba(245,189,7,0.12)] sm:max-w-[420px]">
@@ -664,7 +575,16 @@ export default function MeetingUploadPage() {
             </>
           ) : (
             <div className="rounded-[22px] border border-[#e6e8ee] bg-[#fafafa] px-5 py-5">
-              <div className="text-[18px] font-bold text-[#171717]">文字起こしテキストを貼り付け</div>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={() => applyTranscriptFormatting(formatTranscriptLineBreaks)}
+                  disabled={!transcriptText.trim()}
+                  className="rounded-[12px] border border-[#e4e8ef] bg-white px-3 py-2 text-[12px] font-bold text-[#596273] transition hover:border-[#f0c655] hover:bg-[#fffaf0] disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  改行を整える
+                </button>
+              </div>
               <textarea
                 value={transcriptText}
                 onChange={(event) => setTranscriptText(event.target.value)}
@@ -683,73 +603,12 @@ export default function MeetingUploadPage() {
                     ),
                   );
                 }}
-                className={`${inputClassName} mt-4 min-h-[260px] resize-y leading-7`}
-                placeholder="営業: 本日はありがとうございます。\n顧客: よろしくお願いします。\n..."
+                className={`${inputClassName} mt-3 min-h-[260px] resize-y leading-7`}
+                placeholder="営業: 本日はありがとうございます。\n顧客: よろしくお願いします。\n営業: 本日はLINE公式アカウントの活用についてご提案します。\n..."
               />
               <div className="mt-2 text-right text-[12px] font-semibold text-[#8a909b]">
                 {transcriptText.trim().length.toLocaleString()}文字
               </div>
-              {detectedTranscriptCorrections.length > 0 ? (
-                <div className="mt-4 rounded-[18px] border border-[#f1dfaa] bg-white px-4 py-4">
-                  <div className="flex flex-wrap items-center justify-between gap-3">
-                    <div>
-                      <div className="text-[13px] font-bold text-[#8a6500]">誤認識候補</div>
-                      <div className="mt-1 text-[12px] leading-5 text-[#7a808c]">
-                        候補を確認して、必要なものだけ本文に反映できます。
-                      </div>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={applyAllTranscriptCorrections}
-                      className="rounded-[12px] bg-[#171717] px-3 py-2 text-[12px] font-bold text-white transition hover:bg-[#2a2d33]"
-                    >
-                      置換できる候補を一括反映
-                    </button>
-                  </div>
-                  <div className="mt-3 space-y-3">
-                    {detectedTranscriptCorrections.map((correction) => {
-                      const replacement = correctionOverrides[correction.rule.id] ?? correction.rule.replacement;
-                      const canApply = replacement.trim().length > 0;
-                      return (
-                        <div key={correction.rule.id} className="rounded-[14px] border border-[#eceef4] bg-[#fafafa] px-3 py-3">
-                          <div className="flex flex-wrap items-start justify-between gap-3">
-                            <div className="min-w-0">
-                              <div className="text-[13px] font-bold text-[#171717]">
-                                {correction.rule.source}
-                                <span className="mx-2 text-[#b6bdc8]">→</span>
-                                {replacement || "要確認"}
-                              </div>
-                              <div className="mt-1 text-[12px] leading-5 text-[#7a808c]">
-                                {correction.rule.note} / {correction.count}件
-                              </div>
-                            </div>
-                            <button
-                              type="button"
-                              onClick={() => applyTranscriptCorrection(correction.rule.id)}
-                              disabled={!canApply}
-                              className="rounded-[12px] bg-[#ffd12f] px-3 py-2 text-[12px] font-bold text-[#171717] transition hover:bg-[#f5bd07] disabled:cursor-not-allowed disabled:bg-[#d1d5db] disabled:text-white"
-                            >
-                              反映
-                            </button>
-                          </div>
-                          <input
-                            type="text"
-                            className={`${inputClassName} mt-2 py-2 text-[13px]`}
-                            value={replacement}
-                            placeholder="正しい表記を入力"
-                            onChange={(event) =>
-                              setCorrectionOverrides((current) => ({
-                                ...current,
-                                [correction.rule.id]: event.target.value,
-                              }))
-                            }
-                          />
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              ) : null}
             </div>
           )}
 
@@ -788,7 +647,7 @@ export default function MeetingUploadPage() {
           {isSubmitting ? (
             <div className="mt-5 rounded-[18px] border border-[#eceef4] bg-white px-5 py-4">
               <div className="mb-2 flex items-center justify-between text-[13px] text-[#6d7482]">
-                <span>アップロード進捗</span>
+                <span>{inputMode === "audio" ? "ログ作成進捗" : "保存進捗"}</span>
                 <span>{uploadProgress}%</span>
               </div>
               <div className="h-[8px] overflow-hidden rounded-full bg-[#eceef4]">
@@ -887,7 +746,7 @@ export default function MeetingUploadPage() {
                   onChange={(event) => setTranscriptEndedAtTime(event.target.value)}
                 />
                 <p className="mt-2 text-[12px] font-semibold text-[#8a909b]">
-                  実施日時の1時間後を自動入力します。必要に応じて変更できます。
+                  ログの終了時刻を入力してください。実施日時の1時間後を自動入力します。
                 </p>
               </Field>
             ) : null}
@@ -979,11 +838,11 @@ export default function MeetingUploadPage() {
               >
                 {isSubmitting
                   ? inputMode === "audio"
-                    ? `アップロード中... ${uploadProgress}%`
+                    ? `ログ作成中... ${uploadProgress}%`
                     : "保存中..."
                   : inputMode === "audio"
-                    ? "音声をアップロード"
-                    : "文字起こしを保存"}
+                    ? "音声からログ作成を開始"
+                    : "商談ログを保存して分析"}
               </button>
             </div>
           </form>
@@ -1259,6 +1118,65 @@ function formatPastedTranscriptForEditing(text: string) {
   return splitLongPastedTranscript(normalizedText).join("\n");
 }
 
+function formatTranscriptLineBreaks(text: string) {
+  const normalizedText = text
+    .replace(/\r\n/g, "\n")
+    .replace(/\r/g, "\n")
+    .replace(/\\n/g, "\n")
+    .replace(/[ \t]{2,}/g, " ")
+    .trim();
+
+  if (!normalizedText) return "";
+
+  return normalizedText
+    .split(/\n{2,}/)
+    .flatMap((block) => formatTranscriptBlockLines(block))
+    .join("\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+function formatTranscriptBlockLines(block: string) {
+  const lines = block
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  if (lines.length > 1) {
+    return lines.flatMap((line) => splitTranscriptLinePreservingSpeaker(line));
+  }
+
+  return splitTranscriptLinePreservingSpeaker(block.trim());
+}
+
+function splitTranscriptLinePreservingSpeaker(line: string) {
+  const speakerLine = readEditableSpeakerLine(line);
+  const speakerLabel = speakerLine?.label ?? "";
+  const body = speakerLine?.text ?? line;
+  const units = splitLongPastedTranscript(body);
+
+  if (!speakerLabel) return units;
+
+  return units.map((unit) => `${speakerLabel}: ${unit}`);
+}
+
+function readEditableSpeakerLine(line: string) {
+  const match = line.match(/^(.{1,24}?)[：:]\s*(.+)$/);
+  const label = match?.[1]?.trim();
+  const text = match?.[2]?.trim();
+
+  if (!label || !text || !isEditableSpeakerLabel(label)) {
+    return null;
+  }
+
+  return { label, text };
+}
+
+function isEditableSpeakerLabel(label: string) {
+  return /^(営業|顧客|お客様|お客さま|クライアント|先方|担当|話者\s*[12]|Speaker\s*[12]|同席者|参加者|不明)$/i.test(label) ||
+    /^[一-龠][一-龠ぁ-んァ-ヶA-Za-z\s　・.]{0,15}$/.test(label);
+}
+
 function splitLongPastedTranscript(text: string) {
   const sentences = text
     .replace(/^。+/, "")
@@ -1305,170 +1223,6 @@ function insertTextAtSelection(current: string, inserted: string, selectionStart
   const separatorBefore = prefix && !prefix.endsWith("\n") ? "\n" : "";
   const separatorAfter = suffix && !inserted.endsWith("\n") ? "\n" : "";
   return `${prefix}${separatorBefore}${inserted}${separatorAfter}${suffix}`;
-}
-
-function detectTranscriptCorrections(text: string, productNames: string[]) {
-  const normalizedText = text.trim();
-  if (!normalizedText) return [];
-
-  const corrections = transcriptCorrectionRules
-    .map((rule) => ({
-      rule,
-      count: countLiteralOccurrences(normalizedText, rule.source),
-    }))
-    .filter((correction) => correction.count > 0);
-
-  const existingSources = new Set(corrections.map((correction) => correction.rule.source));
-  const productCorrections = detectProductNameCorrections(normalizedText, productNames, existingSources);
-  productCorrections.forEach((correction) => existingSources.add(correction.rule.source));
-
-  return [
-    ...corrections,
-    ...productCorrections,
-    ...detectSuspiciousTranscriptTerms(normalizedText, existingSources),
-  ].slice(0, 12);
-}
-
-function countLiteralOccurrences(text: string, needle: string) {
-  if (!needle) return 0;
-
-  let count = 0;
-  let index = text.indexOf(needle);
-  while (index !== -1) {
-    count += 1;
-    index = text.indexOf(needle, index + needle.length);
-  }
-  return count;
-}
-
-function detectProductNameCorrections(text: string, productNames: string[], ignoredSources: Set<string>) {
-  const normalizedProducts = Array.from(new Set(productNames.map((name) => name.trim()).filter(Boolean)));
-  if (normalizedProducts.length === 0) return [];
-
-  const terms = extractTranscriptTerms(text);
-  const corrections: Array<{ rule: TranscriptCorrectionRule; count: number }> = [];
-
-  for (const term of terms) {
-    if (ignoredSources.has(term.value)) continue;
-
-    const normalizedTerm = normalizeCorrectionComparable(term.value);
-    if (normalizedTerm.length < 3) continue;
-
-    const matchedProduct = normalizedProducts.find((productName) => {
-      const normalizedProduct = normalizeCorrectionComparable(productName);
-      if (normalizedProduct.length < 3 || normalizedProduct === normalizedTerm) return false;
-      const distance = levenshteinDistance(normalizedTerm, normalizedProduct);
-      return distance > 0 && distance <= Math.max(1, Math.floor(normalizedProduct.length * 0.28));
-    });
-
-    if (!matchedProduct) continue;
-
-    corrections.push({
-      rule: {
-        id: `product-${stableCorrectionId(term.value)}-${stableCorrectionId(matchedProduct)}`,
-        source: term.value,
-        replacement: matchedProduct,
-        note: "登録商材名に近い表記ゆれ候補",
-      },
-      count: term.count,
-    });
-
-    if (corrections.length >= 5) break;
-  }
-
-  return corrections;
-}
-
-function detectSuspiciousTranscriptTerms(text: string, ignoredSources: Set<string>) {
-  return extractTranscriptTerms(text)
-    .filter((term) => !ignoredSources.has(term.value))
-    .filter((term) => isSuspiciousTranscriptTerm(term.value))
-    .slice(0, 5)
-    .map((term) => ({
-      rule: {
-        id: `suspicious-${stableCorrectionId(term.value)}`,
-        source: term.value,
-        replacement: "",
-        note: "聞き間違いの可能性がある語です。正しい表記を入力して置換できます。",
-      },
-      count: term.count,
-    }));
-}
-
-function extractTranscriptTerms(text: string) {
-  const termCounts = new Map<string, number>();
-  const termPattern = /[A-Za-zＡ-Ｚａ-ｚ0-9０-９一-龯ぁ-んァ-ヶー]{3,24}/g;
-  let match: RegExpExecArray | null;
-
-  while ((match = termPattern.exec(text)) !== null) {
-    const value = match[0].trim();
-    if (!value || transcriptCorrectionIgnoreTerms.has(value)) continue;
-    termCounts.set(value, (termCounts.get(value) ?? 0) + 1);
-  }
-
-  return Array.from(termCounts.entries())
-    .map(([value, count]) => ({ value, count }))
-    .sort((left, right) => right.count - left.count || right.value.length - left.value.length);
-}
-
-const transcriptCorrectionIgnoreTerms = new Set([
-  "ありがとう",
-  "ありがとうございます",
-  "よろしく",
-  "お願いします",
-  "ございます",
-  "そうですね",
-  "という",
-  "こちら",
-  "そちら",
-  "できる",
-  "している",
-  "について",
-  "いただき",
-  "いただく",
-]);
-
-function isSuspiciousTranscriptTerm(value: string) {
-  if (transcriptCorrectionIgnoreTerms.has(value)) return false;
-  if (/^[ァ-ヶー]{5,}$/.test(value)) return true;
-  if (/([ァ-ヶー]{2,})\1/.test(value)) return true;
-  if (/[A-Za-zＡ-Ｚａ-ｚ].*[ァ-ヶー]|[ァ-ヶー].*[A-Za-zＡ-Ｚａ-ｚ]/.test(value)) return true;
-  return false;
-}
-
-function normalizeCorrectionComparable(value: string) {
-  return value
-    .normalize("NFKC")
-    .toLowerCase()
-    .replace(/[^\p{Letter}\p{Number}]/gu, "");
-}
-
-function stableCorrectionId(value: string) {
-  return normalizeCorrectionComparable(value).slice(0, 24) || String(value.length);
-}
-
-function levenshteinDistance(left: string, right: string) {
-  const previous = Array.from({ length: right.length + 1 }, (_, index) => index);
-  const current = Array.from({ length: right.length + 1 }, () => 0);
-
-  for (let leftIndex = 1; leftIndex <= left.length; leftIndex += 1) {
-    current[0] = leftIndex;
-    for (let rightIndex = 1; rightIndex <= right.length; rightIndex += 1) {
-      const cost = left[leftIndex - 1] === right[rightIndex - 1] ? 0 : 1;
-      current[rightIndex] = Math.min(
-        previous[rightIndex] + 1,
-        current[rightIndex - 1] + 1,
-        previous[rightIndex - 1] + cost,
-      );
-    }
-    previous.splice(0, previous.length, ...current);
-  }
-
-  return previous[right.length] ?? 0;
-}
-
-function replaceAllLiteral(text: string, source: string, replacement: string) {
-  return text.split(source).join(replacement);
 }
 
 function readAudioDuration(file: File) {

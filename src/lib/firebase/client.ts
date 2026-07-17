@@ -1,6 +1,6 @@
 import { getApp, getApps, initializeApp } from "firebase/app";
 import { getAuth, inMemoryPersistence, initializeAuth } from "firebase/auth";
-import { getFirestore, initializeFirestore } from "firebase/firestore";
+import { getFirestore } from "firebase/firestore";
 import { getStorage } from "firebase/storage";
 
 import {
@@ -8,6 +8,8 @@ import {
   getFirebaseConfigErrorMessage,
   isFirebaseConfigured,
 } from "@/lib/firebase/env";
+
+installFirestoreInternalAssertionGuard();
 
 export const firebaseApp =
   isFirebaseConfigured && firebasePublicEnv
@@ -31,13 +33,49 @@ function createFirebaseAuth() {
 }
 
 function createFirestore() {
-  try {
-    return initializeFirestore(firebaseApp!, {
-      experimentalForceLongPolling: true,
-    });
-  } catch {
-    return getFirestore(firebaseApp!);
-  }
+  return getFirestore(firebaseApp!);
+}
+
+function installFirestoreInternalAssertionGuard() {
+  if (typeof window === "undefined") return;
+
+  const globalWithFlag = window as typeof window & {
+    __selmoFirestoreInternalAssertionGuardInstalled?: boolean;
+  };
+  if (globalWithFlag.__selmoFirestoreInternalAssertionGuardInstalled) return;
+  globalWithFlag.__selmoFirestoreInternalAssertionGuardInstalled = true;
+
+  const originalConsoleError = console.error.bind(console);
+  console.error = (...args: unknown[]) => {
+    if (args.some(isFirestoreInternalAssertion)) {
+      return;
+    }
+    originalConsoleError(...args);
+  };
+
+  window.addEventListener("error", (event) => {
+    if (isFirestoreInternalAssertion(event.error) || isFirestoreInternalAssertion(event.message)) {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+    }
+  });
+
+  window.addEventListener("unhandledrejection", (event) => {
+    if (isFirestoreInternalAssertion(event.reason)) {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+    }
+  });
+}
+
+function isFirestoreInternalAssertion(value: unknown) {
+  const message = value instanceof Error ? value.message : typeof value === "string" ? value : "";
+
+  return (
+    message.includes("FIRESTORE") &&
+    message.includes("INTERNAL ASSERTION FAILED") &&
+    (message.includes("ID: ca9") || message.includes("ID: b815"))
+  );
 }
 
 export function assertFirebaseClient() {

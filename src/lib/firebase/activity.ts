@@ -3,7 +3,7 @@
 import {
   Timestamp,
   collection,
-  onSnapshot,
+  getDocs,
   query,
   serverTimestamp,
   setDoc,
@@ -75,19 +75,25 @@ export function subscribeToSalesActivityEvents(
     collection(firestore, "salesActivityEvents"),
     where("companyId", "==", companyId),
   );
+  let isActive = true;
 
-  return onSnapshot(
-    eventsQuery,
-    (snapshot) => {
+  getDocs(eventsQuery)
+    .then((snapshot) => {
+      if (!isActive) return;
       callback(
         snapshot.docs
           .map(mapSalesActivityEvent)
           .sort((left, right) => (right.createdAt?.getTime() ?? 0) - (left.createdAt?.getTime() ?? 0))
           .slice(0, 100),
       );
-    },
-    onError,
-  );
+    })
+    .catch((error: FirestoreError) => {
+      if (isActive) onError?.(error);
+    });
+
+  return () => {
+    isActive = false;
+  };
 }
 
 function mapSalesActivityEvent(

@@ -366,7 +366,8 @@ async function transcribeChunk({
       formData.append("language", language);
     }
 
-    formData.append("response_format", "json");
+    formData.append("response_format", "verbose_json");
+    formData.append("timestamp_granularities[]", "segment");
 
     const openAiResponse = await fetchWithTimeout("https://api.openai.com/v1/audio/transcriptions", {
       method: "POST",
