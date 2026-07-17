@@ -210,8 +210,10 @@ export async function createMeeting(input: CreateMeetingInput) {
   const companyId = resolveCompanyId(input.companyId);
   const salesDomain = input.salesDomain ?? "meeting";
   const normalizedAudioDurationSec = input.audioDurationSec ?? null;
-  const pastedConversationLogs = input.transcriptText?.trim()
-    ? buildConversationLogsFromText(input.transcriptText.trim())
+  const normalizedTranscriptText = input.transcriptText?.trim() ?? "";
+  const hasTranscriptText = Boolean(normalizedTranscriptText);
+  const pastedConversationLogs = normalizedTranscriptText
+    ? buildConversationLogsFromText(normalizedTranscriptText)
     : [];
 
   await setDoc(meetingRef, {
@@ -236,11 +238,11 @@ export async function createMeeting(input: CreateMeetingInput) {
     audioMimeType: input.audioFile?.type || "audio/mpeg",
     processingStatus: input.audioFile ? "uploading" : "uploaded",
     reanalysisCount: 0,
-    ...(input.transcriptText?.trim()
+    ...(hasTranscriptText
       ? {
           transcriptionProbeStatus: "completed",
           transcriptionProbeModel: "manual-paste",
-          transcriptionProbeText: input.transcriptText.trim(),
+          transcriptionProbeText: normalizedTranscriptText,
           transcriptionProbeLanguage: "ja",
           transcriptionProbeError: null,
           transcriptionProbeSegmentCount: 1,
@@ -248,7 +250,7 @@ export async function createMeeting(input: CreateMeetingInput) {
             {
               startSec: 0,
               endSec: normalizedAudioDurationSec ?? 0,
-              text: input.transcriptText.trim(),
+              text: normalizedTranscriptText,
               speaker: null,
             },
           ],
@@ -269,14 +271,14 @@ export async function createMeeting(input: CreateMeetingInput) {
   await saveSalesActivityEvent({
     companyId,
     userId: input.userId,
-    type: input.transcriptText?.trim() ? "transcript_pasted" : "meeting_uploaded",
-    title: input.transcriptText?.trim() ? "文字起こし貼り付け" : salesDomain === "teleapo" ? "テレアポアップロード" : "商談アップロード",
+    type: hasTranscriptText ? "transcript_pasted" : "meeting_uploaded",
+    title: hasTranscriptText ? "文字起こし貼り付け" : salesDomain === "teleapo" ? "テレアポアップロード" : "商談アップロード",
     summary: `${input.customerName || (salesDomain === "teleapo" ? "未設定のテレアポ" : "未設定の商談")}を登録しました`,
     detail: [
       `顧客名: ${input.customerName || "未設定"}`,
       `商材: ${input.productType || "未設定"}`,
       `商談目的: ${getMeetingPurposeLabel(input.meetingPurpose ?? inferMeetingPurpose(input.customerType, input.status))}`,
-      `入力方法: ${input.transcriptText?.trim() ? "文字起こし貼り付け" : "音声アップロード"}`,
+      `入力方法: ${hasTranscriptText ? "文字起こし貼り付け" : "音声アップロード"}`,
       `ステータス: ${input.status}`,
     ].join("\n"),
     href: `/admin/meetings/${meetingRef.id}`,
@@ -285,7 +287,7 @@ export async function createMeeting(input: CreateMeetingInput) {
       customerName: input.customerName,
       productType: input.productType,
       meetingPurpose: input.meetingPurpose ?? inferMeetingPurpose(input.customerType, input.status),
-      inputMode: input.transcriptText?.trim() ? "transcript" : "audio",
+      inputMode: hasTranscriptText ? "transcript" : "audio",
       salesDomain,
       status: input.status,
     },
@@ -296,9 +298,9 @@ export async function createMeeting(input: CreateMeetingInput) {
       companyId,
       userId: input.userId,
       meetingId: meetingRef.id,
-      title: input.transcriptText?.trim() ? "文字起こしを登録しました" : "商談を登録しました",
-      body: input.transcriptText?.trim()
-        ? "貼り付けた文字起こしから、要約や分析を開始できます。"
+      title: hasTranscriptText ? "文字起こしを登録しました" : "商談を登録しました",
+      body: hasTranscriptText
+        ? "登録した文字起こしから、要約や分析を開始できます。"
         : "商談情報を保存しました。",
     }).catch(() => undefined);
     return meetingRef.id;
@@ -469,16 +471,30 @@ function buildConversationLogsFromText(text: string): MeetingConversationLog[] {
       return;
     }
 
-    logs.push({
-      speaker: currentSpeaker,
-      label: currentLabel,
-      text: body,
-    });
+    for (const text of splitPastedTranscriptUtterances(body)) {
+      logs.push({
+        speaker: currentSpeaker,
+        label: currentLabel,
+        text,
+      });
+    }
     currentLines = [];
   }
 
   for (const rawLine of lines) {
     const line = rawLine.trim();
+    const inlineSpeakerLine = readPastedTranscriptInlineSpeakerLine(line);
+
+    if (inlineSpeakerLine) {
+      flushCurrent();
+      currentSpeaker = inferPastedTranscriptSpeaker(inlineSpeakerLine.label);
+      currentLabel = inlineSpeakerLine.label;
+      if (inlineSpeakerLine.text) {
+        currentLines.push(inlineSpeakerLine.text);
+      }
+      continue;
+    }
+
     const speakerLabel = readPastedTranscriptSpeakerLabel(line);
 
     if (speakerLabel) {
@@ -512,6 +528,44 @@ function buildConversationLogsFromText(text: string): MeetingConversationLog[] {
   }));
 }
 
+function splitPastedTranscriptUtterances(text: string) {
+  const normalizedText = text.replace(/\s*\n+\s*/g, "\n").trim();
+  const chunks: string[] = [];
+
+  for (const block of normalizedText.split(/\n+/)) {
+    const trimmedBlock = block.trim();
+    if (!trimmedBlock) {
+      continue;
+    }
+
+    const sentences = trimmedBlock.match(/[^。！？!?]+[。！？!?]?/g);
+    if (!sentences || sentences.length <= 1) {
+      chunks.push(trimmedBlock);
+      continue;
+    }
+
+    chunks.push(...sentences.map((sentence) => sentence.trim()).filter(Boolean));
+  }
+
+  return chunks.length > 0 ? chunks : [normalizedText];
+}
+
+function readPastedTranscriptInlineSpeakerLine(line: string) {
+  if (!line) {
+    return null;
+  }
+
+  const match = line.match(/^(.{1,24}?)[：:]\s*(.+)$/);
+  const label = match?.[1]?.trim();
+  const text = match?.[2]?.trim();
+
+  if (!label || !text || !isKnownPastedTranscriptSpeakerLabel(label)) {
+    return null;
+  }
+
+  return { label, text };
+}
+
 function readPastedTranscriptSpeakerLabel(line: string) {
   if (!line) {
     return null;
@@ -520,20 +574,31 @@ function readPastedTranscriptSpeakerLabel(line: string) {
   const colonMatch = line.match(/^(.{1,24}?)[：:]\s*$/);
   const label = (colonMatch?.[1] ?? line).trim();
 
-  if (/^(顧客|お客様|お客さま|クライアント|相手|先方|営業|担当|同席者|参加者|不明)$/.test(label)) {
-    return label;
-  }
-
-  if (/^[一-龠][一-龠ぁ-んァ-ヶA-Za-z\s　・.]{0,15}$/.test(label)) {
+  if (isKnownPastedTranscriptSpeakerLabel(label)) {
     return label;
   }
 
   return null;
 }
 
+function isKnownPastedTranscriptSpeakerLabel(label: string) {
+  return /^(顧客|お客様|お客さま|クライアント|相手|先方|営業|担当|同席者|参加者|不明)$/.test(label) ||
+    /^Speaker\s*[12]$/i.test(label) ||
+    /^話者\s*[12]$/.test(label) ||
+    /^[一-龠][一-龠ぁ-んァ-ヶA-Za-z\s　・.]{0,15}$/.test(label);
+}
+
 function inferPastedTranscriptSpeaker(label: string): MeetingConversationLog["speaker"] {
   if (/^(顧客|お客様|お客さま|クライアント|相手|先方)$/.test(label)) {
     return "customer";
+  }
+
+  if (/^Speaker\s*1$/i.test(label) || /^話者\s*1$/.test(label)) {
+    return "speaker_1";
+  }
+
+  if (/^Speaker\s*2$/i.test(label) || /^話者\s*2$/.test(label)) {
+    return "speaker_2";
   }
 
   if (/^(同席者|参加者)$/.test(label)) {

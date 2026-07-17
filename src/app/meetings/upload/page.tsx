@@ -51,6 +51,44 @@ const meetingPurposeOptions: MeetingPurpose[] = [
   "onboarding",
   "retention",
 ];
+const transcriptCorrectionRules = [
+  {
+    id: "neppan",
+    source: "熱ぱ",
+    replacement: "ねっぱん！",
+    note: "予約管理システム名の認識ミス候補",
+  },
+  {
+    id: "toei-hotel",
+    source: "東営ホテル",
+    replacement: "",
+    note: "ホテル名の認識ミスの可能性があります。正しいホテル名を入力して置換できます。",
+  },
+  {
+    id: "template",
+    source: "コンプレート",
+    replacement: "テンプレート",
+    note: "テンプレートの認識ミス候補",
+  },
+  {
+    id: "form",
+    source: "フォア",
+    replacement: "フォーム",
+    note: "フォームの認識ミス候補",
+  },
+  {
+    id: "commo",
+    source: "コモコモ",
+    replacement: "commo.",
+    note: "サービス名の認識ミス候補",
+  },
+  {
+    id: "pl",
+    source: "PL",
+    replacement: "",
+    note: "別の予約システム名として認識された可能性があります。正しい名称を入力して置換できます。",
+  },
+] as const;
 
 export default function MeetingUploadPage() {
   const router = useRouter();
@@ -73,6 +111,7 @@ export default function MeetingUploadPage() {
   const [memo, setMemo] = useState("");
   const [inputMode, setInputMode] = useState<"audio" | "transcript">("audio");
   const [transcriptText, setTranscriptText] = useState("");
+  const [correctionOverrides, setCorrectionOverrides] = useState<Record<string, string>>({});
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [detectedDurationSec, setDetectedDurationSec] = useState<number | null>(null);
   const [uploadProgress, setUploadProgress] = useState(0);
@@ -169,6 +208,10 @@ export default function MeetingUploadPage() {
   );
   const monthlyUploadQuota = profile ? profile.monthlyTranscriptionQuota : 10;
   const isUploadQuotaUnavailable = monthlyUploadQuota !== null && monthlyUploadQuota <= 0;
+  const detectedTranscriptCorrections = useMemo(
+    () => detectTranscriptCorrections(transcriptText),
+    [transcriptText],
+  );
 
   const applyCalendarEventToForm = useCallback(
     (calendarEvent: CalendarEvent) => {
@@ -218,6 +261,25 @@ export default function MeetingUploadPage() {
     setRecordedAt(value);
     setErrorMessage(null);
     setTranscriptEndedAtTime(toTimeInputValue(addMinutes(nextRecordedAt, 60)));
+  }
+
+  function applyTranscriptCorrection(ruleId: string) {
+    const rule = transcriptCorrectionRules.find((item) => item.id === ruleId);
+    if (!rule) return;
+
+    const replacement = (correctionOverrides[rule.id] ?? rule.replacement).trim();
+    if (!replacement) return;
+
+    setTranscriptText((current) => replaceAllLiteral(current, rule.source, replacement));
+  }
+
+  function applyAllTranscriptCorrections() {
+    setTranscriptText((current) =>
+      detectedTranscriptCorrections.reduce((nextText, correction) => {
+        const replacement = (correctionOverrides[correction.rule.id] ?? correction.rule.replacement).trim();
+        return replacement ? replaceAllLiteral(nextText, correction.rule.source, replacement) : nextText;
+      }, current),
+    );
   }
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
@@ -539,6 +601,67 @@ export default function MeetingUploadPage() {
               <div className="mt-2 text-right text-[12px] font-semibold text-[#8a909b]">
                 {transcriptText.trim().length.toLocaleString()}文字
               </div>
+              {detectedTranscriptCorrections.length > 0 ? (
+                <div className="mt-4 rounded-[18px] border border-[#f1dfaa] bg-white px-4 py-4">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                      <div className="text-[13px] font-bold text-[#8a6500]">誤認識候補</div>
+                      <div className="mt-1 text-[12px] leading-5 text-[#7a808c]">
+                        候補を確認して、必要なものだけ本文に反映できます。
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={applyAllTranscriptCorrections}
+                      className="rounded-[12px] bg-[#171717] px-3 py-2 text-[12px] font-bold text-white transition hover:bg-[#2a2d33]"
+                    >
+                      置換できる候補を一括反映
+                    </button>
+                  </div>
+                  <div className="mt-3 space-y-3">
+                    {detectedTranscriptCorrections.map((correction) => {
+                      const replacement = correctionOverrides[correction.rule.id] ?? correction.rule.replacement;
+                      const canApply = replacement.trim().length > 0;
+                      return (
+                        <div key={correction.rule.id} className="rounded-[14px] border border-[#eceef4] bg-[#fafafa] px-3 py-3">
+                          <div className="flex flex-wrap items-start justify-between gap-3">
+                            <div className="min-w-0">
+                              <div className="text-[13px] font-bold text-[#171717]">
+                                {correction.rule.source}
+                                <span className="mx-2 text-[#b6bdc8]">→</span>
+                                {replacement || "要確認"}
+                              </div>
+                              <div className="mt-1 text-[12px] leading-5 text-[#7a808c]">
+                                {correction.rule.note} / {correction.count}件
+                              </div>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => applyTranscriptCorrection(correction.rule.id)}
+                              disabled={!canApply}
+                              className="rounded-[12px] bg-[#ffd12f] px-3 py-2 text-[12px] font-bold text-[#171717] transition hover:bg-[#f5bd07] disabled:cursor-not-allowed disabled:bg-[#d1d5db] disabled:text-white"
+                            >
+                              反映
+                            </button>
+                          </div>
+                          <input
+                            type="text"
+                            className={`${inputClassName} mt-2 py-2 text-[13px]`}
+                            value={replacement}
+                            placeholder="正しい表記を入力"
+                            onChange={(event) =>
+                              setCorrectionOverrides((current) => ({
+                                ...current,
+                                [correction.rule.id]: event.target.value,
+                              }))
+                            }
+                          />
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              ) : null}
             </div>
           )}
 
@@ -951,6 +1074,31 @@ function normalizePastedTranscript(text: string) {
     .replace(/\\n/g, "\n")
     .replace(/\n{3,}/g, "\n\n")
     .trim();
+}
+
+function detectTranscriptCorrections(text: string) {
+  return transcriptCorrectionRules
+    .map((rule) => ({
+      rule,
+      count: countLiteralOccurrences(text, rule.source),
+    }))
+    .filter((correction) => correction.count > 0);
+}
+
+function countLiteralOccurrences(text: string, needle: string) {
+  if (!needle) return 0;
+
+  let count = 0;
+  let index = text.indexOf(needle);
+  while (index !== -1) {
+    count += 1;
+    index = text.indexOf(needle, index + needle.length);
+  }
+  return count;
+}
+
+function replaceAllLiteral(text: string, source: string, replacement: string) {
+  return text.split(source).join(replacement);
 }
 
 function readAudioDuration(file: File) {

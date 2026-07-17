@@ -17,6 +17,7 @@ import {
   subscribeToMeeting,
   type MeetingRecord,
 } from "@/lib/firebase/meetings";
+import { updateSalesRepAnalysisProfileFromMeeting } from "@/lib/firebase/sales-rep-analysis-profile";
 import {
   subscribeToAudioProcessingJob,
   updateAudioProcessingJob,
@@ -289,6 +290,12 @@ export function MeetingDetailScreen({
         error: null,
         processingStatus: "uploaded",
       });
+      if (meeting && summaryPayload.summary) {
+        await updateSalesRepAnalysisProfileFromMeeting({
+          meeting,
+          summary: summaryPayload.summary,
+        }).catch(() => undefined);
+      }
       setErrorMessage(null);
       await saveSalesActivityEvent({
         companyId: profile?.companyId ?? meeting?.companyId ?? null,

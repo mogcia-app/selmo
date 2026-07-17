@@ -20,6 +20,7 @@ import {
   requireApiUser,
   type ApiUserContext,
 } from "@/lib/server/auth/require-api-user";
+import { getFirebaseAdminDb } from "@/lib/firebase/admin";
 
 export const runtime = "nodejs";
 
@@ -170,11 +171,16 @@ export async function POST(
       productName: body.productName ?? readString(meeting.data.productType),
       analysisType: meeting.salesDomain === "teleapo" ? "teleapo_upload" : "meeting_upload",
     });
+    const repProfilePrompt = await loadSalesRepProfilePrompt({
+      companyId: apiUser.companyId,
+      userId: readString(meeting.data.userId) || apiUser.uid,
+    });
     const result = await summarizeTranscript(conversationInput, analysisContext, {
       meetingPurpose: body.meetingPurpose ?? readString(meeting.data.meetingPurpose),
       customerType: body.customerType ?? readString(meeting.data.customerType),
       salesDomain: meeting.salesDomain,
       analysisConfig,
+      repProfilePrompt,
     });
     await saveAiUsageLog({
       companyId: apiUser.companyId,
@@ -237,6 +243,51 @@ function readString(value: unknown) {
   return typeof value === "string" ? value : "";
 }
 
+async function loadSalesRepProfilePrompt(input: { companyId?: string | null; userId: string }) {
+  if (!input.companyId || !input.userId) return "";
+
+  const db = getFirebaseAdminDb();
+  if (!db) return "";
+
+  const snapshot = await db.collection("salesRepAnalysisProfiles").doc(input.userId).get();
+  const data = snapshot.data();
+  if (!data || data.companyId !== input.companyId) return "";
+
+  const skillAverages = readNumberRecord(data.skillAverages);
+  const skillLines = Object.entries(skillAverages)
+    .sort((left, right) => left[1] - right[1])
+    .slice(0, 6)
+    .map(([label, score]) => `${label}: ${Math.round(score)}点`);
+  const weaknesses = readStringArray(data.weaknesses).slice(0, 6);
+  const frequentMisses = readStringArray(data.frequentMisses).slice(0, 6);
+  const improvementPhrases = readStringArray(data.improvementPhrases).slice(0, 4);
+  const recommendedTrainingThemes = readStringArray(data.recommendedTrainingThemes).slice(0, 4);
+  const totalAnalyzedCount = typeof data.totalAnalyzedCount === "number" ? data.totalAnalyzedCount : 0;
+  const overallAverageScore = typeof data.overallAverageScore === "number" ? `${Math.round(data.overallAverageScore)}点` : "未算出";
+
+  if (totalAnalyzedCount <= 0 && skillLines.length === 0 && weaknesses.length === 0) {
+    return "";
+  }
+
+  return [
+    `分析済み件数: ${totalAnalyzedCount}件`,
+    `平均スコア: ${overallAverageScore}`,
+    skillLines.length ? `低い順のスキル平均:\n${skillLines.map((line) => `- ${line}`).join("\n")}` : "",
+    weaknesses.length ? `蓄積された弱点:\n${weaknesses.map((item) => `- ${item}`).join("\n")}` : "",
+    frequentMisses.length ? `頻出未達項目:\n${frequentMisses.map((item) => `- ${item}`).join("\n")}` : "",
+    improvementPhrases.length ? `過去の改善フレーズ:\n${improvementPhrases.map((item) => `- ${item}`).join("\n")}` : "",
+    recommendedTrainingThemes.length ? `推奨練習テーマ:\n${recommendedTrainingThemes.map((item) => `- ${item}`).join("\n")}` : "",
+  ].filter(Boolean).join("\n\n");
+}
+
+function readNumberRecord(value: unknown) {
+  if (!value || typeof value !== "object") return {};
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>)
+      .filter((entry): entry is [string, number] => typeof entry[1] === "number" && Number.isFinite(entry[1])),
+  );
+}
+
 async function summarizeTranscript(
   conversationInput: ConversationAnalysisInput,
   analysisContext: Awaited<ReturnType<typeof loadAnalysisContext>>,
@@ -245,6 +296,7 @@ async function summarizeTranscript(
     customerType?: string | null;
     salesDomain?: string | null;
     analysisConfig?: ServerAnalysisConfig | null;
+    repProfilePrompt?: string;
   },
 ) {
   const model = "gpt-4o-mini";
@@ -257,6 +309,11 @@ async function summarizeTranscript(
   const statusLabel = isTeleapo ? "テレアポステータス" : "商談ステータス";
   const evaluationLabel = isTeleapo ? "テレアポ評価サマリー" : "商談評価サマリー";
   const finalActionLabel = isTeleapo ? "アポ打診" : "クロージング";
+  const analysisConversationInput = isTeleapo
+    ? buildLightweightTeleapoAnalysisInput(conversationInput)
+    : conversationInput;
+  const promptContext = isTeleapo ? truncatePromptText(contextPrompt, 2200) : contextPrompt;
+  const promptAnalysisConfig = isTeleapo ? truncatePromptText(analysisConfigPrompt, 1600) : analysisConfigPrompt;
   const response = await fetchWithTimeout("https://api.openai.com/v1/chat/completions", {
     method: "POST",
     headers: {
@@ -409,13 +466,22 @@ async function summarizeTranscript(
       messages: [
         {
           role: "system",
-          content:
+          content: isTeleapo
+            ? buildTeleapoLightweightSystemPrompt({
+                domainLabel,
+                statusLabel,
+                evaluationLabel,
+                finalActionLabel,
+                hasStructuredLogs: analysisConversationInput.hasStructuredLogs,
+                hasCompanyCriteria: Boolean(promptContext || promptAnalysisConfig),
+              })
+            :
             [
               `あなたは営業${domainLabel}の文字起こしを分析するAIコーチです。`,
               "全体要約は2〜4文で簡潔にまとめ、ポイントは3〜4個の短い箇条書き向け文で返してください。",
               "会社の営業成功基準や商材情報がある場合は、それを最優先して評価してください。",
               "admin管理の分析設定がある場合は、その評価項目・加点減点ルール・追加AI指示も最優先の会社基準として扱ってください。",
-              conversationInput.hasStructuredLogs
+              analysisConversationInput.hasStructuredLogs
                 ? "入力には確定済みの話者別会話ログがあります。全文よりも話者別ログを優先し、営業発話・顧客発話・同席者発話を混同しないでください。"
                 : "話者別ログがない場合は、全文から慎重に推定してください。",
               "顧客温度感・検討度・課題・反論・予算・決裁・導入時期は、顧客発話を主根拠にしてください。",
@@ -468,23 +534,24 @@ async function summarizeTranscript(
             `商談目的: ${meetingPurposeLabel}`,
             `種別: ${domainLabel}`,
             `顧客種別: ${customerTypeLabel}`,
-            contextPrompt ? `以下の基準を使って分析してください。\n\n${contextPrompt}` : "会社固有の基準は未登録です。汎用的な営業観点で分析してください。",
-            analysisConfigPrompt ? `以下のadmin分析設定も必ず使ってください。\n\n${analysisConfigPrompt}` : "admin分析設定は未登録です。",
-            conversationInput.hasStructuredLogs
+            promptContext ? `以下の基準を使って分析してください。\n\n${promptContext}` : "会社固有の基準は未登録です。汎用的な営業観点で分析してください。",
+            promptAnalysisConfig ? `以下のadmin分析設定も必ず使ってください。\n\n${promptAnalysisConfig}` : "admin分析設定は未登録です。",
+            input.repProfilePrompt ? `以下はこの営業担当者の過去分析傾向です。今回の評価を甘く/辛く固定せず、重点確認ポイントとしてだけ使ってください。\n\n${input.repProfilePrompt}` : "",
+            analysisConversationInput.hasStructuredLogs
               ? [
                   "以下の確定済み話者別ログを最優先で分析してください。",
                   "",
-                  `話者別サマリー:\n${conversationInput.speakerSummary}`,
+                  `話者別サマリー:\n${analysisConversationInput.speakerSummary}`,
                   "",
-                  `時系列会話ログ:\n${conversationInput.structuredTranscript}`,
+                  `時系列会話ログ:\n${analysisConversationInput.structuredTranscript}`,
                   "",
-                  `営業発話のみ:\n${conversationInput.salesOnlyText || "営業発話は検出されませんでした。"}`,
+                  `営業発話のみ:\n${analysisConversationInput.salesOnlyText || "営業発話は検出されませんでした。"}`,
                   "",
-                  `顧客発話のみ:\n${conversationInput.customerOnlyText || "顧客発話は検出されませんでした。"}`,
+                  `顧客発話のみ:\n${analysisConversationInput.customerOnlyText || "顧客発話は検出されませんでした。"}`,
                   "",
-                  `顧客発話と直後の営業返答ペア:\n${conversationInput.responsePairsText || "応答ペアは検出されませんでした。"}`,
+                  `顧客発話と直後の営業返答ペア:\n${analysisConversationInput.responsePairsText || "応答ペアは検出されませんでした。"}`,
                 ].join("\n")
-              : `以下の${domainLabel}文字起こしを分析してください。\n\n${conversationInput.transcriptText}`,
+              : `以下の${domainLabel}文字起こしを分析してください。\n\n${analysisConversationInput.transcriptText}`,
           ].join("\n\n"),
         },
       ],
@@ -548,6 +615,108 @@ async function summarizeTranscript(
       outputTokens: parsed.usage?.completion_tokens ?? null,
     },
   };
+}
+
+function buildTeleapoLightweightSystemPrompt(input: {
+  domainLabel: string;
+  statusLabel: string;
+  evaluationLabel: string;
+  finalActionLabel: string;
+  hasStructuredLogs: boolean;
+  hasCompanyCriteria: boolean;
+}) {
+  return [
+    `あなたは営業${input.domainLabel}の文字起こしを軽量分析するAIコーチです。`,
+    "目的は、短時間で実用的な要約・見込み度・改善点を返すことです。過度に細かい採点理由は不要です。",
+    "出力は指定JSONスキーマだけにしてください。",
+    "overview は2文以内、bullets は3個、各文は短くしてください。",
+    input.hasStructuredLogs
+      ? "確定済みの話者別ログを優先し、営業発話と顧客発話を混同しないでください。"
+      : "話者別ログがない場合は、全文から慎重に営業/顧客を推定してください。",
+    "顧客温度感・検討度は、顧客発話、反論、課題の具体性、日程打診への反応を主根拠にしてください。",
+    `${input.statusLabel}は成約/失注ではなく、現在地として判断してください。`,
+    "status.stage は relationship_building, discovery, proposal_preparation, proposal_done, comparison, decision_pending, stalled から選んでください。",
+    `${input.evaluationLabel}は営業品質です。ヒアリング、課題深掘り、提案接続、反論対応、${input.finalActionLabel}を各0〜100で採点してください。`,
+    "テレアポでは、クロージングではなくアポ打診として、アポイント提案・日程打診・次回接点化の明確さを評価してください。",
+    "evidence は各項目1件を基本に、文字起こしに実在する短い根拠だけを使ってください。捏造は禁止です。",
+    input.hasCompanyCriteria
+      ? "会社基準またはadmin分析設定がある場合は優先し、manualCompliance.mode は manual にしてください。checklistItems は登録項目に限定してください。"
+      : "会社基準がない場合は mode=generic とし、manualCompliance は簡潔にしてください。",
+    "改善フレーズは、次の電話でそのまま使える自然な日本語を2〜3個に絞ってください。",
+    "日本語で簡潔に返してください。",
+  ].join("\n");
+}
+
+function buildLightweightTeleapoAnalysisInput(input: ConversationAnalysisInput): ConversationAnalysisInput {
+  const structuredTranscript = compactTeleapoText(input.structuredTranscript || input.transcriptText, {
+    maxLines: 80,
+    maxChars: 9000,
+  });
+  const salesOnlyText = compactTeleapoText(input.salesOnlyText, {
+    maxLines: 24,
+    maxChars: 2600,
+  });
+  const customerOnlyText = compactTeleapoText(input.customerOnlyText, {
+    maxLines: 24,
+    maxChars: 2600,
+  });
+  const responsePairsText = compactTeleapoText(input.responsePairsText, {
+    maxLines: 48,
+    maxChars: 5200,
+  });
+  const transcriptText = input.hasStructuredLogs
+    ? structuredTranscript
+    : compactTeleapoText(input.transcriptText, { maxLines: 100, maxChars: 10000 });
+
+  return {
+    ...input,
+    transcriptText,
+    structuredTranscript,
+    salesOnlyText,
+    customerOnlyText,
+    responsePairsText,
+    speakerSummary: input.speakerSummary,
+  };
+}
+
+function compactTeleapoText(value: string, options: { maxLines: number; maxChars: number }) {
+  const normalized = value.trim();
+  if (!normalized) return "";
+
+  const lines = normalized.split("\n").map((line) => line.trim()).filter(Boolean);
+  const importantLines = lines.filter(isImportantTeleapoLine);
+  const selectedLines = importantLines.length >= Math.min(12, options.maxLines)
+    ? selectHeadMiddleTail(importantLines, options.maxLines)
+    : selectHeadMiddleTail(lines, options.maxLines);
+  const selectedText = selectedLines.join("\n");
+
+  return truncatePromptText(selectedText, options.maxChars);
+}
+
+function isImportantTeleapoLine(line: string) {
+  return /アポ|日程|打ち合わせ|商談|面談|資料|課題|困|検討|興味|予算|決裁|担当|社内|導入|料金|費用|高い|断|不要|今は|忙し|メール|後日|次回|確認|詳しく|説明|サービス|提案/.test(line);
+}
+
+function selectHeadMiddleTail(lines: string[], maxLines: number) {
+  if (lines.length <= maxLines) return lines;
+
+  const headCount = Math.ceil(maxLines * 0.34);
+  const tailCount = Math.ceil(maxLines * 0.42);
+  const middleCount = Math.max(0, maxLines - headCount - tailCount);
+  const middleStart = Math.max(headCount, Math.floor((lines.length - middleCount) / 2));
+
+  return [
+    ...lines.slice(0, headCount),
+    ...(middleCount > 0 ? lines.slice(middleStart, middleStart + middleCount) : []),
+    ...lines.slice(-tailCount),
+  ];
+}
+
+function truncatePromptText(value: string, maxChars: number) {
+  const normalized = value.trim();
+  if (normalized.length <= maxChars) return normalized;
+
+  return `${normalized.slice(0, maxChars)}\n...省略`;
 }
 
 function parseSummaryJsonContent(content: string): SummaryResponse {

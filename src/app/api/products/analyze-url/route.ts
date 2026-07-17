@@ -53,7 +53,7 @@ export async function POST(request: Request) {
     );
 
     return NextResponse.json({
-      summary: [title, description, plainText.slice(0, 900)].filter(Boolean).join("\n"),
+      summary: buildUrlAnalysisSummary({ title, description, plainText }),
     });
   } catch {
     return NextResponse.json({ error: "URLの解析に失敗しました。" }, { status: 500 });
@@ -68,4 +68,70 @@ function decodeHtml(value: string) {
     .replace(/&quot;/g, "\"")
     .replace(/&#039;/g, "'")
     .trim();
+}
+
+function buildUrlAnalysisSummary(input: { title: string; description: string; plainText: string }) {
+  const title = normalizeUrlText(input.title);
+  const description = normalizeUrlText(input.description);
+  const sentences = extractSummarySentences(input.plainText)
+    .filter((sentence) => sentence !== title && sentence !== description)
+    .slice(0, 4);
+  const lines = [
+    title,
+    description,
+    sentences.length > 0 ? `要点: ${sentences.join(" / ")}` : "",
+  ].filter(Boolean);
+
+  return lines.join("\n");
+}
+
+function extractSummarySentences(text: string) {
+  const normalized = normalizeUrlText(text);
+  if (!normalized) return [];
+
+  const rawSentences = normalized.match(/[^。！？!?]+[。！？!?]?/g) ?? [normalized];
+  const seen = new Set<string>();
+  const sentences: string[] = [];
+
+  for (const rawSentence of rawSentences) {
+    const sentence = normalizeUrlText(rawSentence);
+    const comparable = sentence.replace(/\s/g, "");
+    if (
+      !sentence ||
+      seen.has(comparable) ||
+      sentence.length < 18 ||
+      isNavigationLikeText(sentence)
+    ) {
+      continue;
+    }
+
+    seen.add(comparable);
+    sentences.push(sentence);
+  }
+
+  return sentences;
+}
+
+function normalizeUrlText(value: string) {
+  return value
+    .replace(/\s+/g, " ")
+    .replace(/\s+([。！？!?、,.])/g, "$1")
+    .replace(/([（(])\s+/g, "$1")
+    .replace(/\s+([）)])/g, "$1")
+    .trim();
+}
+
+function isNavigationLikeText(value: string) {
+  const navigationWords = [
+    "FAQ",
+    "お問い合わせ",
+    "料金",
+    "コンテンツ",
+    "仕組み",
+    "STEP",
+  ];
+  const hitCount = navigationWords.filter((word) => value.includes(word)).length;
+  const numberedMenuCount = (value.match(/\b0[1-9]\b/g) ?? []).length;
+
+  return hitCount >= 3 || numberedMenuCount >= 4;
 }

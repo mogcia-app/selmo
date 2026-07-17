@@ -149,7 +149,7 @@ function ProductDetailDialog({
           <DetailItem label="商材概要" value={product.description} className="md:col-span-2" />
           <DetailItem label="商材URL" value={product.sourceUrl} />
           <DetailItem label="ターゲット顧客" value={product.targetCustomer} />
-          <DetailItem label="URL解析メモ" value={product.sourceSummary} className="md:col-span-2" />
+          <DetailItem label="URL解析メモ" value={formatUrlAnalysisMemo(product.sourceSummary)} className="md:col-span-2" />
           <DetailItem label="顧客課題" value={formatLines(product.painPoints)} />
           <DetailItem label="価値訴求" value={product.valueProposition} />
           <DetailItem label="料金" value={product.pricing} />
@@ -452,6 +452,67 @@ function formatTextSummary(value: string) {
   const normalized = value.trim();
   if (!normalized) return "未登録";
   return normalized.length > 80 ? `${normalized.slice(0, 80)}...` : normalized;
+}
+
+function formatUrlAnalysisMemo(value: string) {
+  const normalized = normalizeMemoText(value);
+  if (!normalized) return "";
+
+  const lines = normalized.split("\n").map((line) => line.trim()).filter(Boolean);
+  if (normalized.length <= 520 && lines.length <= 4) {
+    return normalized;
+  }
+
+  const title = lines.find((line) => line.length <= 80 && !isMemoNoise(line)) ?? "";
+  const sentences = extractMemoSummarySentences(normalized)
+    .filter((sentence) => sentence !== title)
+    .slice(0, 4);
+
+  return [
+    title,
+    sentences.length > 0 ? `要約: ${sentences.join("\n")}` : "",
+  ].filter(Boolean).join("\n");
+}
+
+function extractMemoSummarySentences(value: string) {
+  const seen = new Set<string>();
+  const sentences: string[] = [];
+  const chunks = normalizeMemoText(value).match(/[^。！？!?]+[。！？!?]?/g) ?? [];
+
+  for (const chunk of chunks) {
+    const sentence = normalizeMemoText(chunk);
+    const comparable = sentence.replace(/\s/g, "");
+    if (
+      !sentence ||
+      seen.has(comparable) ||
+      sentence.length < 18 ||
+      isMemoNoise(sentence)
+    ) {
+      continue;
+    }
+
+    seen.add(comparable);
+    sentences.push(sentence);
+  }
+
+  return sentences;
+}
+
+function normalizeMemoText(value: string) {
+  return value
+    .replace(/\r\n/g, "\n")
+    .replace(/\r/g, "\n")
+    .replace(/[ \t]+/g, " ")
+    .replace(/\n{3,}/g, "\n\n")
+    .replace(/\s+([。！？!?、,.])/g, "$1")
+    .trim();
+}
+
+function isMemoNoise(value: string) {
+  const navigationWords = ["FAQ", "お問い合わせ", "料金", "コンテンツ", "仕組み", "STEP"];
+  const hitCount = navigationWords.filter((word) => value.includes(word)).length;
+  const numberedMenuCount = (value.match(/\b0[1-9]\b/g) ?? []).length;
+  return hitCount >= 3 || numberedMenuCount >= 4;
 }
 
 function formatLines(items: string[]) {

@@ -391,6 +391,24 @@ service cloud.firestore {
       allow write: if isOwnerRole() || isAdminRole();
     }
 
+    match /salesRepAnalysisProfiles/{userId} {
+      allow read: if isSelf(userId)
+        || (
+          canReadCompanyData(resource.data.companyId)
+          && (isOwnerRole() || isAdminRole() || resource.data.userId == request.auth.uid)
+        );
+      allow create: if isSignedIn()
+        && request.resource.data.userId == request.auth.uid
+        && sameCompany(request.resource.data.companyId)
+        && request.resource.data.companyId is string;
+      allow update: if isSignedIn()
+        && resource.data.userId == request.auth.uid
+        && request.resource.data.userId == resource.data.userId
+        && request.resource.data.companyId == resource.data.companyId
+        && sameCompany(resource.data.companyId);
+      allow delete: if false;
+    }
+
     match /manualChecklists/{checklistId} {
       allow read: if isOwnerRole() || isAdminRole();
       allow write: if isOwnerRole() || isAdminRole();

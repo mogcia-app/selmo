@@ -16,6 +16,10 @@ import {
   type RoleplayResult,
   type RoleplayScenario,
 } from "@/lib/firebase/roleplay";
+import {
+  subscribeToSalesRepAnalysisProfile,
+  type SalesRepAnalysisProfile,
+} from "@/lib/firebase/sales-rep-analysis-profile";
 import { canUseSalesDomain, type SalesDomain } from "@/lib/sales-domains";
 
 type SummaryMetric = {
@@ -88,6 +92,7 @@ export default function SalesDashboardPage() {
   const [knowledgeItems, setKnowledgeItems] = useState<KnowledgeItem[]>([]);
   const [roleplayScenarios, setRoleplayScenarios] = useState<RoleplayScenario[]>([]);
   const [roleplayResults, setRoleplayResults] = useState<RoleplayResult[]>([]);
+  const [repAnalysisProfile, setRepAnalysisProfile] = useState<SalesRepAnalysisProfile | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isMeetingsLoaded, setIsMeetingsLoaded] = useState(false);
   const [isKnowledgeLoaded, setIsKnowledgeLoaded] = useState(false);
@@ -109,6 +114,7 @@ export default function SalesDashboardPage() {
       setKnowledgeItems([]);
       setRoleplayScenarios([]);
       setRoleplayResults([]);
+      setRepAnalysisProfile(null);
       setIsMeetingsLoaded(true);
       setIsKnowledgeLoaded(true);
       setIsRoleplayScenariosLoaded(true);
@@ -124,6 +130,11 @@ export default function SalesDashboardPage() {
     requestedActionKeyRef.current = null;
 
     const unsubscribers = [
+      subscribeToSalesRepAnalysisProfile(
+        { userId: profile.uid, companyId: profile.companyId },
+        setRepAnalysisProfile,
+        () => setRepAnalysisProfile(null),
+      ),
       subscribeToMeetings(
         { role: profile.role, userId: profile.uid, companyId: profile.companyId, salesDomains: [activeDomain] },
         (nextMeetings) => {
@@ -191,8 +202,9 @@ export default function SalesDashboardPage() {
     () => selectRecommendedScenario(
       roleplayScenarios.filter((scenario) => scenario.visibility === "all" || scenario.createdBy === profile?.uid),
       roleplayResults,
+      repAnalysisProfile,
     ),
-    [profile?.uid, roleplayResults, roleplayScenarios],
+    [profile?.uid, repAnalysisProfile, roleplayResults, roleplayScenarios],
   );
   const insight = useMemo(
     () =>
@@ -932,13 +944,70 @@ function getMeetingPriority(meeting: MeetingRecord) {
   return score;
 }
 
-function selectRecommendedScenario(scenarios: RoleplayScenario[], results: RoleplayResult[]) {
+function selectRecommendedScenario(
+  scenarios: RoleplayScenario[],
+  results: RoleplayResult[],
+  repProfile: SalesRepAnalysisProfile | null,
+) {
   if (scenarios.length === 0) {
     return null;
   }
 
   const completedScenarioIds = new Set(results.map((result) => result.scenarioId));
-  return scenarios.find((scenario) => !completedScenarioIds.has(scenario.id)) ?? scenarios[0];
+  const uncompletedScenarios = scenarios.filter((scenario) => !completedScenarioIds.has(scenario.id));
+  const candidates = uncompletedScenarios.length > 0 ? uncompletedScenarios : scenarios;
+  const profileKeywords = buildProfileTrainingKeywords(repProfile);
+
+  if (profileKeywords.length === 0) {
+    return candidates[0];
+  }
+
+  return [...candidates]
+    .map((scenario) => ({
+      scenario,
+      score: scoreScenarioForProfile(scenario, profileKeywords),
+    }))
+    .sort((left, right) => right.score - left.score)
+    .find((item) => item.score > 0)?.scenario ?? candidates[0];
+}
+
+function buildProfileTrainingKeywords(profile: SalesRepAnalysisProfile | null) {
+  if (!profile) return [];
+  return unique([
+    ...profile.recommendedTrainingThemes,
+    ...profile.weaknesses,
+    ...profile.frequentMisses,
+    ...Object.entries(profile.skillAverages)
+      .sort((left, right) => left[1] - right[1])
+      .slice(0, 3)
+      .map(([label]) => label),
+  ])
+    .flatMap((item) => tokenizeTrainingText(item))
+    .slice(0, 24);
+}
+
+function scoreScenarioForProfile(scenario: RoleplayScenario, keywords: string[]) {
+  const haystack = [
+    scenario.title,
+    scenario.description,
+    scenario.goal,
+    scenario.scenarioCategory,
+    scenario.targetSegment,
+    scenario.customerProfile,
+    ...scenario.objections,
+    ...scenario.evaluationCriteria,
+  ].join(" ").toLowerCase();
+
+  return keywords.reduce((score, keyword) => score + (haystack.includes(keyword.toLowerCase()) ? keyword.length : 0), 0);
+}
+
+function tokenizeTrainingText(value: string) {
+  return value
+    .replace(/\d+点/g, "")
+    .replace(/を重点練習|を鍛えるロープレ|ロープレ|練習/g, "")
+    .split(/[、。/\s・:：()（）]+/)
+    .map((token) => token.trim())
+    .filter((token) => token.length >= 2);
 }
 
 function buildImproveTargets(actionMeetings: MeetingRecord[], skills: SkillScore[]) {
