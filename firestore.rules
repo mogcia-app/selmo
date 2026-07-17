@@ -27,7 +27,7 @@ service cloud.firestore {
     }
 
     function isOwnerRole() {
-      return false;
+      return isActiveCurrentUser() && currentRole() == "owner";
     }
 
     function isAdminRole() {
