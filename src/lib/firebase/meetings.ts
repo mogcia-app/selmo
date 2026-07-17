@@ -469,6 +469,8 @@ function buildConversationLogsFromText(text: string): MeetingConversationLog[] {
   let currentSpeaker: MeetingConversationLog["speaker"] = "unknown";
   let currentLabel = "文字起こし";
   let currentLines: string[] = [];
+  let currentHasExplicitSpeaker = false;
+  let nextUnlabeledSpeakerIndex = 1;
 
   function flushCurrent() {
     const body = currentLines.join("\n").trim();
@@ -478,9 +480,12 @@ function buildConversationLogsFromText(text: string): MeetingConversationLog[] {
     }
 
     for (const text of splitPastedTranscriptUtterances(body)) {
+      const speakerSlot = currentHasExplicitSpeaker
+        ? { speaker: currentSpeaker, label: currentLabel }
+        : buildUnlabeledPastedTranscriptSpeakerSlot(nextUnlabeledSpeakerIndex++);
       logs.push({
-        speaker: currentSpeaker,
-        label: currentLabel,
+        speaker: speakerSlot.speaker,
+        label: speakerSlot.label,
         text,
       });
     }
@@ -495,6 +500,7 @@ function buildConversationLogsFromText(text: string): MeetingConversationLog[] {
       flushCurrent();
       currentSpeaker = inferPastedTranscriptSpeaker(inlineSpeakerLine.label);
       currentLabel = inlineSpeakerLine.label;
+      currentHasExplicitSpeaker = true;
       if (inlineSpeakerLine.text) {
         currentLines.push(inlineSpeakerLine.text);
       }
@@ -507,6 +513,7 @@ function buildConversationLogsFromText(text: string): MeetingConversationLog[] {
       flushCurrent();
       currentSpeaker = inferPastedTranscriptSpeaker(speakerLabel);
       currentLabel = speakerLabel;
+      currentHasExplicitSpeaker = true;
       continue;
     }
 
@@ -554,6 +561,12 @@ function splitPastedTranscriptUtterances(text: string) {
   }
 
   return chunks.length > 0 ? chunks : [normalizedText];
+}
+
+function buildUnlabeledPastedTranscriptSpeakerSlot(index: number): { speaker: MeetingConversationLog["speaker"]; label: string } {
+  return index % 2 === 1
+    ? { speaker: "speaker_1", label: "話者1" }
+    : { speaker: "speaker_2", label: "話者2" };
 }
 
 function readPastedTranscriptInlineSpeakerLine(line: string) {

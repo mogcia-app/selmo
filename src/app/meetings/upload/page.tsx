@@ -53,7 +53,14 @@ const meetingPurposeOptions: MeetingPurpose[] = [
   "onboarding",
   "retention",
 ];
-const transcriptCorrectionRules = [
+type TranscriptCorrectionRule = {
+  id: string;
+  source: string;
+  replacement: string;
+  note: string;
+};
+
+const transcriptCorrectionRules: TranscriptCorrectionRule[] = [
   {
     id: "neppan",
     source: "熱ぱ",
@@ -90,7 +97,31 @@ const transcriptCorrectionRules = [
     replacement: "",
     note: "別の予約システム名として認識された可能性があります。正しい名称を入力して置換できます。",
   },
-] as const;
+  {
+    id: "selmo-kana",
+    source: "セルモ",
+    replacement: "selmo.",
+    note: "サービス名の表記ゆれ候補",
+  },
+  {
+    id: "commo-kana",
+    source: "コモ",
+    replacement: "commo.",
+    note: "サービス名の表記ゆれ候補",
+  },
+  {
+    id: "sns-reading",
+    source: "エスエヌエス",
+    replacement: "SNS",
+    note: "SNSの読み表記候補",
+  },
+  {
+    id: "sns-daiku",
+    source: "SNS運用大工",
+    replacement: "SNS運用代行",
+    note: "商材名の認識ミス候補",
+  },
+];
 
 export default function MeetingUploadPage() {
   const router = useRouter();
@@ -238,8 +269,8 @@ export default function MeetingUploadPage() {
   const monthlyUploadQuota = profile ? profile.monthlyTranscriptionQuota : 10;
   const isUploadQuotaUnavailable = monthlyUploadQuota !== null && monthlyUploadQuota <= 0;
   const detectedTranscriptCorrections = useMemo(
-    () => detectTranscriptCorrections(transcriptText),
-    [transcriptText],
+    () => detectTranscriptCorrections(transcriptText, [productType, ...productOptions]),
+    [productOptions, productType, transcriptText],
   );
 
   const applyCalendarEventToForm = useCallback(
@@ -637,6 +668,19 @@ export default function MeetingUploadPage() {
               <textarea
                 value={transcriptText}
                 onChange={(event) => setTranscriptText(event.target.value)}
+                onPaste={(event) => {
+                  const pastedText = event.clipboardData.getData("text");
+                  if (!pastedText) return;
+                  event.preventDefault();
+                  setTranscriptText((current) =>
+                    insertTextAtSelection(
+                      current,
+                      formatPastedTranscriptForEditing(pastedText),
+                      event.currentTarget.selectionStart,
+                      event.currentTarget.selectionEnd,
+                    ),
+                  );
+                }}
                 className={`${inputClassName} mt-4 min-h-[260px] resize-y leading-7`}
                 placeholder="営業: 本日はありがとうございます。\n顧客: よろしくお願いします。\n..."
               />
@@ -1189,7 +1233,7 @@ function formatDuration(durationSec: number) {
 }
 
 function normalizePastedTranscript(text: string) {
-  return text
+  return formatPastedTranscriptForEditing(text)
     .replace(/\r\n/g, "\n")
     .replace(/\r/g, "\n")
     .replace(/\\n/g, "\n")
@@ -1197,13 +1241,90 @@ function normalizePastedTranscript(text: string) {
     .trim();
 }
 
-function detectTranscriptCorrections(text: string) {
-  return transcriptCorrectionRules
+function formatPastedTranscriptForEditing(text: string) {
+  const normalizedText = text
+    .replace(/\r\n/g, "\n")
+    .replace(/\r/g, "\n")
+    .replace(/\\n/g, "\n")
+    .replace(/[ \t]{2,}/g, " ")
+    .trim();
+
+  if (!normalizedText) return "";
+  if (normalizedText.includes("\n")) {
+    return normalizedText.replace(/\n{3,}/g, "\n\n");
+  }
+
+  return splitLongPastedTranscript(normalizedText).join("\n");
+}
+
+function splitLongPastedTranscript(text: string) {
+  const sentences = text
+    .replace(/^。+/, "")
+    .match(/[^。！？!?]+[。！？!?]?/g)
+    ?.map((sentence) => sentence.trim())
+    .filter(Boolean) ?? [text.trim()];
+
+  const blocks: string[] = [];
+  let currentBlock = "";
+
+  for (const sentence of sentences) {
+    const nextBlock = currentBlock ? `${currentBlock}${sentence}` : sentence;
+    const shouldBreakBefore =
+      currentBlock.length >= 42 ||
+      isLikelyTurnOpening(sentence) ||
+      (currentBlock.length >= 18 && isShortResponse(sentence));
+
+    if (currentBlock && shouldBreakBefore) {
+      blocks.push(currentBlock);
+      currentBlock = sentence;
+      continue;
+    }
+
+    currentBlock = nextBlock;
+  }
+
+  if (currentBlock) blocks.push(currentBlock);
+  return blocks.length > 0 ? blocks : [text.trim()];
+}
+
+function isLikelyTurnOpening(sentence: string) {
+  return /^(はい|うん|そうです|なるほど|ありがとうございます|よろしく|すみません|申し訳|お待たせ|では|じゃあ|例えば|ただ|あの|えっと|ちなみに|質問|確認|できます|できますか)/.test(sentence);
+}
+
+function isShortResponse(sentence: string) {
+  return sentence.length <= 18 && /^(はい|うん|そうです|なるほど|できます|わかりました|ありがとうございます|よろしく)/.test(sentence);
+}
+
+function insertTextAtSelection(current: string, inserted: string, selectionStart: number | null, selectionEnd: number | null) {
+  const start = selectionStart ?? current.length;
+  const end = selectionEnd ?? start;
+  const prefix = current.slice(0, start);
+  const suffix = current.slice(end);
+  const separatorBefore = prefix && !prefix.endsWith("\n") ? "\n" : "";
+  const separatorAfter = suffix && !inserted.endsWith("\n") ? "\n" : "";
+  return `${prefix}${separatorBefore}${inserted}${separatorAfter}${suffix}`;
+}
+
+function detectTranscriptCorrections(text: string, productNames: string[]) {
+  const normalizedText = text.trim();
+  if (!normalizedText) return [];
+
+  const corrections = transcriptCorrectionRules
     .map((rule) => ({
       rule,
-      count: countLiteralOccurrences(text, rule.source),
+      count: countLiteralOccurrences(normalizedText, rule.source),
     }))
     .filter((correction) => correction.count > 0);
+
+  const existingSources = new Set(corrections.map((correction) => correction.rule.source));
+  const productCorrections = detectProductNameCorrections(normalizedText, productNames, existingSources);
+  productCorrections.forEach((correction) => existingSources.add(correction.rule.source));
+
+  return [
+    ...corrections,
+    ...productCorrections,
+    ...detectSuspiciousTranscriptTerms(normalizedText, existingSources),
+  ].slice(0, 12);
 }
 
 function countLiteralOccurrences(text: string, needle: string) {
@@ -1216,6 +1337,132 @@ function countLiteralOccurrences(text: string, needle: string) {
     index = text.indexOf(needle, index + needle.length);
   }
   return count;
+}
+
+function detectProductNameCorrections(text: string, productNames: string[], ignoredSources: Set<string>) {
+  const normalizedProducts = Array.from(new Set(productNames.map((name) => name.trim()).filter(Boolean)));
+  if (normalizedProducts.length === 0) return [];
+
+  const terms = extractTranscriptTerms(text);
+  const corrections: Array<{ rule: TranscriptCorrectionRule; count: number }> = [];
+
+  for (const term of terms) {
+    if (ignoredSources.has(term.value)) continue;
+
+    const normalizedTerm = normalizeCorrectionComparable(term.value);
+    if (normalizedTerm.length < 3) continue;
+
+    const matchedProduct = normalizedProducts.find((productName) => {
+      const normalizedProduct = normalizeCorrectionComparable(productName);
+      if (normalizedProduct.length < 3 || normalizedProduct === normalizedTerm) return false;
+      const distance = levenshteinDistance(normalizedTerm, normalizedProduct);
+      return distance > 0 && distance <= Math.max(1, Math.floor(normalizedProduct.length * 0.28));
+    });
+
+    if (!matchedProduct) continue;
+
+    corrections.push({
+      rule: {
+        id: `product-${stableCorrectionId(term.value)}-${stableCorrectionId(matchedProduct)}`,
+        source: term.value,
+        replacement: matchedProduct,
+        note: "登録商材名に近い表記ゆれ候補",
+      },
+      count: term.count,
+    });
+
+    if (corrections.length >= 5) break;
+  }
+
+  return corrections;
+}
+
+function detectSuspiciousTranscriptTerms(text: string, ignoredSources: Set<string>) {
+  return extractTranscriptTerms(text)
+    .filter((term) => !ignoredSources.has(term.value))
+    .filter((term) => isSuspiciousTranscriptTerm(term.value))
+    .slice(0, 5)
+    .map((term) => ({
+      rule: {
+        id: `suspicious-${stableCorrectionId(term.value)}`,
+        source: term.value,
+        replacement: "",
+        note: "聞き間違いの可能性がある語です。正しい表記を入力して置換できます。",
+      },
+      count: term.count,
+    }));
+}
+
+function extractTranscriptTerms(text: string) {
+  const termCounts = new Map<string, number>();
+  const termPattern = /[A-Za-zＡ-Ｚａ-ｚ0-9０-９一-龯ぁ-んァ-ヶー]{3,24}/g;
+  let match: RegExpExecArray | null;
+
+  while ((match = termPattern.exec(text)) !== null) {
+    const value = match[0].trim();
+    if (!value || transcriptCorrectionIgnoreTerms.has(value)) continue;
+    termCounts.set(value, (termCounts.get(value) ?? 0) + 1);
+  }
+
+  return Array.from(termCounts.entries())
+    .map(([value, count]) => ({ value, count }))
+    .sort((left, right) => right.count - left.count || right.value.length - left.value.length);
+}
+
+const transcriptCorrectionIgnoreTerms = new Set([
+  "ありがとう",
+  "ありがとうございます",
+  "よろしく",
+  "お願いします",
+  "ございます",
+  "そうですね",
+  "という",
+  "こちら",
+  "そちら",
+  "できる",
+  "している",
+  "について",
+  "いただき",
+  "いただく",
+]);
+
+function isSuspiciousTranscriptTerm(value: string) {
+  if (transcriptCorrectionIgnoreTerms.has(value)) return false;
+  if (/^[ァ-ヶー]{5,}$/.test(value)) return true;
+  if (/([ァ-ヶー]{2,})\1/.test(value)) return true;
+  if (/[A-Za-zＡ-Ｚａ-ｚ].*[ァ-ヶー]|[ァ-ヶー].*[A-Za-zＡ-Ｚａ-ｚ]/.test(value)) return true;
+  return false;
+}
+
+function normalizeCorrectionComparable(value: string) {
+  return value
+    .normalize("NFKC")
+    .toLowerCase()
+    .replace(/[^\p{Letter}\p{Number}]/gu, "");
+}
+
+function stableCorrectionId(value: string) {
+  return normalizeCorrectionComparable(value).slice(0, 24) || String(value.length);
+}
+
+function levenshteinDistance(left: string, right: string) {
+  const previous = Array.from({ length: right.length + 1 }, (_, index) => index);
+  const current = Array.from({ length: right.length + 1 }, () => 0);
+
+  for (let leftIndex = 1; leftIndex <= left.length; leftIndex += 1) {
+    current[0] = leftIndex;
+    for (let rightIndex = 1; rightIndex <= right.length; rightIndex += 1) {
+      const cost = left[leftIndex - 1] === right[rightIndex - 1] ? 0 : 1;
+      current[rightIndex] = Math.min(
+        previous[rightIndex] + 1,
+        current[rightIndex - 1] + 1,
+        previous[rightIndex - 1] + cost,
+      );
+    }
+    previous.splice(0, previous.length, ...current);
+  }
+
+  return previous[right.length] ?? 0;
 }
 
 function replaceAllLiteral(text: string, source: string, replacement: string) {
