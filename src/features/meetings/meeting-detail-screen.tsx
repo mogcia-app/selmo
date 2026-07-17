@@ -174,6 +174,10 @@ export function MeetingDetailScreen({
 
     return null;
   }, [meeting?.userId, profile?.name, profile?.uid]);
+  const participantSpeakerName = useMemo(
+    () => buildParticipantSpeakerName(meeting?.attendeeUserNames ?? []),
+    [meeting?.attendeeUserNames],
+  );
 
   useEffect(() => {
     if (meeting?.transcriptionProbeStatus === "completed" || meeting?.transcriptionProbeStatus === "failed") {
@@ -514,15 +518,23 @@ export function MeetingDetailScreen({
   useEffect(() => {
     const derivedNames = deriveSpeakerNamesFromLogs(baseLogs);
     const salesLabel = salesSpeakerName ?? derivedNames.sales ?? defaultSpeakerName("sales");
-    setEditableLogs(baseLogs.map((log) => (log.speaker === "sales" ? { ...log, label: salesLabel } : log)));
+    const participantLabel = participantSpeakerName ?? derivedNames.participant ?? defaultSpeakerName("participant");
+    setEditableLogs(
+      baseLogs.map((log) => {
+        if (log.speaker === "sales") return { ...log, label: salesLabel };
+        if (log.speaker === "participant") return { ...log, label: participantLabel };
+        return log;
+      }),
+    );
     setSelectedLogIds([]);
     setIsTranscriptEditMode(false);
     setSpeakerNames((current) => ({
       ...current,
       ...derivedNames,
       sales: salesLabel,
+      participant: participantLabel,
     }));
-  }, [baseLogs, salesSpeakerName]);
+  }, [baseLogs, participantSpeakerName, salesSpeakerName]);
 
   const aiSummary = useMemo<NonNullable<MeetingRecord["aiSummary"]>>(
     () => meeting?.aiSummary ?? buildAiSummary(meeting?.transcriptionProbeText, editableLogs),
@@ -1216,15 +1228,20 @@ export function MeetingDetailScreen({
           </div>
 
           <div className="mt-4 overflow-hidden rounded-[20px] border border-[#eceef4] bg-white">
-            <div className="grid gap-0 xl:grid-cols-[1fr_1.4fr]">
+            <div className="grid gap-0 xl:grid-cols-[1fr_1fr_1fr]">
               <TranscriptMetaItem label={domainCopy.metaTitle} value={meetingTitle} className="xl:border-r xl:border-[#eceef4]" />
               <TranscriptMetaItem
                 label="日時"
+                className="xl:border-r xl:border-[#eceef4]"
                 value={
                   meeting.recordedAt
                     ? formatMeetingDateTimeRange(meeting.recordedAt, meeting.audioDurationSec ?? null)
                     : "未設定"
                 }
+              />
+              <TranscriptMetaItem
+                label="同席者"
+                value={meeting.attendeeUserNames.length > 0 ? meeting.attendeeUserNames.join(" / ") : "未設定"}
               />
             </div>
 
@@ -2038,6 +2055,11 @@ function buildSalesSpeakerName(name: string | null | undefined) {
   }
 
   return normalizedName.split(" ")[0] || defaultSpeakerName("sales");
+}
+
+function buildParticipantSpeakerName(names: string[]) {
+  const normalizedNames = names.map((name) => name.trim()).filter(Boolean);
+  return normalizedNames.length > 0 ? normalizedNames.join(" / ") : null;
 }
 
 function buildSplitCandidates(text: string) {

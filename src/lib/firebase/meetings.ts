@@ -123,6 +123,8 @@ export type MeetingRecord = {
   companyId: string;
   userId: string;
   uploadedBy: string;
+  attendeeUserIds: string[];
+  attendeeUserNames: string[];
   salesDomain: SalesDomain;
   customerName: string;
   productType: string;
@@ -177,6 +179,8 @@ export type CreateMeetingInput = {
   userId: string;
   companyId?: string | null;
   salesDomain?: SalesDomain;
+  attendeeUserIds?: string[];
+  attendeeUserNames?: string[];
   customerName: string;
   productType: string;
   customerType: "new" | "existing";
@@ -220,6 +224,8 @@ export async function createMeeting(input: CreateMeetingInput) {
     companyId,
     userId: input.userId,
     uploadedBy: input.userId,
+    attendeeUserIds: normalizeMeetingAttendeeIds(input.attendeeUserIds, input.userId),
+    attendeeUserNames: normalizeMeetingAttendeeNames(input.attendeeUserNames),
     salesDomain,
     customerName: input.customerName,
     productType: input.productType,
@@ -893,6 +899,14 @@ function buildMeetingAudioPath(userId: string, meetingId: string, fileName: stri
   return `meetings/${userId}/${meetingId}/${Date.now()}-${safeName}`;
 }
 
+function normalizeMeetingAttendeeIds(value: string[] | undefined, ownerUserId: string) {
+  return Array.from(new Set((value ?? []).map((item) => item.trim()).filter(Boolean))).filter((userId) => userId !== ownerUserId);
+}
+
+function normalizeMeetingAttendeeNames(value: string[] | undefined) {
+  return Array.from(new Set((value ?? []).map((item) => item.trim()).filter(Boolean)));
+}
+
 function uploadWithProgress(
   storageRef: ReturnType<typeof ref>,
   file: File,
@@ -928,6 +942,8 @@ function mapMeetingRecord(id: string, data: Record<string, unknown>): MeetingRec
     companyId: String(data.companyId ?? "default"),
     userId: String(data.userId ?? ""),
     uploadedBy: String(data.uploadedBy ?? ""),
+    attendeeUserIds: readStringArray(data.attendeeUserIds),
+    attendeeUserNames: readStringArray(data.attendeeUserNames),
     salesDomain: getMeetingSalesDomain(data.salesDomain),
     customerName: String(data.customerName ?? ""),
     productType: String(data.productType ?? ""),

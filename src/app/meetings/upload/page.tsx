@@ -16,6 +16,8 @@ import {
   subscribeToCalendarEvents,
   type CalendarEvent,
 } from "@/lib/firebase/calendar-events";
+import { subscribeToUserProfiles, type AppUserProfile } from "@/lib/firebase/auth";
+import { subscribeToCustomers, type CustomerRecord } from "@/lib/firebase/customers";
 import { subscribeToKnowledgeProducts, type KnowledgeProduct } from "@/lib/firebase/knowledge";
 import {
   createMeeting,
@@ -101,6 +103,10 @@ export default function MeetingUploadPage() {
   const [customerName, setCustomerName] = useState("");
   const [calendarEvents, setCalendarEvents] = useState<CalendarEvent[]>([]);
   const [selectedCalendarEventId, setSelectedCalendarEventId] = useState(searchParams.get("eventId") ?? "");
+  const [customers, setCustomers] = useState<CustomerRecord[]>([]);
+  const [salesUsers, setSalesUsers] = useState<AppUserProfile[]>([]);
+  const [attendeeUserIds, setAttendeeUserIds] = useState<string[]>([]);
+  const [attendeesManuallyEdited, setAttendeesManuallyEdited] = useState(false);
   const [products, setProducts] = useState<KnowledgeProduct[]>([]);
   const [meetings, setMeetings] = useState<MeetingRecord[]>([]);
   const [productType, setProductType] = useState("");
@@ -158,6 +164,16 @@ export default function MeetingUploadPage() {
         setCalendarEvents,
         () => setCalendarEvents([]),
       ),
+      subscribeToCustomers(
+        { companyId: profile.companyId, userId: profile.uid, isAdmin: profile.role === "admin" },
+        setCustomers,
+        () => setCustomers([]),
+      ),
+      subscribeToUserProfiles(
+        (profiles) => setSalesUsers(profiles.filter((user) => user.role === "sales" && user.status === "active")),
+        () => setSalesUsers([]),
+        profile.companyId,
+      ),
     ];
 
     return () => unsubscribers.forEach((unsubscribe) => unsubscribe());
@@ -188,6 +204,19 @@ export default function MeetingUploadPage() {
   const selectedCalendarEvent = useMemo(
     () => availableCalendarEvents.find((event) => event.id === selectedCalendarEventId) ?? null,
     [availableCalendarEvents, selectedCalendarEventId],
+  );
+  const matchedCustomer = useMemo(() => {
+    const normalizedName = normalizeCustomerLookupName(customerName);
+    if (!normalizedName) return null;
+    return customers.find((customer) => normalizeCustomerLookupName(customer.companyName) === normalizedName) ?? null;
+  }, [customerName, customers]);
+  const attendeeOptions = useMemo(
+    () => salesUsers.filter((user) => user.uid !== profile?.uid),
+    [profile?.uid, salesUsers],
+  );
+  const attendeeUserNames = useMemo(
+    () => buildSelectedAttendeeNames(attendeeUserIds, salesUsers, matchedCustomer),
+    [attendeeUserIds, matchedCustomer, salesUsers],
   );
   const audioRetentionLimit = readSharedAiQuota(
     profile ? profile.monthlyTranscriptionQuota : DEFAULT_MONTHLY_TRANSCRIPTION_QUOTA,
@@ -240,6 +269,17 @@ export default function MeetingUploadPage() {
     if (!selectedCalendarEvent) return;
     applyCalendarEventToForm(selectedCalendarEvent);
   }, [applyCalendarEventToForm, selectedCalendarEvent]);
+
+  useEffect(() => {
+    setAttendeesManuallyEdited(false);
+  }, [customerName]);
+
+  useEffect(() => {
+    if (attendeesManuallyEdited) return;
+    setAttendeeUserIds(
+      matchedCustomer ? normalizeAttendeeIds(matchedCustomer.collaboratorUserIds, profile?.uid ?? "") : [],
+    );
+  }, [attendeesManuallyEdited, matchedCustomer, profile?.uid]);
 
   function handleRecordedAtChange(value: string) {
     if (!value) {
@@ -371,6 +411,8 @@ export default function MeetingUploadPage() {
         userId: profile.uid,
         companyId: profile.companyId,
         salesDomain,
+        attendeeUserIds,
+        attendeeUserNames,
         customerName: normalizedCustomerName,
         productType,
         customerType,
@@ -763,6 +805,19 @@ export default function MeetingUploadPage() {
               />
             </Field>
 
+            <Field label="同席者">
+              <MeetingAttendeeSelect
+                users={attendeeOptions}
+                selectedIds={attendeeUserIds}
+                selectedNames={attendeeUserNames}
+                matchedCustomer={matchedCustomer}
+                onChange={(nextIds) => {
+                  setAttendeesManuallyEdited(true);
+                  setAttendeeUserIds(nextIds);
+                }}
+              />
+            </Field>
+
             <Field label="実施日時" required>
               <input
                 type="datetime-local"
@@ -913,6 +968,72 @@ function Field({
         {required ? <span className="ml-1 text-[#ff5d47]">*</span> : null}
       </div>
       {children}
+    </div>
+  );
+}
+
+function MeetingAttendeeSelect({
+  users,
+  selectedIds,
+  selectedNames,
+  matchedCustomer,
+  onChange,
+}: {
+  users: AppUserProfile[];
+  selectedIds: string[];
+  selectedNames: string[];
+  matchedCustomer: CustomerRecord | null;
+  onChange: (selectedIds: string[]) => void;
+}) {
+  const toggleUser = (userId: string) => {
+    onChange(selectedIds.includes(userId) ? selectedIds.filter((id) => id !== userId) : [...selectedIds, userId]);
+  };
+  const sourceLabel = matchedCustomer
+    ? matchedCustomer.collaboratorUserNames.length > 0
+      ? `顧客カルテの共同担当・同行者を反映中: ${matchedCustomer.collaboratorUserNames.join(" / ")}`
+      : "顧客カルテに同席者は未設定です。必要な社内メンバーを選択できます。"
+    : "顧客カルテ未登録でも、この打ち合わせだけの同席者を選択できます。";
+
+  return (
+    <div className="rounded-[14px] border border-[#e6e8ee] bg-[#fcfcfd] px-4 py-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p className="text-[12px] font-semibold leading-5 text-[#7a808c]">{sourceLabel}</p>
+        <span className="rounded-full bg-white px-3 py-1 text-[11px] font-bold text-[#8a6500]">
+          {selectedIds.length > 0 ? `${selectedIds.length}名選択中` : "任意"}
+        </span>
+      </div>
+      {selectedNames.length > 0 ? (
+        <div className="mt-3 flex flex-wrap gap-2">
+          {selectedNames.map((name) => (
+            <span key={name} className="rounded-full border border-[#f1dfaa] bg-[#fffdf7] px-3 py-1.5 text-[12px] font-bold text-[#6f5500]">
+              {name}
+            </span>
+          ))}
+        </div>
+      ) : null}
+      {users.length > 0 ? (
+        <div className="mt-3 flex flex-wrap gap-2">
+          {users.map((user) => {
+            const selected = selectedIds.includes(user.uid);
+            return (
+              <button
+                key={user.uid}
+                type="button"
+                onClick={() => toggleUser(user.uid)}
+                className={`rounded-full border px-3 py-1.5 text-[12px] font-bold transition ${
+                  selected
+                    ? "border-[#f0c655] bg-[#ffd84d] text-[#171717]"
+                    : "border-[#e2e6ee] bg-white text-[#596273] hover:border-[#ead8a8]"
+                }`}
+              >
+                {user.name ?? user.email ?? "名前未設定"}
+              </button>
+            );
+          })}
+        </div>
+      ) : (
+        <p className="mt-3 text-[12px] font-semibold text-[#8a909b]">選択できる社内メンバーはいません。</p>
+      )}
     </div>
   );
 }
@@ -1163,6 +1284,29 @@ function buildCalendarEventMemo(event: CalendarEvent) {
     .map(([label, value]) => `${label}: ${value.trim()}`);
 
   return sections.join("\n\n");
+}
+
+function normalizeCustomerLookupName(value: string) {
+  return value.replace(/\s+/g, "").trim().toLowerCase();
+}
+
+function normalizeAttendeeIds(value: string[], currentUserId: string) {
+  return Array.from(new Set(value.map((item) => item.trim()).filter(Boolean))).filter((userId) => userId !== currentUserId);
+}
+
+function buildSelectedAttendeeNames(
+  selectedIds: string[],
+  users: AppUserProfile[],
+  matchedCustomer: CustomerRecord | null,
+) {
+  return selectedIds
+    .map((userId) => {
+      const user = users.find((profile) => profile.uid === userId);
+      if (user) return user.name ?? user.email ?? "名前未設定";
+      const customerNameIndex = matchedCustomer?.collaboratorUserIds.indexOf(userId) ?? -1;
+      return customerNameIndex >= 0 ? matchedCustomer?.collaboratorUserNames[customerNameIndex] ?? "名前未設定" : "名前未設定";
+    })
+    .filter(Boolean);
 }
 
 function toDatetimeLocalValue(date: Date) {
