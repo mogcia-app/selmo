@@ -671,13 +671,15 @@ export default function MeetingUploadPage() {
                 onPaste={(event) => {
                   const pastedText = event.clipboardData.getData("text");
                   if (!pastedText) return;
+                  const selectionStart = event.currentTarget.selectionStart;
+                  const selectionEnd = event.currentTarget.selectionEnd;
                   event.preventDefault();
                   setTranscriptText((current) =>
                     insertTextAtSelection(
                       current,
                       formatPastedTranscriptForEditing(pastedText),
-                      event.currentTarget.selectionStart,
-                      event.currentTarget.selectionEnd,
+                      selectionStart,
+                      selectionEnd,
                     ),
                   );
                 }}
