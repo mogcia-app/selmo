@@ -157,18 +157,28 @@ export function subscribeToCustomers(
   }
 
   const customersRef = collection(firestore, "customers");
-  const customersQueries = [query(customersRef, where("companyId", "==", input.companyId))];
+  const customersQueries = input.isAdmin || !input.userId
+    ? [query(customersRef, where("companyId", "==", input.companyId))]
+    : [
+        query(customersRef, where("companyId", "==", input.companyId), where("assignedUserId", "==", input.userId)),
+        query(customersRef, where("companyId", "==", input.companyId), where("memberUserIds", "array-contains", input.userId)),
+        query(customersRef, where("companyId", "==", input.companyId), where("collaboratorUserIds", "array-contains", input.userId)),
+      ];
 
-  const unsubscribers = customersQueries.map((customersQuery) => (
+  const snapshotsByIndex = new Map<number, CustomerRecord[]>();
+  const unsubscribers = customersQueries.map((customersQuery, queryIndex) => (
     onSnapshot(
       customersQuery,
       (snapshot) => {
-        const recordsById = new Map<string, CustomerRecord>();
-        snapshot.docs
+        snapshotsByIndex.set(queryIndex, snapshot.docs
           .map((docSnapshot) => mapCustomerRecord(docSnapshot.id, docSnapshot.data()))
           .filter((customer) => customer.companyId === input.companyId)
           .filter((customer) => input.isAdmin || !input.userId || isCustomerVisibleToUser(customer, input.userId))
-          .forEach((record) => recordsById.set(record.id, record));
+        );
+        const recordsById = new Map<string, CustomerRecord>();
+        snapshotsByIndex.forEach((records) => {
+          records.forEach((record) => recordsById.set(record.id, record));
+        });
         callback(Array.from(recordsById.values()).sort((left, right) => (right.updatedAt?.getTime() ?? 0) - (left.updatedAt?.getTime() ?? 0)));
       },
       onError,
