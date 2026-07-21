@@ -7,6 +7,7 @@ import {
   doc,
   getDoc,
   getDocs,
+  onSnapshot,
   query,
   serverTimestamp,
   updateDoc,
@@ -158,26 +159,24 @@ export function subscribeToCustomers(
   const customersRef = collection(firestore, "customers");
   const customersQueries = [query(customersRef, where("companyId", "==", input.companyId))];
 
-  let isActive = true;
-  Promise.all(customersQueries.map((customersQuery) => getDocs(customersQuery)))
-    .then((snapshots) => {
-      if (!isActive) return;
-      const recordsById = new Map<string, CustomerRecord>();
-      snapshots.forEach((snapshot) => {
+  const unsubscribers = customersQueries.map((customersQuery) => (
+    onSnapshot(
+      customersQuery,
+      (snapshot) => {
+        const recordsById = new Map<string, CustomerRecord>();
         snapshot.docs
           .map((docSnapshot) => mapCustomerRecord(docSnapshot.id, docSnapshot.data()))
           .filter((customer) => customer.companyId === input.companyId)
           .filter((customer) => input.isAdmin || !input.userId || isCustomerVisibleToUser(customer, input.userId))
           .forEach((record) => recordsById.set(record.id, record));
-      });
-      callback(Array.from(recordsById.values()).sort((left, right) => (right.updatedAt?.getTime() ?? 0) - (left.updatedAt?.getTime() ?? 0)));
-    })
-    .catch((error: FirestoreError) => {
-      if (isActive) onError?.(error);
-    });
+        callback(Array.from(recordsById.values()).sort((left, right) => (right.updatedAt?.getTime() ?? 0) - (left.updatedAt?.getTime() ?? 0)));
+      },
+      onError,
+    )
+  ));
 
   return () => {
-    isActive = false;
+    unsubscribers.forEach((unsubscribe) => unsubscribe());
   };
 }
 
@@ -377,7 +376,7 @@ function serializeCustomerInput(input: SaveCustomerInput) {
 }
 
 function mapCustomerRecord(id: string, data: Record<string, unknown>): CustomerRecord {
-  const assignedUserId = readString(data.assignedUserId);
+  const assignedUserId = readString(data.assignedUserId) || readString(data.userId) || readString(data.createdBy);
   const collaboratorUserIds = readStringArray(data.collaboratorUserIds);
   const memberUserIds = readStringArray(data.memberUserIds);
 
