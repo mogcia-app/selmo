@@ -287,11 +287,9 @@ service cloud.firestore {
     }
 
     match /meetings/{meetingId} {
-      allow read: if isOwnerRole()
-        || (
+      allow read: if (
           canReadCompanyData(resource.data.companyId)
           && canUseMeetingDocument(resource.data)
-          && (isAdminRole() || resource.data.userId == request.auth.uid)
         )
         || (
           isSignedIn()
@@ -314,13 +312,7 @@ service cloud.firestore {
     }
 
     match /customers/{customerId} {
-      allow read: if isOwnerRole()
-        || canAdminCompanyData(resource.data.companyId)
-        || (
-          isSalesRole()
-          && sameCompany(resource.data.companyId)
-          && isCustomerMember(resource.data)
-        );
+      allow read: if canReadCompanyData(resource.data.companyId);
       allow create: if isSignedIn()
         && sameCompany(request.resource.data.companyId)
         && (
@@ -390,10 +382,7 @@ service cloud.firestore {
 
     match /salesRepAnalysisProfiles/{userId} {
       allow read: if isSelf(userId)
-        || (
-          canReadCompanyData(resource.data.companyId)
-          && (isOwnerRole() || isAdminRole() || resource.data.userId == request.auth.uid)
-        );
+        || canReadCompanyData(resource.data.companyId);
       allow create: if isSignedIn()
         && request.resource.data.userId == request.auth.uid
         && sameCompany(request.resource.data.companyId)
@@ -452,14 +441,7 @@ service cloud.firestore {
 
     match /knowledgeItems/{knowledgeId} {
       allow read: if canReadCompanyData(resource.data.companyId)
-        && canUseKnowledgeDomain()
-        && (
-          resource.data.scope == "shared"
-          || resource.data.ownerId == request.auth.uid
-          || (("sharedWithUserIds" in resource.data) && request.auth.uid in resource.data.sharedWithUserIds)
-          || isAdminRole()
-          || isOwnerRole()
-        );
+        && canUseKnowledgeDomain();
       allow create: if isSignedIn()
         && request.resource.data.ownerId == request.auth.uid
         && sameCompany(request.resource.data.companyId)
@@ -504,8 +486,7 @@ service cloud.firestore {
 
     match /roleplayResults/{resultId} {
       allow read: if canReadCompanyData(resource.data.companyId)
-        && canUseRoleplayDomain()
-        && (isOwnerRole() || isAdminRole() || resource.data.userId == request.auth.uid);
+        && canUseRoleplayDomain();
       allow create: if isSignedIn()
         && request.resource.data.userId == request.auth.uid
         && sameCompany(request.resource.data.companyId)
@@ -522,15 +503,13 @@ service cloud.firestore {
 
     match /roleplaySessions/{sessionId} {
       allow read: if canReadCompanyData(resource.data.companyId)
-        && canUseRoleplayDomain()
-        && (isOwnerRole() || isAdminRole() || resource.data.userId == request.auth.uid);
+        && canUseRoleplayDomain();
       allow create, update, delete: if false;
     }
 
     match /roleplayResultComments/{commentId} {
       allow read: if canReadCompanyData(resource.data.companyId)
-        && canUseRoleplayDomain()
-        && (isOwnerRole() || isAdminRole() || resource.data.userId == request.auth.uid);
+        && canUseRoleplayDomain();
       allow create: if canAdminCompanyData(request.resource.data.companyId)
         && request.resource.data.createdBy == request.auth.uid;
       allow update, delete: if false;
@@ -538,8 +517,7 @@ service cloud.firestore {
 
     match /roleplayAssignments/{assignmentId} {
       allow read: if canReadCompanyData(resource.data.companyId)
-        && canUseRoleplayDomain()
-        && (isOwnerRole() || isAdminRole() || resource.data.userId == request.auth.uid);
+        && canUseRoleplayDomain();
       allow create: if canAdminCompanyData(request.resource.data.companyId)
         && request.resource.data.assignedBy == request.auth.uid;
       allow update: if isSignedIn()
