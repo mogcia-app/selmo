@@ -71,11 +71,11 @@ service cloud.firestore {
     }
 
     function canReadCompanyData(companyId) {
-      return sameCompany(companyId);
+      return isOwnerRole() || sameCompany(companyId);
     }
 
     function canAdminCompanyData(companyId) {
-      return isAdminRole() && sameCompany(companyId);
+      return isOwnerRole() || (isAdminRole() && sameCompany(companyId));
     }
 
     function isCustomerMember(data) {
@@ -273,8 +273,12 @@ service cloud.firestore {
           && request.resource.data.status == resource.data.status
           && request.resource.data.email == resource.data.email
         );
-      allow delete: if canAdminCompanyData(resource.data.companyId)
-        || (isSelf(resource.data.userId) && sameCompany(resource.data.companyId) && canUseMeetingDocument(resource.data));
+      allow delete: if isOwnerRole()
+        || (
+          isAdminRole()
+          && sameCompany(resource.data.companyId)
+          && resource.data.role != "owner"
+        );
 
       match /knowledgeSearchHistory/{historyId} {
         allow read: if isOwnerRole() || isSelf(userId);
