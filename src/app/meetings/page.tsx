@@ -5,6 +5,7 @@ import { useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 
 import { useAuth } from "@/features/auth/auth-provider";
+import { subscribeToCustomers, type CustomerRecord } from "@/lib/firebase/customers";
 import { deleteMeetingRecord, getMeetingPurposeLabel, subscribeToMeetings, type MeetingRecord } from "@/lib/firebase/meetings";
 import { canUseSalesDomain } from "@/lib/sales-domains";
 
@@ -25,7 +26,7 @@ export default function MeetingsPage() {
         loading: "テレアポ一覧を読み込み中です。",
         empty: "条件に一致するテレアポログがありません。検索条件を変更してください。",
         uploadLabel: "テレアポログを分析",
-        searchPlaceholder: "会社名・担当者名・商材で検索",
+        searchPlaceholder: "会社名・相手先担当者・商材で検索",
         purposeLabel: "テレアポ目的",
         backLabel: "ダッシュボードへ戻る",
       }
@@ -35,13 +36,14 @@ export default function MeetingsPage() {
         loading: "打ち合わせ一覧を読み込み中です。",
         empty: "条件に一致する打ち合わせがありません。検索条件を変更してください。",
         uploadLabel: "商談ログを分析",
-        searchPlaceholder: "会社名・担当者名・商材で検索",
+        searchPlaceholder: "会社名・相手先担当者・商材で検索",
         purposeLabel: "目的",
         backLabel: "ダッシュボードへ戻る",
       };
   const { isLoading: isAuthLoading, profile } = useAuth();
   const canAccessDomain = isAuthLoading || canUseSalesDomain(profile, category);
   const [meetings, setMeetings] = useState<MeetingRecord[]>([]);
+  const [customers, setCustomers] = useState<CustomerRecord[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [search, setSearch] = useState("");
@@ -90,6 +92,30 @@ export default function MeetingsPage() {
     return unsubscribe;
   }, [canAccessDomain, category, isAuthLoading, profile?.companyId, profile?.role, profile?.uid]);
 
+  useEffect(() => {
+    if (isAuthLoading || !profile?.uid || !profile.companyId || !canAccessDomain) {
+      setCustomers([]);
+      return;
+    }
+
+    return subscribeToCustomers(
+      { companyId: profile.companyId, userId: profile.uid, isAdmin: profile.role === "owner" || profile.role === "admin" },
+      setCustomers,
+      () => setCustomers([]),
+    );
+  }, [canAccessDomain, isAuthLoading, profile?.companyId, profile?.role, profile?.uid]);
+
+  const customerByCompanyName = useMemo(() => {
+    const recordsByName = new Map<string, CustomerRecord>();
+    customers.forEach((customer) => {
+      const normalizedName = normalizeLookupText(customer.companyName);
+      if (normalizedName && !recordsByName.has(normalizedName)) {
+        recordsByName.set(normalizedName, customer);
+      }
+    });
+    return recordsByName;
+  }, [customers]);
+
   const productOptions = useMemo(() => {
     const options = new Set<string>();
     meetings.forEach((meeting) => {
@@ -107,7 +133,14 @@ export default function MeetingsPage() {
       if (meeting.salesDomain !== category) return false;
       const matchesSearch =
         normalizedSearch.length === 0 ||
-        [meeting.customerName, meeting.productType, meeting.location, meeting.audioFileName, meeting.memo]
+        [
+          meeting.customerName,
+          customerByCompanyName.get(normalizeLookupText(meeting.customerName))?.contactName,
+          meeting.productType,
+          meeting.location,
+          meeting.audioFileName,
+          meeting.memo,
+        ]
           .filter((value): value is string => typeof value === "string" && value.length > 0)
           .some((value) => value.toLowerCase().includes(normalizedSearch));
 
@@ -118,7 +151,7 @@ export default function MeetingsPage() {
 
       return matchesSearch && matchesStatus && matchesProduct && matchesDate;
     });
-  }, [category, dateFilter, meetings, productFilter, search, statusFilter]);
+  }, [category, customerByCompanyName, dateFilter, meetings, productFilter, search, statusFilter]);
 
   async function handleDeleteMeeting(meeting: MeetingRecord) {
     const label = meeting.customerName || "この打ち合わせ";
@@ -242,7 +275,7 @@ export default function MeetingsPage() {
                 <thead className="border-b border-[#f0f1f5] bg-white">
                   <tr className="text-[13px] font-semibold text-[#171717]">
                     <th className="px-5 py-5">日時</th>
-                    <th className="px-5 py-5">会社名 / 担当者</th>
+                    <th className="px-5 py-5">会社名 / 相手先担当者</th>
                     <th className="px-5 py-5">商材</th>
                     <th className="px-5 py-5">{copy.purposeLabel}</th>
                     <th className="px-5 py-5">成約/失注</th>
@@ -254,77 +287,14 @@ export default function MeetingsPage() {
                 </thead>
                 <tbody>
                   {filteredMeetings.map((meeting) => (
-                    <tr
+                    <MeetingRow
                       key={meeting.id}
-                      className="border-b border-[#f3f4f7] text-[14px] text-[#303544] last:border-b-0"
-                    >
-                      <td className="px-5 py-4 align-top">
-                        <div className="font-medium text-[#495160]">
-                          {meeting.recordedAt ? formatDate(meeting.recordedAt) : "日時未設定"}
-                        </div>
-                        <div className="mt-1 text-[#66707d]">
-                          {meeting.recordedAt ? formatTimeRange(meeting.recordedAt, meeting.audioDurationSec) : "—"}
-                        </div>
-                      </td>
-                      <td className="px-5 py-4 align-top">
-                        <div className="font-medium text-[#20242c]">
-                          {meeting.customerName || "未設定"}
-                        </div>
-                        <div className="mt-1 text-[#66707d]">
-                          {profile?.name ?? "担当者未設定"} 様
-                        </div>
-                      </td>
-                      <td className="px-5 py-4 align-top">
-                        <div className="flex items-center gap-3">
-                          {productIconMap[meeting.productType || ""] ?? (
-                            <CloudIcon color="#60a5fa" bg="#eef5ff" />
-                          )}
-                          <span>{meeting.productType || "未設定"}</span>
-                        </div>
-                      </td>
-                      <td className="px-5 py-4 align-top">
-                        {getMeetingPurposeLabel(meeting.meetingPurpose)}
-                      </td>
-                      <td className="px-5 py-4 align-top">
-                        <StatusBadge value={meeting.status} />
-                      </td>
-                      <td className="px-5 py-4 align-top">
-                        <ProcessingBadge meeting={meeting} />
-                      </td>
-                      <td className="px-5 py-4 align-top">
-                        <AiScoreCell meeting={meeting} />
-                      </td>
-                      <td className="px-5 py-4 align-top text-[#7a808c]">
-                        <button
-                          type="button"
-                          onClick={() => setSelectedInfoMeeting(meeting)}
-                          className="inline-flex h-9 w-9 items-center justify-center rounded-[12px] border border-[#e4e7ed] bg-white text-[#6b7280] transition hover:border-[#f0c655] hover:bg-[#fffaf0] hover:text-[#8b6a00]"
-                          aria-label="打ち合わせ情報を見る"
-                        >
-                          <MemoIcon />
-                        </button>
-                      </td>
-                      <td className="px-5 py-4 align-top">
-                        <div className="flex flex-wrap gap-2">
-                          <Link
-                            href={`/meetings/${meeting.id}`}
-                            className="inline-flex items-center gap-2 rounded-[12px] border border-[#e4e7ed] bg-white px-3 py-2 text-[13px] font-medium text-[#575f6d]"
-                          >
-                            詳細
-                            <span>›</span>
-                          </Link>
-                          <button
-                            type="button"
-                            onClick={() => void handleDeleteMeeting(meeting)}
-                            disabled={deletingMeetingId === meeting.id}
-                            className="inline-flex items-center gap-2 rounded-[12px] border border-[#ffd8cc] bg-white px-3 py-2 text-[13px] font-medium text-[#cf4b39] transition hover:bg-[#fff4ef] disabled:cursor-not-allowed disabled:opacity-60"
-                          >
-                            <TrashIcon />
-                            {deletingMeetingId === meeting.id ? "削除中" : "削除"}
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
+                      meeting={meeting}
+                      contactName={customerByCompanyName.get(normalizeLookupText(meeting.customerName))?.contactName ?? ""}
+                      deletingMeetingId={deletingMeetingId}
+                      onDelete={handleDeleteMeeting}
+                      onShowInfo={setSelectedInfoMeeting}
+                    />
                   ))}
                 </tbody>
               </table>
@@ -352,6 +322,95 @@ export default function MeetingsPage() {
         />
       ) : null}
     </main>
+  );
+}
+
+function MeetingRow({
+  meeting,
+  contactName,
+  deletingMeetingId,
+  onDelete,
+  onShowInfo,
+}: {
+  meeting: MeetingRecord;
+  contactName: string;
+  deletingMeetingId: string | null;
+  onDelete: (meeting: MeetingRecord) => void;
+  onShowInfo: (meeting: MeetingRecord) => void;
+}) {
+  return (
+    <tr
+      className="border-b border-[#f3f4f7] text-[14px] text-[#303544] last:border-b-0"
+    >
+                      <td className="px-5 py-4 align-top">
+                        <div className="font-medium text-[#495160]">
+                          {meeting.recordedAt ? formatDate(meeting.recordedAt) : "日時未設定"}
+                        </div>
+                        <div className="mt-1 text-[#66707d]">
+                          {meeting.recordedAt ? formatTimeRange(meeting.recordedAt, meeting.audioDurationSec) : "—"}
+                        </div>
+                      </td>
+                      <td className="px-5 py-4 align-top">
+                        <div className="font-medium text-[#20242c]">
+                          {meeting.customerName || "未設定"}
+                        </div>
+                        {contactName ? (
+                          <div className="mt-1 text-[#66707d]">
+                            {contactName} 様
+                          </div>
+                        ) : null}
+                      </td>
+                      <td className="px-5 py-4 align-top">
+                        <div className="flex items-center gap-3">
+                          {productIconMap[meeting.productType || ""] ?? (
+                            <CloudIcon color="#60a5fa" bg="#eef5ff" />
+                          )}
+                          <span>{meeting.productType || "未設定"}</span>
+                        </div>
+                      </td>
+                      <td className="px-5 py-4 align-top">
+                        {getMeetingPurposeLabel(meeting.meetingPurpose)}
+                      </td>
+                      <td className="px-5 py-4 align-top">
+                        <StatusBadge value={meeting.status} />
+                      </td>
+                      <td className="px-5 py-4 align-top">
+                        <ProcessingBadge meeting={meeting} />
+                      </td>
+                      <td className="px-5 py-4 align-top">
+                        <AiScoreCell meeting={meeting} />
+                      </td>
+                      <td className="px-5 py-4 align-top text-[#7a808c]">
+                        <button
+                          type="button"
+                          onClick={() => onShowInfo(meeting)}
+                          className="inline-flex h-9 w-9 items-center justify-center rounded-[12px] border border-[#e4e7ed] bg-white text-[#6b7280] transition hover:border-[#f0c655] hover:bg-[#fffaf0] hover:text-[#8b6a00]"
+                          aria-label="打ち合わせ情報を見る"
+                        >
+                          <MemoIcon />
+                        </button>
+                      </td>
+                      <td className="px-5 py-4 align-top">
+                        <div className="flex flex-wrap gap-2">
+                          <Link
+                            href={`/meetings/${meeting.id}`}
+                            className="inline-flex items-center gap-2 rounded-[12px] border border-[#e4e7ed] bg-white px-3 py-2 text-[13px] font-medium text-[#575f6d]"
+                          >
+                            詳細
+                            <span>›</span>
+                          </Link>
+                          <button
+                            type="button"
+                            onClick={() => void onDelete(meeting)}
+                            disabled={deletingMeetingId === meeting.id}
+                            className="inline-flex items-center gap-2 rounded-[12px] border border-[#ffd8cc] bg-white px-3 py-2 text-[13px] font-medium text-[#cf4b39] transition hover:bg-[#fff4ef] disabled:cursor-not-allowed disabled:opacity-60"
+                          >
+                            <TrashIcon />
+                            {deletingMeetingId === meeting.id ? "削除中" : "削除"}
+                          </button>
+                        </div>
+                      </td>
+    </tr>
   );
 }
 
@@ -485,6 +544,10 @@ function getMeetingStatusLabel(value: MeetingRecord["status"]) {
   } as const;
 
   return map[value];
+}
+
+function normalizeLookupText(value: string) {
+  return value.trim().replace(/\s+/g, "").toLowerCase();
 }
 
 function formatDate(date: Date) {

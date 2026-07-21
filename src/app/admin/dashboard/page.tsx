@@ -28,6 +28,7 @@ import {
   subscribeToRoleplayResults,
   type RoleplayResult,
 } from "@/lib/firebase/roleplay";
+import { buildProductWeaknessRows, type ProductWeaknessRow } from "@/lib/meeting-weakness-insights";
 
 const SELMO_OPERATION_ACTOR = {
   name: "selmo.運営",
@@ -122,6 +123,10 @@ export default function AdminDashboardPage() {
   const selectedManualInsights = useMemo(
     () => buildManualInsightSummary(selectedMeetings, selectedResults),
     [selectedMeetings, selectedResults],
+  );
+  const selectedProductWeaknessRows = useMemo(
+    () => buildProductWeaknessRows(selectedMeetings, 8),
+    [selectedMeetings],
   );
   const selectedRepAllMeetings = useMemo(
     () => selectedRep ? meetings.filter((meeting) => meeting.userId === selectedRep.id) : [],
@@ -306,6 +311,9 @@ export default function AdminDashboardPage() {
                     </Panel>
                     <Panel title="次にやるべきアクション">
                       <NextActionList row={selectedRep} />
+                    </Panel>
+                    <Panel title="商材 × 苦手な部分">
+                      <ProductWeaknessList rows={selectedProductWeaknessRows} />
                     </Panel>
                     <div className="grid gap-5 sm:grid-cols-2 xl:grid-cols-1">
                       <Panel title="商材別 成約率">
@@ -688,6 +696,32 @@ function MissingManualList({ rows }: { rows: ReturnType<typeof buildManualInsigh
               <div className="mt-1 text-[11px] font-bold text-[#8a909b]">{row.category} ・ 実商談 {row.meetingCount} / ロープレ {row.roleplayCount}</div>
             </div>
             <span className="rounded-full bg-[#fff0ed] px-2.5 py-1 text-[11px] font-black text-[#d63c2f]">{row.count}件</span>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function ProductWeaknessList({ rows }: { rows: ProductWeaknessRow[] }) {
+  if (rows.length === 0) {
+    return <EmptyState title="苦手テーマはまだありません" body="AI営業分析が蓄積されると、商材ごとに強化すべきロープレテーマを表示します。" />;
+  }
+
+  return (
+    <div className="space-y-3">
+      {rows.map((row) => (
+        <div key={`${row.productName}-${row.weaknessLabel}`} className="rounded-[12px] border border-[#eef1f5] bg-[#fcfcfd] px-4 py-3">
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <div className="truncate text-[12px] font-black text-[#8a6500]">{row.productName}</div>
+              <div className="mt-1 truncate text-[14px] font-black text-[#171717]">{row.weaknessLabel}</div>
+              <div className="mt-1 text-[11px] font-bold text-[#8a909b]">対象 {row.meetingCount}商談 ・ 平均 {row.averageScore === null ? "-" : `${row.averageScore}点`}</div>
+            </div>
+            <span className="rounded-full bg-[#fff0ed] px-2.5 py-1 text-[11px] font-black text-[#d63c2f]">{row.count}件</span>
+          </div>
+          <div className="mt-3 rounded-[10px] border border-[#ead8a8] bg-[#fffaf0] px-3 py-2 text-[12px] font-bold leading-5 text-[#6f5500]">
+            {row.trainingTheme}
           </div>
         </div>
       ))}

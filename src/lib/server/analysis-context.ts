@@ -91,10 +91,13 @@ function selectBestManual(
       if (normalizedInputProductName && !productMatches) {
         return { manual, score: -100 };
       }
+      if (input.manualCategory && manualCategory && manualCategory !== input.manualCategory) {
+        return { manual, score: -100 };
+      }
 
       const domainScore = manualDomain === input.manualDomain ? 10 : -20;
       const productScore = productMatches ? 8 : 0;
-      const categoryScore = input.manualCategory && manualCategory === input.manualCategory ? 5 : 0;
+      const categoryScore = input.manualCategory && manualCategory === input.manualCategory ? 8 : 0;
       const targetScore = input.targetSegment && isTextMatch(targetSegment, input.targetSegment) ? 4 : 0;
       return { manual, score: domainScore + productScore + categoryScore + targetScore };
     })
@@ -109,7 +112,12 @@ function selectBestManual(
     return null;
   }
 
-  return manuals.find((manual) => readManualDomain(manual.manualDomain) === input.manualDomain) ?? null;
+  return manuals.find((manual) => {
+    if (readManualDomain(manual.manualDomain) !== input.manualDomain) return false;
+    if (!input.manualCategory) return true;
+    const manualCategory = normalizeText(readString(manual.manualCategory));
+    return !manualCategory || manualCategory === input.manualCategory;
+  }) ?? null;
 }
 
 function isTextMatch(left: string, right: string) {

@@ -20,6 +20,7 @@ import {
   subscribeToSalesRepAnalysisProfile,
   type SalesRepAnalysisProfile,
 } from "@/lib/firebase/sales-rep-analysis-profile";
+import { buildProductWeaknessRows, type ProductWeaknessRow } from "@/lib/meeting-weakness-insights";
 import { canUseSalesDomain, type SalesDomain } from "@/lib/sales-domains";
 
 type SummaryMetric = {
@@ -84,6 +85,7 @@ type DashboardInsight = {
   aarCards: AarCardData[];
   skillScores: SkillScore[];
   growthMetrics: GrowthMetric[];
+  productWeaknessRows: ProductWeaknessRow[];
 };
 
 export default function SalesDashboardPage() {
@@ -353,6 +355,8 @@ export default function SalesDashboardPage() {
           unitLabel={unitLabel}
         />
 
+        <ProductWeaknessCard rows={insight.productWeaknessRows} />
+
         <section className="rounded-[24px] border border-[#e7e9ef] bg-white p-5 shadow-[0_12px_30px_rgba(17,24,39,0.05)] md:p-6">
           <SectionHeading
             eyebrow="OODA"
@@ -530,6 +534,43 @@ function GrowthChartCard({ metrics }: { metrics: GrowthMetric[] }) {
           </article>
         ))}
       </div>
+    </section>
+  );
+}
+
+function ProductWeaknessCard({ rows }: { rows: ProductWeaknessRow[] }) {
+  return (
+    <section className="rounded-[24px] border border-[#e7e9ef] bg-white p-5 shadow-[0_12px_30px_rgba(17,24,39,0.05)] md:p-6">
+      <SectionHeading
+        eyebrow="Training Focus"
+        title="商材 × 苦手な部分"
+        body="AI営業分析から、商材ごとにロープレで強化すべきテーマを表示します。"
+      />
+      {rows.length === 0 ? (
+        <EmptyMetricState title="苦手テーマはまだありません" body="商談やテレアポのAI分析が蓄積されると、商材別の弱点と練習テーマを表示します。" />
+      ) : (
+        <div className="mt-5 grid gap-3 lg:grid-cols-2">
+          {rows.map((row) => (
+            <article key={`${row.productName}-${row.weaknessLabel}`} className="rounded-[18px] border border-[#eef1f5] bg-[#fcfcfd] px-4 py-4">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="truncate text-[13px] font-bold text-[#8a6500]">{row.productName}</div>
+                  <h3 className="mt-1 text-[16px] font-black text-[#171717]">{row.weaknessLabel}</h3>
+                </div>
+                <span className="shrink-0 rounded-full bg-[#fff0ed] px-2.5 py-1 text-[11px] font-black text-[#d63c2f]">{row.count}件</span>
+              </div>
+              <p className="mt-3 line-clamp-2 text-[12px] leading-5 text-[#6f7480]">{row.evidence}</p>
+              <div className="mt-3 rounded-[14px] border border-[#f0d46b] bg-[#fffaf0] px-3 py-2 text-[12px] font-bold leading-5 text-[#6f5500]">
+                {row.trainingTheme}
+              </div>
+              <div className="mt-3 flex flex-wrap gap-2 text-[11px] font-bold text-[#8d94a1]">
+                <span>対象 {row.meetingCount}商談</span>
+                <span>平均 {row.averageScore === null ? "-" : `${row.averageScore}点`}</span>
+              </div>
+            </article>
+          ))}
+        </div>
+      )}
     </section>
   );
 }
@@ -883,6 +924,7 @@ function buildDashboardInsight(input: {
       },
     ],
     skillScores,
+    productWeaknessRows: buildProductWeaknessRows(completedMeetings, 6),
     growthMetrics: [
       {
         label: "AIスコア推移",

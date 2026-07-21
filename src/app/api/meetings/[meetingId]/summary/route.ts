@@ -309,6 +309,7 @@ async function summarizeTranscript(
   const statusLabel = isTeleapo ? "テレアポステータス" : "商談ステータス";
   const evaluationLabel = isTeleapo ? "テレアポ評価サマリー" : "商談評価サマリー";
   const finalActionLabel = isTeleapo ? "アポ打診" : "クロージング";
+  const isExistingRelationshipMode = isExistingRelationshipPurpose(input.customerType, input.meetingPurpose);
   const analysisConversationInput = isTeleapo
     ? buildLightweightTeleapoAnalysisInput(conversationInput)
     : conversationInput;
@@ -503,6 +504,9 @@ async function summarizeTranscript(
               "AIの推測で基準を増やしたり、マニュアル外の項目を checklistItems に入れたりしないでください。",
               "達成/未達の判定はキーワード一致だけでなく、前後の会話で実質的に確認・説明・合意できているかで判定してください。",
               `${domainLabel}目的に応じて評価軸を変えてください。関係構築や状況確認では、即時の成約確度だけでなく、信頼形成、課題把握、次回接点の明確さを重視してください。`,
+              isExistingRelationshipMode
+                ? "今回は既存顧客の関係構築/状況確認系です。新規提案・初回商談・クロージング用の基準で、予算・決裁者・導入時期の未確認だけを理由に大きく減点しないでください。信頼形成、近況/満足度/懸念の把握、次回接点、既存利用価値の確認を主軸に評価してください。"
+                : "新規提案やクロージング目的の場合は、課題、予算、決裁者、導入時期、判断条件、次回アクションの具体性を重視してください。",
               `${statusLabel}は成約/失注ではなく、現在地として判断してください。`,
               "status.stage は relationship_building=関係構築中、discovery=課題探索中、proposal_preparation=提案準備中、proposal_done=提案済み、comparison=比較検討中、decision_pending=意思決定前、stalled=停滞/再接触必要 から選んでください。",
               "status.label は上記stageに対応する自然な日本語ラベルにしてください。",
@@ -511,12 +515,22 @@ async function summarizeTranscript(
               `${evaluationLabel}は営業品質です。ヒアリング、課題深掘り、提案接続、反論対応、${finalActionLabel}を各0〜100で採点し、マニュアル/スコアルールがある場合はそれを優先してください。`,
               "manualCompliance.score は、営業成功基準のスコアルールがある場合、その加点/減点ルールを最優先して算出してください。単なる達成項目数の割合で採点してはいけません。",
               "採点はロープレ評価と同じ厳しさにしてください。普通に会話できているだけでは60点前後、明確な深掘り・反論対応・条件確認・次回合意が揃って初めて75点以上です。",
-              "80点以上は、顧客の具体課題を深掘りし、顧客発話に正面から返答し、商材価値へ接続し、予算/決裁/時期/次回アクションのうち複数を明確に確認できている場合に限定してください。",
-              "90点以上は例外です。マニュアル基準の大半を満たし、顧客の反論や条件提示にも具体的に対応し、次回行動が明確に合意されている場合だけ付けてください。",
-              "description に『不足』『必要』『曖昧』『浅い』『弱い』『確認できていない』などの不足表現を書く場合、その項目を75点以上にしないでください。重要項目の不足がある場合は65点以下を基本にしてください。",
-              "ヒアリング/課題深掘りでは、売上課題・予算・決裁者・導入時期など重要確認の不足がある場合、深く聞けていても上限は65点です。",
+              isExistingRelationshipMode
+                ? "既存顧客の関係構築/状況確認では、80点以上は信頼形成、現状/満足度/懸念の把握、顧客発話への適切な返答、次回接点または継続フォロー方針が明確な場合に付けてください。"
+                : "80点以上は、顧客の具体課題を深掘りし、顧客発話に正面から返答し、商材価値へ接続し、予算/決裁/時期/次回アクションのうち複数を明確に確認できている場合に限定してください。",
+              isExistingRelationshipMode
+                ? "既存顧客の関係構築/状況確認では、90点以上は例外です。関係性の維持だけでなく、次回の具体フォローや追加提案につながる顧客理解が明確な場合だけ付けてください。"
+                : "90点以上は例外です。マニュアル基準の大半を満たし、顧客の反論や条件提示にも具体的に対応し、次回行動が明確に合意されている場合だけ付けてください。",
+              isExistingRelationshipMode
+                ? "description に『不足』『必要』『曖昧』『浅い』『弱い』『確認できていない』などの不足表現を書く場合、その項目を75点以上にしないでください。ただし、既存顧客の関係構築/状況確認では目的外の予算・決裁者・導入時期未確認だけで65点以下に固定しないでください。"
+                : "description に『不足』『必要』『曖昧』『浅い』『弱い』『確認できていない』などの不足表現を書く場合、その項目を75点以上にしないでください。重要項目の不足がある場合は65点以下を基本にしてください。",
+              isExistingRelationshipMode
+                ? "既存顧客の関係構築/状況確認では、予算・決裁者・導入時期が商談目的上まだ自然でない場合、それらの未確認だけでヒアリング/課題深掘りを65点以下に固定しないでください。"
+                : "ヒアリング/課題深掘りでは、売上課題・予算・決裁者・導入時期など重要確認の不足がある場合、深く聞けていても上限は65点です。",
               "提案接続/反論対応では、『さらなる価値提案が必要』『具体性が不足』などが残る場合、上限は70点です。",
-              "クロージングは、次回日程が確定していても、決裁者・宿題・判断条件・導入時期が曖昧なら上限は70点です。",
+              isExistingRelationshipMode
+                ? "既存顧客の関係構築/状況確認では、クロージングは受注獲得ではなく次回接点・継続フォロー・追加確認の明確さとして評価してください。"
+                : "クロージングは、次回日程が確定していても、決裁者・宿題・判断条件・導入時期が曖昧なら上限は70点です。",
               "会話が短い、顧客発話が少ない、質問が浅い、顧客の質問に答えていない、マニュアル項目が未達、次回アクションが曖昧な場合は50点台以下もためらわないでください。",
               "各評価項目のdescriptionには、良かった点だけでなく不足点も必ず含めてください。",
               isTeleapo ? "テレアポでは、クロージングではなくアポ打診として、アポイント提案・日程打診・次回接点化の明確さを評価してください。" : "商談では、クロージングとして次回日程・宿題・決裁者確認まで進めているかを評価してください。",
@@ -610,7 +624,7 @@ async function summarizeTranscript(
       bullets: Array.isArray(summary.bullets)
         ? summary.bullets.map((bullet) => bullet.trim()).filter(Boolean).slice(0, 4)
         : [],
-      diagnosis: normalizeDiagnosis(summary.diagnosis, input.salesDomain),
+      diagnosis: normalizeDiagnosis(summary.diagnosis, input.salesDomain, input.customerType, input.meetingPurpose),
       manualCompliance: normalizeManualCompliance(summary.manualCompliance, analysisContext.manual, input.analysisConfig ?? null),
     },
     usage: {
@@ -1165,8 +1179,28 @@ function findNextSalesReply(
 
 function resolveManualCategory(customerType?: string | null, meetingPurpose?: string | null) {
   if (customerType === "new" || meetingPurpose === "new_proposal") return "新規";
-  if (customerType === "existing" || meetingPurpose === "existing_followup" || meetingPurpose === "retention" || meetingPurpose === "upsell_cross_sell") return "既存";
+  if (customerType === "existing" || isExistingPurpose(meetingPurpose)) return "既存";
   return null;
+}
+
+function isExistingRelationshipPurpose(customerType?: string | null, meetingPurpose?: string | null) {
+  return customerType === "existing" && (
+    meetingPurpose === "existing_followup" ||
+    meetingPurpose === "relationship_building" ||
+    meetingPurpose === "check_in" ||
+    meetingPurpose === "onboarding"
+  );
+}
+
+function isExistingPurpose(meetingPurpose?: string | null) {
+  return (
+    meetingPurpose === "existing_followup" ||
+    meetingPurpose === "relationship_building" ||
+    meetingPurpose === "check_in" ||
+    meetingPurpose === "upsell_cross_sell" ||
+    meetingPurpose === "onboarding" ||
+    meetingPurpose === "retention"
+  );
 }
 
 function getMeetingPurposeLabel(value?: string | null) {
@@ -1183,11 +1217,17 @@ function getMeetingPurposeLabel(value?: string | null) {
   return value ? labels[value] ?? value : "目的未設定";
 }
 
-function normalizeDiagnosis(value: SummaryResponse["diagnosis"], salesDomain?: string | null) {
+function normalizeDiagnosis(
+  value: SummaryResponse["diagnosis"],
+  salesDomain?: string | null,
+  customerType?: string | null,
+  meetingPurpose?: string | null,
+) {
   const fallbackStage = "discovery";
   const stage = value?.status?.stage;
   const tone = value?.status?.tone;
   const level = value?.temperature?.level;
+  const isExistingRelationshipMode = isExistingRelationshipPurpose(customerType, meetingPurpose);
 
   return {
     status: {
@@ -1210,11 +1250,15 @@ function normalizeDiagnosis(value: SummaryResponse["diagnosis"], salesDomain?: s
       description: value?.consideration?.description?.trim() || "課題、予算、時期、決裁者、次回アクションの明確さから評価しました。",
       evidence: readStringArray(value?.consideration?.evidence).slice(0, 4),
     },
-    salesEvaluation: normalizeSalesEvaluation(value?.salesEvaluation, salesDomain),
+    salesEvaluation: normalizeSalesEvaluation(value?.salesEvaluation, salesDomain, isExistingRelationshipMode),
   };
 }
 
-function normalizeSalesEvaluation(value: SummaryResponse["diagnosis"] extends { salesEvaluation?: infer S } ? S : unknown, salesDomain?: string | null) {
+function normalizeSalesEvaluation(
+  value: SummaryResponse["diagnosis"] extends { salesEvaluation?: infer S } ? S : unknown,
+  salesDomain?: string | null,
+  isExistingRelationshipMode = false,
+) {
   const expected = ["ヒアリング", "課題深掘り", "提案接続", "反論対応", salesDomain === "teleapo" ? "アポ打診" : "クロージング"];
   const items = Array.isArray(value) ? value : [];
 
@@ -1223,17 +1267,20 @@ function normalizeSalesEvaluation(value: SummaryResponse["diagnosis"] extends { 
     const description = matched?.description?.trim() || `${label}の観点で商談品質を評価しました。`;
     return {
       label,
-      score: calibrateSalesEvaluationScore(label, clampNumber(matched?.score, 0, 100, 50), description),
+      score: calibrateSalesEvaluationScore(label, clampNumber(matched?.score, 0, 100, 50), description, isExistingRelationshipMode),
       description,
       evidence: readStringArray(matched?.evidence).slice(0, 3),
     };
   });
 }
 
-function calibrateSalesEvaluationScore(label: string, score: number, description: string) {
+function calibrateSalesEvaluationScore(label: string, score: number, description: string, isExistingRelationshipMode = false) {
   const text = description.toLowerCase();
   const hasWeakness = /不足|必要|曖昧|あいまい|浅い|弱い|課題|余地|できていない|確認がない|未確認|不十分/.test(text);
-  const hasImportantMissing = /売上課題|予算|決裁|導入時期|判断条件|次回アクション|日程|宿題/.test(text) && /不足|曖昧|未確認|確認がない|必要|弱い|不十分/.test(text);
+  const importantMissingPattern = isExistingRelationshipMode
+    ? /次回アクション|日程|宿題|次回接点|フォロー/
+    : /売上課題|予算|決裁|導入時期|判断条件|次回アクション|日程|宿題/;
+  const hasImportantMissing = importantMissingPattern.test(text) && /不足|曖昧|未確認|確認がない|必要|弱い|不十分/.test(text);
 
   let adjusted = score;
 
@@ -1246,7 +1293,10 @@ function calibrateSalesEvaluationScore(label: string, score: number, description
   }
 
   if (hasWeakness) {
-    adjusted = Math.min(adjusted, label === "クロージング" || label === "アポ打診" ? 72 : 70);
+    const weaknessCap = isExistingRelationshipMode
+      ? label === "クロージング" || label === "アポ打診" ? 76 : 78
+      : label === "クロージング" || label === "アポ打診" ? 72 : 70;
+    adjusted = Math.min(adjusted, weaknessCap);
     adjusted -= score >= 75 ? 5 : 0;
   }
 
