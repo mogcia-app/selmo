@@ -120,6 +120,7 @@ export default function SalesCustomersPage() {
   const [salesUsers, setSalesUsers] = useState<AppUserProfile[]>([]);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const [isCustomersLoaded, setIsCustomersLoaded] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [formState, setFormState] = useState<CustomerFormState>(initialFormState);
@@ -130,13 +131,23 @@ export default function SalesCustomersPage() {
   useEffect(() => {
     if (!profile?.companyId || !profile.uid) {
       setCustomers([]);
+      setIsCustomersLoaded(true);
       return;
     }
 
+    setIsCustomersLoaded(false);
     return subscribeToCustomers(
       { companyId: profile.companyId, userId: profile.uid, isAdmin: false },
-      setCustomers,
-      () => setCustomers([]),
+      (nextCustomers) => {
+        setCustomers(nextCustomers);
+        setIsCustomersLoaded(true);
+        setErrorMessage(null);
+      },
+      (error) => {
+        setCustomers([]);
+        setIsCustomersLoaded(true);
+        setErrorMessage(`顧客カルテの読み込みに失敗しました: ${error.message}`);
+      },
     );
   }, [profile?.companyId, profile?.uid]);
 
@@ -298,7 +309,9 @@ export default function SalesCustomersPage() {
             </select>
           </div>
 
-          {filteredCustomers.length > 0 ? (
+          {!isCustomersLoaded ? (
+            <EmptyState title="顧客カルテを読み込み中です" body="担当顧客のデータを確認しています。" />
+          ) : filteredCustomers.length > 0 ? (
             <div className="px-4 py-4">
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div className="text-[12px] font-bold text-[#8a909b]">
@@ -314,6 +327,8 @@ export default function SalesCustomersPage() {
                 <Pagination currentPage={displayPage} pageCount={pageCount} onChange={setCurrentPage} />
               ) : null}
             </div>
+          ) : customers.length > 0 ? (
+            <EmptyState title="条件に一致する顧客カルテがありません" body="検索キーワードまたはステータス条件を変更すると、登録済みの顧客カルテを表示できます。" />
           ) : (
             <EmptyState title="顧客カルテはまだありません" body="新規顧客を追加すると、次回アクションや契約状況を一覧で管理できます。" />
           )}

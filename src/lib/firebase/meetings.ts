@@ -31,7 +31,7 @@ import {
   saveSystemError,
   updateAudioProcessingJob,
 } from "@/lib/firebase/operations";
-import type { MeetingOutcome, MeetingPurpose, ProcessingStatus } from "@/types/domain";
+import type { MeetingOutcome, MeetingPurpose, ProcessingStatus, UserRole } from "@/types/domain";
 
 export type MeetingTranscriptionSegment = {
   startSec: number;
@@ -655,7 +655,7 @@ export async function fetchMeeting(meetingId: string) {
 
 export function subscribeToMeetings(
   input: {
-    role: "admin" | "sales";
+    role: UserRole;
     userId: string;
     companyId?: string | null;
     salesDomains?: SalesDomain[];
@@ -674,7 +674,7 @@ export function subscribeToMeetings(
     (domain): domain is SalesDomain => domain === "meeting" || domain === "teleapo",
   );
   const meetingsQueries =
-    input.role === "admin"
+    input.role === "owner" || input.role === "admin"
       ? [query(meetingsRef, where("companyId", "==", input.companyId))]
       : salesDomains.length > 0
         ? salesDomains.map((salesDomain) =>

@@ -4,7 +4,7 @@ import type { NextRequest } from "next/server";
 import { getFirebaseAdminAuth, getFirebaseAdminDb } from "@/lib/firebase/admin";
 import { readEnabledSalesDomains, type EnabledSalesDomains, type SalesDomain } from "@/lib/sales-domains";
 
-export type ApiUserRole = "sales" | "admin";
+export type ApiUserRole = "sales" | "admin" | "owner";
 
 export type ApiUserContext = {
   uid: string;
@@ -83,7 +83,7 @@ export async function requireApiUser(request: Request | NextRequest): Promise<Ap
 }
 
 export function assertAdminUser(user: ApiUserContext) {
-  if (user.role !== "admin") {
+  if (user.role !== "owner" && user.role !== "admin") {
     throw new ApiAuthError(403, "admin_required", "管理者権限が必要です。");
   }
 }
@@ -95,7 +95,7 @@ export function assertSalesUser(user: ApiUserContext) {
 }
 
 export function assertSalesDomainAccess(user: ApiUserContext, domain: SalesDomain) {
-  if (user.role === "admin") {
+  if (user.role === "owner" || user.role === "admin") {
     return;
   }
 
@@ -152,7 +152,7 @@ export function handleApiAuthError(error: unknown) {
 }
 
 function readRole(value: unknown): ApiUserRole | null {
-  if (value === "sales" || value === "admin") return value;
+  if (value === "sales" || value === "admin" || value === "owner") return value;
   return null;
 }
 

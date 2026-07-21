@@ -17,7 +17,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
   }
 
   return (
-    <RouteGuard allowedRoles={["admin"]}>
+    <RouteGuard allowedRoles={["owner", "admin"]}>
       <DashboardShell variant="admin">{children}</DashboardShell>
     </RouteGuard>
   );

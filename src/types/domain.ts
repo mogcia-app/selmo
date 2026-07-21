@@ -1,4 +1,4 @@
-export type UserRole = "admin" | "sales";
+export type UserRole = "owner" | "admin" | "sales";
 
 export type MeetingOutcome = "considering" | "won" | "lost";
 

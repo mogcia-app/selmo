@@ -250,13 +250,13 @@ export function LoginForm({
 }
 
 function getAllowedLoginRoles(variant: "default" | "admin"): UserRole[] {
-  return variant === "admin" ? ["admin"] : ["sales"];
+  return variant === "admin" ? ["owner", "admin"] : ["sales"];
 }
 
 function getRoleMismatchMessage(variant: "default" | "admin") {
   return variant === "admin"
-    ? "このログイン画面では管理者アカウントのみログインできます。営業アカウントではログインできません。"
-    : "このログイン画面では営業アカウントのみログインできます。管理者アカウントではログインできません。";
+    ? "このログイン画面では管理者・オーナーアカウントのみログインできます。営業アカウントではログインできません。"
+    : "このログイン画面では営業アカウントのみログインできます。管理者・オーナーアカウントではログインできません。";
 }
 
 function waitForAuthStateFlush() {

@@ -24,7 +24,7 @@ export function readEnabledSalesDomains(value: unknown): EnabledSalesDomains {
 
 export function canUseSalesDomain(profile: AppUserProfile | null | undefined, domain: SalesDomain) {
   if (!profile) return false;
-  if (profile.role === "admin") return true;
+  if (profile.role === "owner" || profile.role === "admin") return true;
   return profile.enabledSalesDomains[domain] === true;
 }
 
