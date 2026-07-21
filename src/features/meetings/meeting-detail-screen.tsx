@@ -26,6 +26,7 @@ import {
 import { canUseSalesDomain } from "@/lib/sales-domains";
 
 const transcriptionRequestTimeoutMs = 10 * 60 * 1000;
+const aiSummaryRequestTimeoutMs = 12 * 60 * 1000;
 const transientBannerDurationMs = 15 * 1000;
 const aiSummaryRunningFreshMs = 10 * 60 * 1000;
 const staleTranscriptionRunningMs = 90 * 60 * 1000;
@@ -87,6 +88,7 @@ export function MeetingDetailScreen({
   const [isLoading, setIsLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isTranscribing, setIsTranscribing] = useState(false);
+  const [isGeneratingAiSummary, setIsGeneratingAiSummary] = useState(false);
   const [summaryStatusNowMs, setSummaryStatusNowMs] = useState(() => Date.now());
   const [logSearch, setLogSearch] = useState("");
   const [transcriptViewMode, setTranscriptViewMode] = useState("all");
@@ -239,6 +241,7 @@ export function MeetingDetailScreen({
   }, [isTranscribing, meeting?.audioDurationSec]);
 
   const generateAiSummaryInBackground = useCallback(async (transcriptText: string, logs: DisplayLog[]) => {
+    setIsGeneratingAiSummary(true);
     try {
       await saveMeetingAiSummary(meetingId, {
         status: "running",
@@ -267,7 +270,7 @@ export function MeetingDetailScreen({
             }))
             .filter((log) => log.text),
         }),
-        timeoutMs: null,
+        timeoutMs: aiSummaryRequestTimeoutMs,
       });
 
       const summaryPayload = (await parseApiJsonResponse(summaryResponse)) as {
@@ -335,6 +338,8 @@ export function MeetingDetailScreen({
       } catch {
         // noop
       }
+    } finally {
+      setIsGeneratingAiSummary(false);
     }
   }, [meeting, meetingId, profile]);
 
@@ -657,13 +662,13 @@ export function MeetingDetailScreen({
     isSummaryView &&
     !hasStoredAiSummary &&
     canRunAiSummary &&
-    (isAiSummaryRunning || meeting?.aiSummaryStatus !== "failed");
+    (isGeneratingAiSummary || isAiSummaryRunning);
   const shouldShowAiSummaryFailed =
     isSummaryView &&
     !hasStoredAiSummary &&
     meeting?.aiSummaryStatus === "failed" &&
     !shouldShowAiSummaryLoading;
-  const shouldShowAiSummaryActions = shouldShowAiSummaryFailed;
+  const shouldShowAiSummaryActions = isSummaryView && !hasStoredAiSummary && canRunAiSummary && !shouldShowAiSummaryLoading;
   const meetingFlowSteps = useMemo(
     () =>
       buildMeetingFlowSteps({
@@ -1041,10 +1046,10 @@ export function MeetingDetailScreen({
               <button
                 type="button"
                 onClick={handleRegenerateAiSummary}
-                disabled={!canRunAiSummary || isAiSummaryRunning}
-                className={`relative inline-flex h-11 items-center justify-center overflow-hidden rounded-[14px] border border-[#f0c655] bg-[#ffd84d] px-5 text-[13px] font-black text-[#171717] shadow-[0_8px_18px_rgba(245,189,7,0.18)] transition hover:bg-[#ffcf33] disabled:cursor-not-allowed ${isAiSummaryRunning ? "ai-summary-regenerate-active" : "disabled:opacity-50"}`}
+                disabled={!canRunAiSummary || shouldShowAiSummaryLoading}
+                className={`relative inline-flex h-11 items-center justify-center overflow-hidden rounded-[14px] border border-[#f0c655] bg-[#ffd84d] px-5 text-[13px] font-black text-[#171717] shadow-[0_8px_18px_rgba(245,189,7,0.18)] transition hover:bg-[#ffcf33] disabled:cursor-not-allowed ${shouldShowAiSummaryLoading ? "ai-summary-regenerate-active" : "disabled:opacity-50"}`}
               >
-                <span className="relative z-10">{isAiSummaryRunning ? "分析中..." : "再分析実行"}</span>
+                <span className="relative z-10">{shouldShowAiSummaryLoading ? "分析中..." : shouldShowAiSummaryFailed ? "再分析実行" : "AI分析開始"}</span>
               </button>
             ) : null}
           </div>
@@ -1169,6 +1174,8 @@ export function MeetingDetailScreen({
             この分析は商談ログをもとにAIが自動で生成しています。顧客の実際の発言を確認しながら、勝ち筋・改善点・次アクションの検討に活用してください。
           </div>
           </>
+          ) : canRunAiSummary ? (
+            <AiSummaryReadyState />
           ) : (
             <AiSummaryEmptyState />
           )}
@@ -1691,6 +1698,17 @@ function AiSummaryFailedState({ message }: { message: string }) {
     <div className="mt-4 rounded-[24px] border border-[#ffd8cc] bg-[#fff4ef] px-6 py-12 text-center">
       <h3 className="text-[18px] font-black text-[#171717]">AIサマリーを生成できませんでした</h3>
       <p className="mx-auto mt-3 max-w-[620px] text-[14px] font-medium leading-7 text-[#b54a35]">{message}</p>
+    </div>
+  );
+}
+
+function AiSummaryReadyState() {
+  return (
+    <div className="mt-4 rounded-[24px] border border-[#f4e2a4] bg-[#fffaf0] px-6 py-12 text-center">
+      <h3 className="text-[18px] font-black text-[#171717]">AI営業分析を開始できます</h3>
+      <p className="mx-auto mt-3 max-w-[620px] text-[14px] font-medium leading-7 text-[#7a6a35]">
+        商談ログは登録済みです。右上のボタンから勝ち筋・改善点・次アクションの分析を開始できます。
+      </p>
     </div>
   );
 }
